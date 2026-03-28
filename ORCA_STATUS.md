@@ -1,13 +1,19 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** March 25, 2026 (Phase 36 planned — Legal Compliance: Age Verification, Email Collection, Copyright Confirmation)
+**Last Updated:** March 28, 2026 (Post-Phase 36 — Pre-launch QA & legal prep; codebase published under AGPL v3)
 
 ---
 
 ## Project Overview
 
 Orca is a collaborative action ontology platform where users create and navigate hierarchical graphs of concepts with context-dependent children, community voting, and concept attributes. The initial use case is **research material** — users organize academic and scientific concepts (e.g., "Microscopy [tool]", "Cell Culture [action]", "Reproducibility [value]", "Western Blot [tool]", "Hypothesis Generation [action]", "How does institutional review board process design influence reproducibility? [question]"), annotate research documents (preprints, grant applications, outlines), and build shared ontologies for their fields. Example concepts throughout this document should reflect realistic research/academic scenarios.
+
+**License:** AGPL v3 (GNU Affero General Public License v3.0)
+
+**Repository:** [github.com/orca-concepts/orca](https://github.com/orca-concepts/orca) (public)
+
+**Local working directory:** `\Users\17wil\orca\orca-public` — this is the active development folder. The private repo (`orca-private`) is retained for history but all new work happens in the public repo.
 
 ---
 
@@ -6604,7 +6610,7 @@ Three-step flow rendered as a fixed-position overlay (z-index 10000, semi-transp
 **Using Orca page content (`UsingOrcaContent` component):**
 1. **Intro paragraph** — describes what Orca is (building shared value hierarchies, annotations, messaging)
 2. **Three use case paragraphs** — Research, Product Development, Education. Each has a bold "Use Case: [Name]." label followed by description text
-3. **Open source note** — "Orca is open source (link). Educators and organizations can run their own instance for a controlled environment."
+3. **Open source note** — "Orca is open source (link to github.com/orca-concepts/orca). Educators and organizations can run their own instance for a controlled environment."
 4. **2×2 screenshot grid** — four cells arranged via CSS Grid (`gridTemplateColumns: '1fr 1fr'`), falls back to single-column stack on narrow screens (<768px via useState/useEffect resize listener):
    - **Value Hierarchy** — single screenshot (`step3.png`) with caption about Effect Size Reporting hierarchy
    - **Flip View** — single screenshot (`flip-view.png`) with caption about alternative parent contexts
