@@ -1,0 +1,1972 @@
+const pool = require('./database');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+
+const createTables = async () => {
+  const client = await pool.connect();
+  
+  try {
+    await client.query('BEGIN');
+
+    // Users table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Concepts table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS concepts (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Attributes table - stores reusable attribute tags (action, tool, value)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS attributes (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) UNIQUE NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Seed default attributes (action, tool, value) if they don't exist
+    await client.query(`
+      INSERT INTO attributes (name) VALUES ('action'), ('tool'), ('value')
+      ON CONFLICT (name) DO NOTHING;
+    `);
+
+    // Edges table - represents parent-child relationships in specific graph contexts
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS edges (
+        id SERIAL PRIMARY KEY,
+        parent_id INTEGER REFERENCES concepts(id) ON DELETE CASCADE,
+        child_id INTEGER REFERENCES concepts(id) ON DELETE CASCADE,
+        graph_path INTEGER[] NOT NULL,
+        attribute_id INTEGER REFERENCES attributes(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // If edges table already existed without attribute_id, add the column
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'edges' AND column_name = 'attribute_id'
+        ) THEN
+          ALTER TABLE edges ADD COLUMN attribute_id INTEGER REFERENCES attributes(id);
+        END IF;
+      END $$;
+    `);
+
+    // Backfill: assign all existing edges without an attribute to 'action'
+    await client.query(`
+      UPDATE edges 
+      SET attribute_id = (SELECT id FROM attributes WHERE name = 'action')
+      WHERE attribute_id IS NULL;
+    `);
+
+    // Now enforce NOT NULL on attribute_id
+    await client.query(`
+      ALTER TABLE edges ALTER COLUMN attribute_id SET NOT NULL;
+    `);
+
+    // Drop old unique constraint if it exists (without attribute_id)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints 
+          WHERE constraint_name = 'edges_parent_id_child_id_graph_path_key'
+          AND table_name = 'edges'
+        ) THEN
+          ALTER TABLE edges DROP CONSTRAINT edges_parent_id_child_id_graph_path_key;
+        END IF;
+      END $$;
+    `);
+
+    // Add new unique constraint that includes attribute_id
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints 
+          WHERE constraint_name = 'edges_parent_child_path_attribute_key'
+          AND table_name = 'edges'
+        ) THEN
+          ALTER TABLE edges ADD CONSTRAINT edges_parent_child_path_attribute_key 
+            UNIQUE(parent_id, child_id, graph_path, attribute_id);
+        END IF;
+      END $$;
+    `);
+
+    // Indexes for faster lookups
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_edges_parent ON edges(parent_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_edges_child ON edges(child_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_edges_attribute ON edges(attribute_id);
+    `);
+
+    // Votes table (saves)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, edge_id)
+      );
+    `);
+
+    // Similarity votes table (link votes — Flip View only)
+    // origin_edge_id = the edge the user came from (their current context)
+    // similar_edge_id = the alt parent edge they're voting as helpful/linked
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS similarity_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        origin_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        similar_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, origin_edge_id, similar_edge_id)
+      );
+    `);
+
+    // Indexes for similarity_votes
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_similarity_votes_origin ON similarity_votes(origin_edge_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_similarity_votes_similar ON similarity_votes(similar_edge_id);
+    `);
+
+    // Side votes table (move votes)
+    // edge_id = the edge being flagged as misplaced
+    // destination_edge_id = the edge in the destination context where it should live
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS side_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        destination_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, edge_id, destination_edge_id)
+      );
+    `);
+
+    // Indexes for side_votes
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_side_votes_edge ON side_votes(edge_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_side_votes_destination ON side_votes(destination_edge_id);
+    `);
+
+    // Replace votes table (swap votes)
+    // edge_id = the edge being flagged as replaceable
+    // replacement_edge_id = the sibling edge that should replace it
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS replace_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        replacement_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, edge_id, replacement_edge_id)
+      );
+    `);
+
+    // Indexes for replace_votes
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_replace_votes_edge ON replace_votes(edge_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_replace_votes_replacement ON replace_votes(replacement_edge_id);
+    `);
+
+    // ============================================================
+    // Saved Tabs table (Phase 5b)
+    // Each user has one or more named tabs on their Saved page.
+    // A default "Saved" tab is auto-created at registration time.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saved_tabs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL DEFAULT 'Saved',
+        display_order INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_tabs_user ON saved_tabs(user_id);
+    `);
+
+    // ============================================================
+    // Vote-Tab Links junction table (Phase 5b)
+    // Links a vote (user endorsement of an edge) to one or more
+    // Saved tabs. A vote can appear in multiple tabs. Removing a
+    // link from a tab does NOT delete the vote itself — it only
+    // removes it from that tab's view.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vote_tab_links (
+        id SERIAL PRIMARY KEY,
+        vote_id INTEGER REFERENCES votes(id) ON DELETE CASCADE,
+        saved_tab_id INTEGER REFERENCES saved_tabs(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(vote_id, saved_tab_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_vote_tab_links_vote ON vote_tab_links(vote_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_vote_tab_links_tab ON vote_tab_links(saved_tab_id);
+    `);
+
+    // ============================================================
+    // Backfill: Create a default "Saved" tab for any existing user
+    // who does not yet have one, and link all their existing votes
+    // to that tab. This ensures seamless upgrade from Phase 5a.
+    // ============================================================
+    await client.query(`
+      INSERT INTO saved_tabs (user_id, name, display_order)
+      SELECT u.id, 'Saved', 0
+      FROM users u
+      WHERE NOT EXISTS (
+        SELECT 1 FROM saved_tabs st WHERE st.user_id = u.id
+      );
+    `);
+
+    // Link all existing votes that have no tab link to the user's default tab
+    await client.query(`
+      INSERT INTO vote_tab_links (vote_id, saved_tab_id)
+      SELECT v.id, st.id
+      FROM votes v
+      JOIN saved_tabs st ON st.user_id = v.user_id
+      WHERE st.display_order = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM vote_tab_links vtl WHERE vtl.vote_id = v.id
+        )
+      ON CONFLICT (vote_id, saved_tab_id) DO NOTHING;
+    `);
+
+    // ============================================================
+    // Graph Tabs table (Phase 5c)
+    // Persistent in-app navigation tabs. Each graph tab tracks
+    // where the user is in the concept graph (concept_id + path).
+    // Graph tabs live alongside Saved tabs in the unified tab bar.
+    // tab_type: 'root' (at root page) or 'concept' (at a concept)
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS graph_tabs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        tab_type VARCHAR(20) NOT NULL DEFAULT 'root',
+        concept_id INTEGER REFERENCES concepts(id) ON DELETE SET NULL,
+        path INTEGER[] NOT NULL DEFAULT '{}',
+        view_mode VARCHAR(20) NOT NULL DEFAULT 'children',
+        display_order INTEGER NOT NULL DEFAULT 0,
+        label VARCHAR(255) NOT NULL DEFAULT 'Root',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_graph_tabs_user ON graph_tabs(user_id);
+    `);
+
+    // ============================================================
+    // Tab Groups table (Phase 5d)
+    // Named groups that can contain any combination of saved tabs
+    // and graph tabs. Flat grouping only — no groups within groups.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tab_groups (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL DEFAULT 'Group',
+        display_order INTEGER NOT NULL DEFAULT 0,
+        is_expanded BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tab_groups_user ON tab_groups(user_id);
+    `);
+
+    // Add group_id column to saved_tabs (nullable — null means ungrouped)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'saved_tabs' AND column_name = 'group_id'
+        ) THEN
+          ALTER TABLE saved_tabs ADD COLUMN group_id INTEGER REFERENCES tab_groups(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    // Add group_id column to graph_tabs (nullable — null means ungrouped)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'graph_tabs' AND column_name = 'group_id'
+        ) THEN
+          ALTER TABLE graph_tabs ADD COLUMN group_id INTEGER REFERENCES tab_groups(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    // ============================================================
+    // Saved Tree Order table (Phase 5e)
+    // Stores per-user, per-tab display order of root-level graph
+    // trees on the Saved Page. Trees without an explicit order
+    // record fall to the bottom, sorted by save count.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saved_tree_order (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        saved_tab_id INTEGER REFERENCES saved_tabs(id) ON DELETE CASCADE,
+        root_concept_id INTEGER REFERENCES concepts(id) ON DELETE CASCADE,
+        display_order INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, saved_tab_id, root_concept_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_tree_order_user_tab 
+        ON saved_tree_order(user_id, saved_tab_id);
+    `);
+
+    // ============================================================
+    // Child Rankings table (Phase 5f)
+    // Stores per-user numeric rankings of children when filtering
+    // to a single identical vote set. Rankings are keyed by a
+    // deterministic vote_set_key so they apply only to a specific
+    // vote set composition. If set membership changes, old rankings
+    // become stale (different key).
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS child_rankings (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        parent_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        child_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        vote_set_key TEXT NOT NULL,
+        rank_position INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, parent_edge_id, child_edge_id, vote_set_key)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_child_rankings_parent_set
+        ON child_rankings(parent_edge_id, vote_set_key);
+    `);
+
+    // ============================================================
+    // Concept Links table (Phase 6)
+    // External URLs attached to concepts in specific contexts.
+    // Links are tied to edges (context-specific), not concepts
+    // globally. Same concept can have different links in different
+    // parent contexts.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS concept_links (
+        id SERIAL PRIMARY KEY,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        title VARCHAR(255),
+        added_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_concept_links_edge ON concept_links(edge_id);
+    `);
+
+    // Phase 29a: Add comment and updated_at columns to concept_links (idempotent)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'concept_links' AND column_name = 'comment'
+        ) THEN
+          ALTER TABLE concept_links ADD COLUMN comment TEXT;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'concept_links' AND column_name = 'updated_at'
+        ) THEN
+          ALTER TABLE concept_links ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+
+    // ============================================================
+    // Concept Link Votes table (Phase 6)
+    // Simple upvote system for web links. One vote per user per
+    // link — not the four-type vote system used for edges.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS concept_link_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        concept_link_id INTEGER REFERENCES concept_links(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, concept_link_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_concept_link_votes_link ON concept_link_votes(concept_link_id);
+    `);
+
+    // ============================================================
+    // Corpuses table (Phase 7a)
+    // A corpus is a named collection of documents. Annotations,
+    // permissions, and subscriptions all operate at the corpus
+    // level. annotation_mode: 'public' (anyone can annotate) or
+    // 'private' (invite-only). Note: this column is functionally retired as of Phase 7g.
+    // Phase 10a renamed the annotation layer from 'private' to 'editorial'.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS corpuses (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        annotation_mode VARCHAR(20) NOT NULL DEFAULT 'public',
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpuses_created_by ON corpuses(created_by);
+    `);
+
+    // ============================================================
+    // Documents table (Phase 7a)
+    // Stores uploaded document content. Documents are immutable
+    // once uploaded — text content cannot be edited, which
+    // guarantees annotation character offsets remain valid.
+    // format: 'plain' (plain text) or 'markdown'.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS documents (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        format VARCHAR(20) NOT NULL DEFAULT 'plain',
+        uploaded_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_documents_uploaded_by ON documents(uploaded_by);
+    `);
+
+    // ============================================================
+    // Document Versioning columns (Phase 7h)
+    // version_number: Auto-incremented per lineage (default 1 for
+    //   original uploads). source_document_id: Self-referencing FK
+    //   forming a version chain (NULL for originals). is_draft:
+    //   New versions start as drafts (editable); finalized = immutable.
+    //   Existing documents are always finalized (is_draft = false).
+    // ============================================================
+
+    // Add version_number column
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'documents' AND column_name = 'version_number'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN version_number INTEGER NOT NULL DEFAULT 1;
+        END IF;
+      END $$;
+    `);
+
+    // Add source_document_id (self-referencing FK for version chain)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'documents' AND column_name = 'source_document_id'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    // Add is_draft column (false for existing documents — they're already finalized)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'documents' AND column_name = 'is_draft'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN is_draft BOOLEAN NOT NULL DEFAULT false;
+        END IF;
+      END $$;
+    `);
+
+    // Index for version chain lookups
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_document_id);
+    `);
+
+    // ============================================================
+    // Corpus-Documents junction table (Phase 7a)
+    // Links documents to corpuses. A document can appear in
+    // multiple corpuses. Removing a document from a corpus deletes
+    // all annotations for that document within that corpus.
+    // If a document is in zero corpuses, it is deleted.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS corpus_documents (
+        id SERIAL PRIMARY KEY,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        added_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(corpus_id, document_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_documents_corpus ON corpus_documents(corpus_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_documents_document ON corpus_documents(document_id);
+    `);
+
+    // ============================================================
+    // Trigram index on documents.body (Phase 7b)
+    // Used for duplicate detection on upload — pg_trgm similarity
+    // matching against existing document bodies. Requires the
+    // pg_trgm extension (already enabled for concept name search).
+    // ============================================================
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_documents_body_trgm 
+        ON documents USING GIN (body gin_trgm_ops);
+    `);
+
+    // ============================================================
+    // Corpus Subscriptions table (Phase 7c)
+    // Tracks which users are subscribed to which corpuses.
+    // Subscribing creates a persistent corpus tab in the main tab
+    // bar. Unsubscribing removes it. Subscriber count is displayed
+    // on corpus listings.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS corpus_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, corpus_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_subscriptions_user ON corpus_subscriptions(user_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_subscriptions_corpus ON corpus_subscriptions(corpus_id);
+    `);
+
+    // Add group_id to corpus_subscriptions (Phase 7f — allows corpus tabs to join tab groups)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'corpus_subscriptions' AND column_name = 'group_id'
+        ) THEN
+          ALTER TABLE corpus_subscriptions ADD COLUMN group_id INTEGER REFERENCES tab_groups(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    // ============================================================
+    // Document Annotations table (Phase 7d)
+    // Annotations attach an edge (concept-in-context) to a text
+    // selection within a document, scoped to a specific corpus.
+    // The same document in different corpuses has entirely separate
+    // annotation sets. Character offsets (start_position,
+    // end_position) are stored against the immutable document body.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_annotations (
+        id SERIAL PRIMARY KEY,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        start_position INTEGER NOT NULL,
+        end_position INTEGER NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT valid_positions CHECK (start_position >= 0 AND end_position > start_position)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_annotations_corpus_doc 
+        ON document_annotations(corpus_id, document_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_annotations_edge 
+        ON document_annotations(edge_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_annotations_document 
+        ON document_annotations(document_id);
+    `);
+
+    // ============================================================
+    // Annotation Votes table (Phase 7f)
+    // Simple save-style votes on annotations. One vote per user
+    // per annotation — endorses the connection between the text
+    // selection and the annotated concept-in-context.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS annotation_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, annotation_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_annotation_votes_annotation
+        ON annotation_votes(annotation_id);
+    `);
+
+    // ============================================================
+    // Annotation Color Set Votes table (Phase 7f)
+    // Stores a user's preferred color set (vote set) for an
+    // annotation. The vote_set_key is the same sorted comma-
+    // separated edge ID string used in child_rankings, identifying
+    // which identical vote set of children the user prefers.
+    // One preference per user per annotation.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS annotation_color_set_votes (
+        id SERIAL PRIMARY KEY,
+        annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        vote_set_key TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, annotation_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_annotation_color_set_votes_annotation
+        ON annotation_color_set_votes(annotation_id);
+    `);
+
+    // ============================================================
+    // Corpus Allowed Users table (Phase 7g)
+    // Tracks which users are allowed to contribute to a corpus's
+    // editorial annotation layer. The corpus owner invites users via
+    // invite links. Allowed users can: add documents, create
+    // editorial-layer annotations, vote on editorial-layer annotations,
+    // and remove annotations (with changelog).
+    // display_name: optional username visible only within this
+    // corpus's annotation layer, only to other allowed users.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS corpus_allowed_users (
+        id SERIAL PRIMARY KEY,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        display_name VARCHAR(255),
+        invited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(corpus_id, user_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_allowed_users_corpus
+        ON corpus_allowed_users(corpus_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_allowed_users_user
+        ON corpus_allowed_users(user_id);
+    `);
+
+    // ============================================================
+    // Corpus Invite Tokens table (Phase 7g)
+    // Stores invite tokens generated by corpus owners. Each token
+    // is a unique random string. Accepting a token adds the user
+    // to corpus_allowed_users. Tokens can optionally expire.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS corpus_invite_tokens (
+        id SERIAL PRIMARY KEY,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        token VARCHAR(64) UNIQUE NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP,
+        max_uses INTEGER,
+        use_count INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_invite_tokens_corpus
+        ON corpus_invite_tokens(corpus_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpus_invite_tokens_token
+        ON corpus_invite_tokens(token);
+    `);
+
+    // ============================================================
+    // Annotation Removal Log table (Phase 7g)
+    // Logs every annotation removal performed by an allowed user
+    // within a corpus. Provides accountability for curation
+    // decisions. Uses ON DELETE SET NULL for FKs so log entries
+    // survive even if the referenced document/edge/user is deleted.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS annotation_removal_log (
+        id SERIAL PRIMARY KEY,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE SET NULL,
+        start_position INTEGER NOT NULL,
+        end_position INTEGER NOT NULL,
+        annotation_layer VARCHAR(10) NOT NULL DEFAULT 'public',
+        original_creator INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        removed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_annotation_removal_log_corpus
+        ON annotation_removal_log(corpus_id);
+    `);
+
+    // ============================================================
+    // Add 'layer' column to document_annotations (Phase 7g)
+    // Every annotation now has a layer: 'public' (visible to all)
+    // or 'editorial' (curated layer maintained by allowed users of the corpus).
+    // Existing annotations default to 'public'.
+    // ============================================================
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'layer'
+        ) THEN
+          ALTER TABLE document_annotations ADD COLUMN layer VARCHAR(10) NOT NULL DEFAULT 'public';
+        END IF;
+      END $$;
+    `);
+
+    // ============================================================
+    // Document Concept Links Cache table (Phase 7i-5)
+    // Pre-computed concept link matches for finalized documents.
+    // Finalized doc bodies are immutable, so matches only change
+    // when new concepts are created. On document open, compare
+    // computed_at against MAX(concepts.created_at) — if stale,
+    // recompute and replace the cache.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_concept_links_cache (
+        id SERIAL PRIMARY KEY,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        concept_id INTEGER NOT NULL,
+        concept_name VARCHAR(255) NOT NULL,
+        start_position INTEGER NOT NULL,
+        end_position INTEGER NOT NULL,
+        computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_doc_concept_links_cache_doc
+        ON document_concept_links_cache(document_id);
+    `);
+
+    // ============================================================
+    // Saved Tree Order V2 table (Phase 7c Saved Page Overhaul)
+    // Replaces saved_tree_order (which keyed on saved_tab_id).
+    // New version keys on corpus_id — NULL corpus_id = Uncategorized tab.
+    // Stores user-configured display order of root-level graph trees
+    // on each corpus-based Saved Page tab.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saved_tree_order_v2 (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        root_concept_id INTEGER REFERENCES concepts(id) ON DELETE CASCADE,
+        display_order INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Partial unique index for rows WITH a corpus_id
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_tree_order_v2_with_corpus
+        ON saved_tree_order_v2(user_id, corpus_id, root_concept_id)
+        WHERE corpus_id IS NOT NULL;
+    `);
+
+    // Partial unique index for rows WITHOUT a corpus_id (Uncategorized tab)
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_tree_order_v2_uncategorized
+        ON saved_tree_order_v2(user_id, root_concept_id)
+        WHERE corpus_id IS NULL;
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_tree_order_v2_user_corpus
+        ON saved_tree_order_v2(user_id, corpus_id);
+    `);
+
+    // ============================================================
+    // Document Favorites table (Phase 7c Overhaul — per-corpus favoriting)
+    // Users can favorite documents within a specific corpus.
+    // Favorited docs float to the top of that corpus's document list.
+    // Per-corpus favoriting — favoriting in one corpus does not affect
+    // the document's position in other corpuses.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_favorites (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, corpus_id, document_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_favorites_user_corpus
+        ON document_favorites(user_id, corpus_id);
+    `);
+
+    // ============================================================
+    // Saved Page Tab Activity table (Phase 8)
+    // Tracks when each corpus tab on the Saved Page was last
+    // opened, used to determine dormancy. After 30 days of
+    // inactivity, a corpus tab goes dormant and its save votes
+    // are excluded from public save totals. Users can revive
+    // dormant tabs to restore their vote contributions.
+    // corpus_id is NULL for the "Uncategorized" tab.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saved_page_tab_activity (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        last_opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        is_dormant BOOLEAN NOT NULL DEFAULT false,
+        UNIQUE(user_id, corpus_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_page_tab_activity_user
+        ON saved_page_tab_activity(user_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_page_tab_activity_dormant
+        ON saved_page_tab_activity(user_id, is_dormant);
+    `);
+
+    // Handle the NULL corpus_id (Uncategorized tab) — PostgreSQL treats NULLs
+    // as distinct in UNIQUE constraints, so we need a partial unique index
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_page_tab_activity_uncategorized
+        ON saved_page_tab_activity(user_id)
+        WHERE corpus_id IS NULL;
+    `);
+
+    // ============================================================
+    // Backfill: Create activity rows for all existing users who
+    // have saves grouped into corpuses (via getUserSavesByCorpus).
+    // We seed last_opened_at = NOW() so nobody is instantly dormant
+    // on deploy. For corpus tabs: one row per (user, corpus) where
+    // the user has annotations in that corpus. For uncategorized:
+    // one row per user who has any saves at all.
+    // ============================================================
+
+    // Seed uncategorized tab activity for all users who have any saves
+    await client.query(`
+      INSERT INTO saved_page_tab_activity (user_id, corpus_id, last_opened_at, is_dormant)
+      SELECT DISTINCT v.user_id, NULL::INTEGER, CURRENT_TIMESTAMP, false
+      FROM votes v
+      WHERE NOT EXISTS (
+        SELECT 1 FROM saved_page_tab_activity spa
+        WHERE spa.user_id = v.user_id AND spa.corpus_id IS NULL
+      )
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // Seed corpus tab activity for all (user, corpus) pairs where
+    // the user has saves on edges that have annotations in that corpus
+    await client.query(`
+      INSERT INTO saved_page_tab_activity (user_id, corpus_id, last_opened_at, is_dormant)
+      SELECT DISTINCT v.user_id, da.corpus_id, CURRENT_TIMESTAMP, false
+      FROM votes v
+      JOIN document_annotations da ON da.edge_id = v.edge_id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM saved_page_tab_activity spa
+        WHERE spa.user_id = v.user_id AND spa.corpus_id = da.corpus_id
+      )
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // ============================================================
+    // Phase 12a: Nested Corpuses — parent_corpus_id column
+    // Allows corpuses to be nested in a single-parent tree.
+    // NULL = top-level corpus. ON DELETE SET NULL = if parent
+    // is deleted, children become top-level (not deleted).
+    // ============================================================
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'corpuses' AND column_name = 'parent_corpus_id'
+        ) THEN
+          ALTER TABLE corpuses ADD COLUMN parent_corpus_id INTEGER REFERENCES corpuses(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_corpuses_parent ON corpuses(parent_corpus_id);
+    `);
+
+    // ============================================================
+    // Phase 12: Retire corpus_subscriptions.group_id
+    // Corpus tabs are now positioned by the tree structure, not
+    // flat tab groups. Clear any existing group_id values.
+    // ============================================================
+    await client.query(`
+      UPDATE corpus_subscriptions SET group_id = NULL WHERE group_id IS NOT NULL;
+    `);
+
+    // ============================================================
+    // Phase 12c: User Corpus Tab Placements
+    // Allows users to place their graph tabs inside any corpus
+    // node in the sidebar directory tree. These placements are
+    // private — only visible to the placing user. A graph tab
+    // can only be placed in one corpus at a time per user.
+    // Placing in a corpus removes from any flat tab group.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_corpus_tab_placements (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        graph_tab_id INTEGER REFERENCES graph_tabs(id) ON DELETE CASCADE,
+        corpus_id INTEGER REFERENCES corpuses(id) ON DELETE CASCADE,
+        display_order INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, graph_tab_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_corpus_tab_placements_user_corpus
+        ON user_corpus_tab_placements(user_id, corpus_id);
+    `);
+
+    // ============================================================
+    // Phase 16a: Moderation / Spam Flagging
+    // ============================================================
+
+    // concept_flags — one flag per user per edge, immediate hide on first flag
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS concept_flags (
+        id SERIAL PRIMARY KEY,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        reason VARCHAR(50) NOT NULL DEFAULT 'spam',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, edge_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_concept_flags_edge ON concept_flags(edge_id);
+    `);
+
+    // concept_flag_votes — community votes to keep hidden or restore
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS concept_flag_votes (
+        id SERIAL PRIMARY KEY,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('hide', 'show')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, edge_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_concept_flag_votes_edge ON concept_flag_votes(edge_id);
+    `);
+
+    // moderation_comments — discussion on hidden concepts (no unique constraint)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS moderation_comments (
+        id SERIAL PRIMARY KEY,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_moderation_comments_edge ON moderation_comments(edge_id);
+    `);
+
+    // ─── Phase 17a: Document Tags ───
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_tags (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) UNIQUE NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Phase 27e: Seed admin-controlled document tags
+    await client.query(`
+      INSERT INTO document_tags (name, created_by) VALUES
+        ('preprint', NULL),
+        ('protocol', NULL),
+        ('grant application', NULL),
+        ('review article', NULL),
+        ('dataset', NULL),
+        ('thesis', NULL),
+        ('textbook', NULL),
+        ('lecture notes', NULL),
+        ('commentary', NULL)
+      ON CONFLICT (name) DO NOTHING;
+    `);
+
+    // Phase 28d: Delete the "PrePrint" duplicate tag (keep lowercase "preprint")
+    // Cleanup runs only if document_tag_links already exists (skipped on fresh installs)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'document_tag_links') THEN
+          DELETE FROM document_tag_links WHERE tag_id IN (SELECT id FROM document_tags WHERE name = 'PrePrint');
+        END IF;
+        DELETE FROM document_tags WHERE name = 'PrePrint';
+      END $$;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_tag_links (
+        id SERIAL PRIMARY KEY,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        tag_id INTEGER REFERENCES document_tags(id) ON DELETE CASCADE,
+        added_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(document_id, tag_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_tag_links_doc ON document_tag_links(document_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_tag_links_tag ON document_tag_links(tag_id);
+    `);
+
+    // Phase 28d: case-insensitive unique index to prevent future duplicate tags
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_document_tags_name_lower ON document_tags (LOWER(name));
+    `);
+
+    // Add is_hidden column to edges table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'edges' AND column_name = 'is_hidden'
+        ) THEN
+          ALTER TABLE edges ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT false;
+        END IF;
+      END $$;
+    `);
+
+    // ============================================================
+    // Phase 19b: Unified sidebar ordering — sidebar_items table
+    // A single ordered list of corpus subscriptions, tab groups,
+    // and graph tabs that replaces the 3-section sidebar layout.
+    // item_type: 'corpus' | 'group' | 'graph_tab'
+    // item_id: corpus_id, tab_groups.id, or graph_tabs.id
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sidebar_items (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        item_type VARCHAR(20) NOT NULL,
+        item_id INTEGER NOT NULL,
+        display_order INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(user_id, item_type, item_id)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_sidebar_items_user
+        ON sidebar_items(user_id, display_order);
+    `);
+
+    // Backfill: corpus subscriptions (ordered by subscription date, offset 0)
+    await client.query(`
+      INSERT INTO sidebar_items (user_id, item_type, item_id, display_order)
+      SELECT user_id, 'corpus', corpus_id,
+             (ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at)) * 10
+      FROM corpus_subscriptions
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // Backfill: tab groups (offset 10000 to appear after all corpuses)
+    await client.query(`
+      INSERT INTO sidebar_items (user_id, item_type, item_id, display_order)
+      SELECT user_id, 'group', id,
+             10000 + (ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY display_order, id)) * 10
+      FROM tab_groups
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // Backfill: graph tabs (offset 20000 to appear after all groups)
+    await client.query(`
+      INSERT INTO sidebar_items (user_id, item_type, item_id, display_order)
+      SELECT user_id, 'graph_tab', id,
+             20000 + (ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY display_order, id)) * 10
+      FROM graph_tabs
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // ============================================================
+    // Phase 19a: Remove parent_corpus_id column from corpuses
+    // Sub-corpus infrastructure removed entirely. Existing sub-
+    // corpuses become top-level corpuses (ON DELETE SET NULL
+    // already null-ified children when parents were deleted;
+    // here we simply drop the column). Non-destructive: all
+    // corpus data (documents, subscriptions, annotations) kept.
+    // ============================================================
+    await client.query(`
+      ALTER TABLE corpuses DROP COLUMN IF EXISTS parent_corpus_id;
+    `);
+    await client.query(`
+      DROP INDEX IF EXISTS idx_corpuses_parent;
+    `);
+
+    // Phase 19d: Remove corpus_subscriptions.group_id — corpus tabs are always
+    // top-level in the unified sidebar; group membership via this column was
+    // retired in Phase 12 (values cleared) and is now fully removed.
+    await client.query(`
+      ALTER TABLE corpus_subscriptions DROP COLUMN IF EXISTS group_id;
+    `);
+
+    await client.query('COMMIT');
+
+    // ============================================================
+    // Phase 20a: Single-attribute graphs — normalize all edges in
+    // each graph to share the attribute of their root edge.
+    // Wrapped in try/catch — safe to skip if already applied.
+    // ============================================================
+    try {
+      // Get all root concepts
+      const rootsResult = await pool.query(
+        'SELECT DISTINCT child_id FROM edges WHERE parent_id IS NULL'
+      );
+      const rootIds = rootsResult.rows.map(r => r.child_id);
+      console.log(`Phase 20a: Processing ${rootIds.length} root graphs...`);
+
+      for (const rootId of rootIds) {
+        const edgesResult = await pool.query(`
+          SELECT id, attribute_id FROM edges
+          WHERE (parent_id IS NULL AND child_id = $1)
+             OR (parent_id IS NOT NULL AND graph_path[1] = $1)
+        `, [rootId]);
+
+        if (edgesResult.rows.length === 0) continue;
+
+        const attrCounts = {};
+        for (const row of edgesResult.rows) {
+          const aid = row.attribute_id;
+          attrCounts[aid] = (attrCounts[aid] || 0) + 1;
+        }
+
+        let winnerAttrId = null;
+        let winnerCount = 0;
+        for (const [aid, count] of Object.entries(attrCounts)) {
+          if (count > winnerCount || (count === winnerCount && parseInt(aid) < parseInt(winnerAttrId))) {
+            winnerAttrId = parseInt(aid);
+            winnerCount = count;
+          }
+        }
+
+        if (winnerAttrId === null) continue;
+
+        // Check if already uniform (skip if all edges already have winner attribute)
+        const nonWinner = edgesResult.rows.filter(r => r.attribute_id !== winnerAttrId);
+        if (nonWinner.length === 0) continue;
+
+        // Delete edges that would cause duplicates after attribute update
+        await pool.query(`
+          DELETE FROM edges
+          WHERE id = ANY($1::int[])
+            AND EXISTS (
+              SELECT 1 FROM edges e2
+              WHERE e2.attribute_id = $2
+                AND e2.parent_id IS NOT DISTINCT FROM edges.parent_id
+                AND e2.child_id = edges.child_id
+                AND e2.graph_path = edges.graph_path
+                AND e2.id != edges.id
+            )
+        `, [nonWinner.map(r => r.id), winnerAttrId]);
+
+        // Update remaining edges to the winning attribute
+        await pool.query(`
+          UPDATE edges
+          SET attribute_id = $1
+          WHERE (parent_id IS NULL AND child_id = $2)
+             OR (parent_id IS NOT NULL AND graph_path[1] = $2)
+        `, [winnerAttrId, rootId]);
+      }
+      console.log('Phase 20a: Graph attribute normalization complete.');
+    } catch (phase20aErr) {
+      console.log('Phase 20a: Skipped (already applied or no-op):', phase20aErr.message);
+    }
+    // ─── Phase 10a: Rename 'private' layer to 'editorial' ───
+    // Update document_annotations.layer from 'private' to 'editorial'
+    await client.query(`
+      UPDATE document_annotations SET layer = 'editorial' WHERE layer = 'private'
+    `);
+    // Update annotation_removal_log.annotation_layer from 'private' to 'editorial'
+    await client.query(`
+      UPDATE annotation_removal_log SET annotation_layer = 'editorial' WHERE annotation_layer = 'private'
+    `);
+    console.log('Phase 10a: Renamed private layer to editorial');
+
+    // Phase 20b: Drop side_votes (move votes) table
+    await client.query(`
+      DROP TABLE IF EXISTS side_votes CASCADE;
+    `);
+    console.log('Phase 20b: Dropped side_votes table');
+
+    // Phase 21a: Remove is_draft column from documents
+    // First finalize any remaining drafts so no data is lost
+    await client.query(`
+      UPDATE documents SET is_draft = false WHERE is_draft = true
+    `);
+    await client.query(`
+      ALTER TABLE documents DROP COLUMN IF EXISTS is_draft
+    `);
+    console.log('Phase 21a: Removed is_draft column from documents');
+
+    // ─── Phase 22b-1: Migrate document_annotations to document-level ───
+    // Add new columns: quote_text, comment, quote_occurrence
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'quote_text'
+        ) THEN
+          ALTER TABLE document_annotations ADD COLUMN quote_text TEXT;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'comment'
+        ) THEN
+          ALTER TABLE document_annotations ADD COLUMN comment TEXT;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'quote_occurrence'
+        ) THEN
+          ALTER TABLE document_annotations ADD COLUMN quote_occurrence INTEGER;
+        END IF;
+      END $$;
+    `);
+
+    // Migrate existing annotations: populate quote_text from document body
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'start_position'
+        ) THEN
+          UPDATE document_annotations da
+          SET quote_text = SUBSTRING(d.body FROM da.start_position + 1 FOR da.end_position - da.start_position)
+          FROM documents d
+          WHERE da.document_id = d.id
+            AND da.start_position IS NOT NULL
+            AND da.quote_text IS NULL;
+        END IF;
+      END $$;
+    `);
+
+    // Set quote_occurrence = 1 for all migrated annotations
+    await client.query(`
+      UPDATE document_annotations SET quote_occurrence = 1 WHERE quote_occurrence IS NULL
+    `);
+
+    // Drop valid_positions CHECK constraint
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'document_annotations' AND constraint_name = 'valid_positions'
+        ) THEN
+          ALTER TABLE document_annotations DROP CONSTRAINT valid_positions;
+        END IF;
+      END $$;
+    `);
+
+    // Make start_position and end_position nullable before dropping
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'start_position'
+        ) THEN
+          ALTER TABLE document_annotations ALTER COLUMN start_position DROP NOT NULL;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_annotations' AND column_name = 'end_position'
+        ) THEN
+          ALTER TABLE document_annotations ALTER COLUMN end_position DROP NOT NULL;
+        END IF;
+      END $$;
+    `);
+
+    // Drop start_position and end_position columns
+    await client.query(`
+      ALTER TABLE document_annotations DROP COLUMN IF EXISTS start_position
+    `);
+    await client.query(`
+      ALTER TABLE document_annotations DROP COLUMN IF EXISTS end_position
+    `);
+
+    console.log('Phase 22b-1: Migrated document_annotations to document-level (quote_text, comment, quote_occurrence)');
+
+    // Update annotation_removal_log: add quote_text, make positions nullable
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'annotation_removal_log' AND column_name = 'quote_text'
+        ) THEN
+          ALTER TABLE annotation_removal_log ADD COLUMN quote_text TEXT;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'annotation_removal_log' AND column_name = 'start_position'
+        ) THEN
+          ALTER TABLE annotation_removal_log ALTER COLUMN start_position DROP NOT NULL;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'annotation_removal_log' AND column_name = 'end_position'
+        ) THEN
+          ALTER TABLE annotation_removal_log ALTER COLUMN end_position DROP NOT NULL;
+        END IF;
+      END $$;
+    `);
+    console.log('Phase 22b-1: Updated annotation_removal_log (added quote_text, made positions nullable)');
+
+    // ============================================================
+    // Phase 23a: Vote Set Drift Event Log
+    // Append-only log of save/unsave events per parent context.
+    // parent_edge_id: the edge whose children list was affected
+    //   (NULL for root-level concepts — no parent edge)
+    // child_edge_id: the specific child edge that was saved/unsaved
+    // action: 'save' or 'unsave'
+    // Index on (parent_edge_id, user_id, created_at) for efficient
+    // reconstruction queries.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vote_set_changes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        parent_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        child_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        action VARCHAR(20) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_vote_set_changes_parent_user_time
+        ON vote_set_changes(parent_edge_id, user_id, created_at);
+    `);
+
+    console.log('Phase 23a: Created vote_set_changes table');
+
+    // ============================================================
+    // Phase 25a: Single Tag Per Document
+    // Add tag_id column to documents, migrate earliest assigned tag
+    // per document from document_tag_links, then drop the junction
+    // table. Documents with no tags keep tag_id = NULL.
+    // ============================================================
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'documents' AND column_name = 'tag_id'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN tag_id INTEGER REFERENCES document_tags(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+
+    // Only run if document_tag_links still exists (idempotent)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_name = 'document_tag_links'
+        ) THEN
+          -- Copy earliest assigned tag per document (keep first by created_at)
+          UPDATE documents d
+          SET tag_id = earliest.tag_id
+          FROM (
+            SELECT DISTINCT ON (document_id) document_id, tag_id
+            FROM document_tag_links
+            ORDER BY document_id, created_at ASC
+          ) AS earliest
+          WHERE d.id = earliest.document_id AND d.tag_id IS NULL;
+
+          DROP TABLE document_tag_links;
+        END IF;
+      END $$;
+    `);
+
+    console.log('Phase 25a: Migrated tags to documents.tag_id, dropped document_tag_links');
+
+    // Phase 25e: Set all edges to "value" attribute (value-only launch mode)
+    // First, deduplicate edges that share (parent_id, child_id, graph_path) but differ
+    // only by attribute_id — keep the one with the most votes (then oldest by created_at).
+    const valueAttrRow = await client.query(`SELECT id FROM attributes WHERE name = 'value'`);
+    const valueAttrId = valueAttrRow.rows[0].id;
+
+    // Find groups that would collide when all attribute_ids become 'value'
+    const dupes = await client.query(`
+      SELECT parent_id, child_id, graph_path
+      FROM edges
+      GROUP BY parent_id, child_id, graph_path
+      HAVING COUNT(*) > 1
+    `);
+
+    for (const group of dupes.rows) {
+      // For each collision group, keep the edge with the most votes (ties: oldest)
+      // and reassign any votes/saves from deleted edges to the keeper
+      const edgesInGroup = await client.query(`
+        SELECT e.id,
+          (SELECT COUNT(*) FROM votes v WHERE v.edge_id = e.id) as vote_count
+        FROM edges e
+        WHERE e.parent_id IS NOT DISTINCT FROM $1
+          AND e.child_id = $2
+          AND e.graph_path = $3
+        ORDER BY vote_count DESC, e.created_at ASC
+      `, [group.parent_id, group.child_id, group.graph_path]);
+
+      const keepId = edgesInGroup.rows[0].id;
+      const removeIds = edgesInGroup.rows.slice(1).map(r => r.id);
+
+      // Reassign votes from removed edges to keeper (skip duplicates)
+      for (const rid of removeIds) {
+        await client.query(`
+          UPDATE votes SET edge_id = $1
+          WHERE edge_id = $2
+            AND user_id NOT IN (SELECT user_id FROM votes WHERE edge_id = $1)
+        `, [keepId, rid]);
+        // Delete any remaining votes on the removed edge (duplicates)
+        await client.query(`DELETE FROM votes WHERE edge_id = $1`, [rid]);
+        // Delete the duplicate edge
+        await client.query(`DELETE FROM edges WHERE id = $1`, [rid]);
+      }
+    }
+
+    // Now safe to update all edges to the value attribute
+    await client.query(`
+      UPDATE edges SET attribute_id = $1 WHERE attribute_id != $1
+    `, [valueAttrId]);
+
+    console.log('Phase 25e: Deduplicated and updated all edges to value attribute');
+
+    // ── Phase 26a: Co-author infrastructure tables ──
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_authors (
+        id SERIAL PRIMARY KEY,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        invited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(document_id, user_id)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_authors_document_id ON document_authors(document_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_authors_user_id ON document_authors(user_id)
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_invite_tokens (
+        id SERIAL PRIMARY KEY,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        token VARCHAR(64) UNIQUE NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP,
+        max_uses INTEGER,
+        use_count INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_invite_tokens_document_id ON document_invite_tokens(document_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_invite_tokens_token ON document_invite_tokens(token)
+    `);
+
+    console.log('Phase 26a: Created document_authors and document_invite_tokens tables');
+
+    // ── Phase 27a: Retire links/fliplinks view modes from graph_tabs ──
+    await client.query(`
+      UPDATE graph_tabs SET view_mode = 'children'
+      WHERE view_mode IN ('links', 'fliplinks')
+    `);
+    console.log('Phase 27a: Migrated links/fliplinks view_mode rows to children');
+
+    // Phase 28g: Widen concept name column from VARCHAR(40) to VARCHAR(255)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'concepts' AND column_name = 'name'
+            AND character_maximum_length < 255
+        ) THEN
+          ALTER TABLE concepts ALTER COLUMN name TYPE VARCHAR(255);
+        END IF;
+      END $$;
+    `);
+
+    // Also widen the concept_name cache column
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'document_concept_links_cache' AND column_name = 'concept_name'
+            AND character_maximum_length < 255
+        ) THEN
+          ALTER TABLE document_concept_links_cache ALTER COLUMN concept_name TYPE VARCHAR(255);
+        END IF;
+      END $$;
+    `);
+    console.log('Phase 28g: Concept name columns widened to VARCHAR(255)');
+
+    // Phase 30g: Informational page comments and comment votes
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS page_comments (
+        id SERIAL PRIMARY KEY,
+        page_slug VARCHAR(50) NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_page_comments_page ON page_comments(page_slug);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS page_comment_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        comment_id INTEGER REFERENCES page_comments(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, comment_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_page_comment_votes_comment ON page_comment_votes(comment_id);
+    `);
+    console.log('Phase 30g: page_comments and page_comment_votes tables created');
+
+    // Phase 30g-2: Add parent_comment_id for 1-level nested replies
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'page_comments' AND column_name = 'parent_comment_id'
+        ) THEN
+          ALTER TABLE page_comments ADD COLUMN parent_comment_id INTEGER REFERENCES page_comments(id) ON DELETE CASCADE;
+          CREATE INDEX idx_page_comments_parent ON page_comments(parent_comment_id);
+        END IF;
+      END $$;
+    `);
+    console.log('Phase 30g-2: page_comments parent_comment_id column added');
+
+    // ── Phase 31a: Annotation Messaging tables ──
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS message_threads (
+        id SERIAL PRIMARY KEY,
+        annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE CASCADE,
+        external_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        thread_type VARCHAR(20) NOT NULL CHECK (thread_type IN ('to_authors', 'to_annotator')),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(annotation_id, external_user_id, thread_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_message_threads_annotation ON message_threads(annotation_id);
+      CREATE INDEX IF NOT EXISTS idx_message_threads_external_user ON message_threads(external_user_id);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        thread_id INTEGER REFERENCES message_threads(id) ON DELETE CASCADE,
+        sender_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON messages(thread_id, created_at);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS message_read_status (
+        id SERIAL PRIMARY KEY,
+        thread_id INTEGER REFERENCES message_threads(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        last_read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(thread_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_message_read_status_user ON message_read_status(user_id);
+    `);
+
+    console.log('Phase 31a: Created message_threads, messages, and message_read_status tables');
+
+    // ── Phase 32a: Phone OTP Authentication — add phone_hash to users ──
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_hash VARCHAR(255);
+    `);
+    console.log('Phase 32a: Added phone_hash column to users table');
+
+    // ── Phase 32b: Make email/password_hash nullable, add token_issued_after ──
+    await client.query(`
+      ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+    `);
+    await client.query(`
+      ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+    `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_issued_after TIMESTAMP;
+    `);
+    console.log('Phase 32b: email/password_hash now nullable, added token_issued_after column');
+
+    // ── Phase 32d: Assign phone hashes to existing test users ──
+    const testUsers = [
+      { username: 'alice', phone: '+15005550001' },
+      { username: 'bob', phone: '+15005550002' },
+      { username: 'carol', phone: '+15005550003' },
+      { username: 'dave', phone: '+15005550004' },
+      { username: 'eve', phone: '+15005550005' },
+      { username: 'frank', phone: '+15005550006' },
+    ];
+    for (const { username, phone } of testUsers) {
+      try {
+        const exists = await client.query(
+          'SELECT id FROM users WHERE username = $1 AND phone_hash IS NULL',
+          [username]
+        );
+        if (exists.rows.length > 0) {
+          const phoneHash = await bcrypt.hash(phone, 10);
+          await client.query(
+            'UPDATE users SET phone_hash = $1 WHERE username = $2',
+            [phoneHash, username]
+          );
+          console.log(`  Assigned phone hash to ${username}`);
+        }
+      } catch (err) {
+        console.error(`  Failed to assign phone hash to ${username}:`, err.message);
+      }
+    }
+    console.log('Phase 32d: Test user phone hash migration complete');
+
+    // Phase 33d: Add missing FK constraint on document_concept_links_cache.concept_id
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'document_concept_links_cache'
+            AND constraint_type = 'FOREIGN KEY'
+            AND constraint_name = 'fk_doc_concept_links_cache_concept'
+        ) THEN
+          ALTER TABLE document_concept_links_cache
+            ADD CONSTRAINT fk_doc_concept_links_cache_concept
+            FOREIGN KEY (concept_id) REFERENCES concepts(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
+    `);
+    console.log('Phase 33d: FK constraint on document_concept_links_cache.concept_id ensured');
+
+    // ── Phase 33e: O(1) phone lookup via HMAC-SHA256 ──
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_lookup VARCHAR(64);
+    `);
+    // Add UNIQUE constraint if not already present
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'users'
+            AND constraint_type = 'UNIQUE'
+            AND constraint_name = 'users_phone_lookup_key'
+        ) THEN
+          ALTER TABLE users ADD CONSTRAINT users_phone_lookup_key UNIQUE (phone_lookup);
+        END IF;
+      END $$;
+    `);
+    // Backfill phone_lookup for the 6 test users (we know their plain phone numbers)
+    if (process.env.PHONE_LOOKUP_KEY) {
+      const testPhones = [
+        { username: 'alice', phone: '+15005550001' },
+        { username: 'bob', phone: '+15005550002' },
+        { username: 'carol', phone: '+15005550003' },
+        { username: 'dave', phone: '+15005550004' },
+        { username: 'eve', phone: '+15005550005' },
+        { username: 'frank', phone: '+15005550006' },
+      ];
+      for (const { username, phone } of testPhones) {
+        try {
+          const lookup = crypto.createHmac('sha256', process.env.PHONE_LOOKUP_KEY)
+            .update(phone).digest('hex');
+          const updated = await client.query(
+            'UPDATE users SET phone_lookup = $1 WHERE username = $2 AND phone_lookup IS NULL',
+            [lookup, username]
+          );
+          if (updated.rowCount > 0) {
+            console.log(`  Assigned phone_lookup to ${username}`);
+          }
+        } catch (err) {
+          console.error(`  Failed to assign phone_lookup to ${username}:`, err.message);
+        }
+      }
+    }
+    console.log('Phase 33e: phone_lookup column + UNIQUE constraint + test user backfill complete');
+
+    // ============================================================
+    // Phase 35c: Fix Foreign Key Constraints for Account Deletion
+    // Change all user-provenance FKs (community contributions) from
+    // RESTRICT (default) to ON DELETE SET NULL. This allows
+    // DELETE FROM users WHERE id = X to succeed, preserving
+    // contributions with NULL attribution.
+    // ============================================================
+    try {
+      const fksToFix = [
+        { table: 'concepts',             column: 'created_by', constraint: 'concepts_created_by_fkey' },
+        { table: 'attributes',           column: 'created_by', constraint: 'attributes_created_by_fkey' },
+        { table: 'edges',                column: 'created_by', constraint: 'edges_created_by_fkey' },
+        { table: 'concept_links',        column: 'added_by',   constraint: 'concept_links_added_by_fkey' },
+        { table: 'corpuses',             column: 'created_by', constraint: 'corpuses_created_by_fkey' },
+        { table: 'documents',            column: 'uploaded_by', constraint: 'documents_uploaded_by_fkey' },
+        { table: 'corpus_documents',     column: 'added_by',   constraint: 'corpus_documents_added_by_fkey' },
+        { table: 'document_annotations', column: 'created_by', constraint: 'document_annotations_created_by_fkey' },
+        { table: 'corpus_invite_tokens', column: 'created_by', constraint: 'corpus_invite_tokens_created_by_fkey' },
+        { table: 'document_invite_tokens', column: 'created_by', constraint: 'document_invite_tokens_created_by_fkey' },
+        { table: 'document_tags',        column: 'created_by', constraint: 'document_tags_created_by_fkey' },
+        { table: 'message_threads',      column: 'created_by', constraint: 'message_threads_created_by_fkey' },
+      ];
+
+      for (const { table, column, constraint } of fksToFix) {
+        await client.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${constraint}`);
+        await client.query(`ALTER TABLE ${table} ADD CONSTRAINT ${constraint} FOREIGN KEY (${column}) REFERENCES users(id) ON DELETE SET NULL`);
+      }
+      console.log('Phase 35c: Fixed 12 foreign key constraints to ON DELETE SET NULL');
+    } catch (phase35cErr) {
+      console.error('Phase 35c: FK migration error:', phase35cErr.message);
+    }
+
+    // ============================================================
+    // Phase 36a: Legal Compliance — Age Verification & Copyright
+    // Add age_verified_at to users, copyright_confirmed_at to
+    // documents, backfill test users with emails + age verification.
+    // ============================================================
+
+    // Add age_verified_at column to users
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'age_verified_at'
+        ) THEN
+          ALTER TABLE users ADD COLUMN age_verified_at TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+
+    // Add copyright_confirmed_at column to documents
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'documents' AND column_name = 'copyright_confirmed_at'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN copyright_confirmed_at TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+
+    // Backfill test users with fake emails (only where email IS NULL)
+    const testEmails = [
+      { username: 'alice', email: 'alice@test.com' },
+      { username: 'bob', email: 'bob@test.com' },
+      { username: 'carol', email: 'carol@test.com' },
+      { username: 'dave', email: 'dave@test.com' },
+      { username: 'eve', email: 'eve@test.com' },
+      { username: 'frank', email: 'frank@test.com' },
+    ];
+    for (const { username, email } of testEmails) {
+      await client.query(
+        'UPDATE users SET email = $1 WHERE username = $2 AND email IS NULL',
+        [email, username]
+      );
+    }
+
+    // Set age_verified_at for all test users where it's NULL
+    await client.query(`
+      UPDATE users SET age_verified_at = NOW()
+      WHERE username IN ('alice', 'bob', 'carol', 'dave', 'eve', 'frank')
+        AND age_verified_at IS NULL
+    `);
+
+    console.log('Phase 36a: Added age_verified_at, copyright_confirmed_at, backfilled test users');
+
+    console.log('Database tables created/migrated successfully!');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating tables:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Run migration
+createTables()
+  .then(() => {
+    console.log('Migration completed');
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error('Migration failed:', error);
+    process.exit(1);
+  });
