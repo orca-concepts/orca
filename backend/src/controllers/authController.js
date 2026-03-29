@@ -26,10 +26,40 @@ const authController = {
 
   // Send OTP code via Twilio
   sendCode: async (req, res) => {
-    const { phoneNumber } = req.body;
+    const { phoneNumber, intent } = req.body;
 
     if (!phoneNumber) {
       return res.status(400).json({ error: 'Phone number is required' });
+    }
+
+    // Pre-check phone uniqueness/existence before calling Twilio
+    try {
+      const normalized = normalizePhone(phoneNumber);
+      const phoneLookup = computePhoneLookup(normalized);
+
+      if (intent === 'register') {
+        // Registration: reject if phone already exists
+        const existing = await pool.query(
+          'SELECT id FROM users WHERE phone_lookup = $1',
+          [phoneLookup]
+        );
+        if (existing.rows.length > 0) {
+          return res.status(400).json({ error: 'An account with this phone number already exists' });
+        }
+      } else if (intent === 'login') {
+        // Login: reject if phone doesn't exist
+        const existing = await pool.query(
+          'SELECT id FROM users WHERE phone_lookup = $1',
+          [phoneLookup]
+        );
+        if (existing.rows.length === 0) {
+          return res.status(400).json({ error: 'No account found with this phone number' });
+        }
+      }
+      // If no intent provided, skip checks (backward compatibility)
+    } catch (error) {
+      console.error('Phone pre-check error:', error);
+      return res.status(500).json({ error: 'Internal server error' });
     }
 
     try {

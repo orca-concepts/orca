@@ -102,7 +102,8 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     }
     setLoading(true);
     try {
-      await sendCode('+1' + phoneDigits);
+      const intent = activeTab === 'signup' ? 'register' : 'login';
+      await sendCode('+1' + phoneDigits, intent);
       setStep(2);
       setResendCooldown(30);
     } catch (err) {
@@ -116,7 +117,8 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     setError('');
     setLoading(true);
     try {
-      await sendCode('+1' + phoneDigits);
+      const intent = activeTab === 'signup' ? 'register' : 'login';
+      await sendCode('+1' + phoneDigits, intent);
       setResendCooldown(30);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to resend code');

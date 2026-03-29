@@ -29,8 +29,8 @@ export const authAPI = {
   getCurrentUser: () =>
     api.get('/auth/me'),
 
-  sendCode: (phoneNumber) =>
-    api.post('/auth/send-code', { phoneNumber }),
+  sendCode: (phoneNumber, intent) =>
+    api.post('/auth/send-code', { phoneNumber, intent }),
 
   verifyRegister: (phoneNumber, code, username, email, ageVerified) =>
     api.post('/auth/verify-register', { phoneNumber, code, username, email, ageVerified }),

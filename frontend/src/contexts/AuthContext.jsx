@@ -40,9 +40,9 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  const sendCode = async (phoneNumber) => {
+  const sendCode = async (phoneNumber, intent) => {
     try {
-      const response = await authAPI.sendCode(phoneNumber);
+      const response = await authAPI.sendCode(phoneNumber, intent);
       return response.data;
     } catch (error) {
       throw error;
