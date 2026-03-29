@@ -1006,7 +1006,7 @@ const conceptsController = {
       // Step 1: For each user, get the sorted array of child edge IDs they've saved
       // in this context (parent_id = id, graph_path = graphPath)
       // Step 2: Group users by identical vote arrays
-      // Step 3: Return only groups with 2+ users (threshold)
+      // Step 3: Return groups (filtered to 10+ users post-query)
       const voteSetsQuery = `
         WITH user_saved_children AS (
           -- For each user, get the set of child edge IDs they've saved in this context
@@ -1061,7 +1061,8 @@ const conceptsController = {
         if (peResult.rows.length > 0) parentEdgeId = peResult.rows[0].id;
       }
 
-      // Build initial vote sets from query results
+      // Build initial vote sets from query results (already sorted by user_count DESC from SQL)
+      const VOTE_SET_THRESHOLD = 10;
       const rawSets = result.rows.map((row) => ({
         edgeIds: row.saved_edge_ids,
         childIds: row.saved_child_ids,
@@ -1070,47 +1071,11 @@ const conceptsController = {
         voteSetKey: [...row.saved_edge_ids].sort((a, b) => a - b).join(','),
       }));
 
-      // Reorder vote sets by nearest-neighbor Jaccard similarity
-      // so that similar compositions get adjacent colors
-      const orderedSets = [];
-      if (rawSets.length <= 1) {
-        orderedSets.push(...rawSets);
-      } else {
-        const edgeSets = rawSets.map(s => new Set(s.edgeIds));
-        const used = new Set();
-        // Start with the first set (largest by user count, from ORDER BY)
-        used.add(0);
-        orderedSets.push(rawSets[0]);
-        let lastIdx = 0;
-        for (let step = 1; step < rawSets.length; step++) {
-          const lastSet = edgeSets[lastIdx];
-          let bestIdx = -1;
-          let bestSim = -1;
-          for (let j = 0; j < rawSets.length; j++) {
-            if (used.has(j)) continue;
-            const setB = edgeSets[j];
-            let intersection = 0;
-            for (const id of lastSet) {
-              if (setB.has(id)) intersection++;
-            }
-            const union = lastSet.size + setB.size - intersection;
-            const sim = union === 0 ? 0 : intersection / union;
-            if (sim > bestSim) {
-              bestSim = sim;
-              bestIdx = j;
-            }
-          }
-          used.add(bestIdx);
-          orderedSets.push(rawSets[bestIdx]);
-          lastIdx = bestIdx;
-        }
-      }
-
-      // Assign setIndex based on new order
-      const voteSets = orderedSets.map((set, index) => ({
-        ...set,
-        setIndex: index,
-      }));
+      // Filter to sets with 10+ users and assign contiguous setIndex values
+      // Already sorted by userCount DESC from SQL ORDER BY
+      const voteSets = rawSets
+        .filter(set => set.userCount >= VOTE_SET_THRESHOLD)
+        .map((set, index) => ({ ...set, setIndex: index }));
 
       // Build a lookup: for each edge_id, which set indices does it belong to?
       const edgeToSets = {};
