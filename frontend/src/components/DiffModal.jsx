@@ -427,7 +427,7 @@ export default function DiffModal({ isOpen, onClose, initialConcept, isGuest }) 
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Search for a concept to compare\u2026"
+                placeholder="Search for a concept to compare..."
                 style={styles.searchInput}
                 autoFocus
               />

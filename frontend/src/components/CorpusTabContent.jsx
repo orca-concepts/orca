@@ -1864,7 +1864,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               {!isGuest && onUnsubscribe && (
                 <button
                   onClick={() => {
-                    if (window.confirm(`Unsubscribe from "${corpus.name}"? This will remove the tab.`)) {
+                    if (window.confirm(`Unsubscribe from "${corpus.name}"? This removes the corpus tab from your sidebar. You can resubscribe anytime.`)) {
                       onUnsubscribe(corpusId);
                     }
                   }}

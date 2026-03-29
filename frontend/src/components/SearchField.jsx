@@ -270,7 +270,7 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
               (prevResult.corpusAnnotations && prevResult.corpusAnnotations.length > 0)
             );
 
-            // Show "In your saves / corpuses" header before first contextual result
+            // Show "In your votes / corpuses" header before first contextual result
             const isFirstContextResult = idx === 0 && hasContext;
             // Show divider between contextual and non-contextual results
             const isFirstNonContextAfterContext = prevHasContext && !hasContext;
@@ -278,7 +278,7 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
             return (
               <React.Fragment key={result.id}>
                 {isFirstContextResult && (
-                  <div style={styles.savedSectionHeader}>In your saves / corpuses</div>
+                  <div style={styles.savedSectionHeader}>In your votes / corpuses</div>
                 )}
                 {isFirstNonContextAfterContext && (
                   <div style={styles.divider} />
@@ -303,16 +303,13 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
                       </span>
                     )}
                     {result.corpusAnnotations && result.corpusAnnotations.length > 0 && (
-                      <span style={styles.corpusBadge}>
-                        {result.corpusAnnotations.map(c => c.corpusName).join(', ')}
-                      </span>
+                      <div style={styles.corpusBadgeColumn}>
+                        {result.corpusAnnotations.map((c, i) => (
+                          <span key={i} style={styles.corpusBadge}>{c.corpusName}</span>
+                        ))}
+                      </div>
                     )}
-                    {result.isChild && result.childAttributes && result.childAttributes.length > 0 && (
-                      <span style={styles.childBadge}>
-                        child: {result.childAttributes.map(a => typeof a === 'string' ? a : a.attribute_name).join(', ')}
-                      </span>
-                    )}
-                    {result.isChild && (!result.childAttributes || result.childAttributes.length === 0) && (
+                    {result.isChild && (
                       <span style={styles.childBadge}>child</span>
                     )}
                   </div>
@@ -427,7 +424,7 @@ const styles = {
   },
   resultBadges: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: '6px',
     flexShrink: 0,
   },
@@ -452,6 +449,12 @@ const styles = {
     borderRadius: '3px',
     whiteSpace: 'nowrap',
     fontStyle: 'normal',
+  },
+  corpusBadgeColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3px',
+    alignItems: 'flex-start',
   },
   corpusBadge: {
     fontSize: '11px',

@@ -593,7 +593,7 @@ const Concept = ({
             {effectiveViewMode === 'children' ? (
               <>
                 <div style={styles.conceptHeader}>
-                  <h2 style={styles.conceptName}>
+                  <h2 style={styles.conceptName} title={concept.name}>
                     {concept.name}
                   </h2>
                   {currentEdgeVoteCount !== null && (
@@ -601,7 +601,7 @@ const Concept = ({
                       {currentEdgeVoteCount} {currentEdgeVoteCount === 1 ? 'vote' : 'votes'}
                     </span>
                   )}
-                  <div style={{ ...styles.sortRow, marginLeft: 'auto' }}>
+                  <div style={{ ...styles.sortRow, marginLeft: 'auto', flexShrink: 0 }}>
                     {[
                       { value: 'saves', label: 'Graph Votes' },
                       { value: 'new', label: 'Newest' },
@@ -874,6 +874,11 @@ const styles = {
     margin: 0,
     color: '#333',
     fontFamily: '"EB Garamond", Georgia, serif',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+    flex: 1,
   },
   attributeTagHeader: {
     color: '#888',

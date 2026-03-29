@@ -332,6 +332,11 @@ const styles = {
     color: '#555',
     transition: 'all 0.2s',
   },
+  swapButtonActive: {
+    backgroundColor: '#333',
+    color: '#faf9f6',
+    borderColor: '#333',
+  },
 };
 
 export default ConceptGrid;
