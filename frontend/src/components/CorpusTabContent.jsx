@@ -113,6 +113,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
 
   // Annotation filter and user identity status
   const [layerFilter, setLayerFilter] = useState(null); // null = default (all), 'corpus_members', 'author'
+  const [attributeFilter, setAttributeFilter] = useState('all'); // 'all' or an attribute name like 'value'
+  const [enabledAttributes, setEnabledAttributes] = useState([]);
   const [isAllowedUser, setIsAllowedUser] = useState(false);
   const [isCorpusOwner, setIsCorpusOwner] = useState(false);
   const [isAuthor, setIsAuthor] = useState(false);
@@ -134,6 +136,13 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   useEffect(() => {
     loadCorpus();
   }, [corpusId]);
+
+  // Fetch enabled attributes for the attribute filter (Phase 38f)
+  useEffect(() => {
+    conceptsAPI.getAttributes()
+      .then(res => setEnabledAttributes(res.data.attributes || []))
+      .catch(() => setEnabledAttributes([]));
+  }, []);
 
   // Auto-open a pending document if passed from annotation panel or External Links (Phase 7d-4 / 27c)
   useEffect(() => {
@@ -443,9 +452,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     }
   }, [layerFilter]);
 
-  // Reset concept navigation state when document changes
+  // Reset concept navigation state and attribute filter when document changes
   useEffect(() => {
     setConceptNavState({});
+    setAttributeFilter('all');
   }, [subView?.documentId]);
 
 
@@ -1016,6 +1026,28 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               >Author</button>
             </div>
           )}
+          {/* Phase 38f: Attribute filter toggle */}
+          {enabledAttributes.length > 1 && (
+            <div style={{ ...styles.layerToggle, marginTop: '6px' }}>
+              <button
+                onClick={() => setAttributeFilter('all')}
+                style={{
+                  ...styles.layerToggleBtn,
+                  ...(attributeFilter === 'all' ? styles.layerToggleBtnActive : {}),
+                }}
+              >All</button>
+              {enabledAttributes.map(attr => (
+                <button
+                  key={attr.id}
+                  onClick={() => setAttributeFilter(attr.name)}
+                  style={{
+                    ...styles.layerToggleBtn,
+                    ...(attributeFilter === attr.name ? styles.layerToggleBtnActive : {}),
+                  }}
+                >{attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={styles.docInfo}>
@@ -1308,7 +1340,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
           <div style={styles.annotationSidebar}>
             <div style={styles.annotationSidebarHeader}>
               <span style={styles.annotationSidebarTitle}>
-                Annotations{annotations.length > 0 ? ` (${annotations.length})` : ''}
+                Annotations{annotations.length > 0
+                  ? attributeFilter !== 'all'
+                    ? ` (${annotations.filter(a => a.attribute_name === attributeFilter).length}/${annotations.length})`
+                    : ` (${annotations.length})`
+                  : ''}
               </span>
               {!isGuest && (
                 <button
@@ -1325,13 +1361,19 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               )}
             </div>
 
-            {annotationsLoading ? (
+            {(() => {
+              const filteredAnnotations = attributeFilter === 'all'
+                ? annotations
+                : annotations.filter(a => a.attribute_name === attributeFilter);
+              return annotationsLoading ? (
               <div style={styles.annLoadingText}>Loading…</div>
             ) : annotations.length === 0 ? (
               <div style={styles.annEmptyText}>No annotations yet.</div>
+            ) : filteredAnnotations.length === 0 ? (
+              <div style={styles.annEmptyText}>No annotations match the selected filters.</div>
             ) : (
               <div style={styles.annotationList}>
-                {[...annotations].sort((a, b) => (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0)).map(ann => {
+                {[...filteredAnnotations].sort((a, b) => (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0)).map(ann => {
                   const isSelected = selectedAnnotation?.id === ann.id;
                   const quoteNotFound = quoteNotFoundAnnId === ann.id;
                   return (
@@ -1681,7 +1723,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                   );
                 })}
               </div>
-            )}
+            );
+            })()}
 
             {/* Concepts in this document */}
             {!conceptLinksLoading && conceptLinks.length > 0 && (() => {
