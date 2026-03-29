@@ -1131,8 +1131,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
           )}
           {/* Phase 7h/22a: Version actions row */}
           <div style={styles.versionActionRow}>
-            {/* New Version button — only for owner/allowed users */}
-            {!isGuest && (isCorpusOwner || isAllowedUser) && (
+            {/* New Version button — only for document authors (uploader or coauthors) */}
+            {!isGuest && isDocAuthor && (
               <button
                 onClick={handleToggleVersionUpload}
                 style={styles.versionButton}

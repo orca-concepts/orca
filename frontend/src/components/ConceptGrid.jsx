@@ -117,7 +117,7 @@ const ConceptGrid = ({
                   >
                     ▲ {concept.vote_count}
                   </button>
-                  {onSwapClick && (
+                  {onSwapClick ? (
                     <button
                       style={styles.swapButton}
                       onClick={(e) => {
@@ -128,7 +128,14 @@ const ConceptGrid = ({
                     >
                       ⇄ {concept.swap_count || 0}
                     </button>
-                  )}
+                  ) : (Number(concept.swap_count) > 0 && (
+                    <span
+                      style={styles.swapButton}
+                      title="Log in to vote on swaps"
+                    >
+                      ⇄ {concept.swap_count}
+                    </span>
+                  ))}
                 </div>
               )}
 

@@ -14,6 +14,7 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
   const [attributes, setAttributes] = useState([]);
   const [showAttributePicker, setShowAttributePicker] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // { type: 'child' | 'root', name: string }
+  const [exactMatchRootAttributes, setExactMatchRootAttributes] = useState([]);
 
   const navigate = useNavigate();
   const inputRef = useRef(null);
@@ -65,6 +66,7 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
       );
       setResults(response.data.results);
       setExactMatch(response.data.exactMatch);
+      setExactMatchRootAttributes(response.data.exactMatchRootAttributes || []);
       setShowDropdown(true);
     } catch (err) {
       console.error('Search failed:', err);
@@ -127,11 +129,13 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
     }
   };
 
-  // Step 1b: Create as root -> show attribute picker, or auto-assign if only one attribute
+  // Step 1b: Create as root -> show attribute picker, or auto-assign if only one available attribute
   const handleCreateRootClick = (name) => {
-    if (attributes.length === 1) {
-      // Single attribute mode: skip picker, auto-assign
-      handleAttributeSelect(attributes[0].id, { type: 'root', name });
+    // Filter out attributes that already have root edges for this concept
+    const availableAttrs = attributes.filter(a => !exactMatchRootAttributes.includes(a.name));
+    if (availableAttrs.length === 1) {
+      // Single available attribute: skip picker, auto-assign
+      handleAttributeSelect(availableAttrs[0].id, { type: 'root', name });
       return;
     }
     setPendingAction({ type: 'root', name });
@@ -181,9 +185,13 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
   );
   const showAddChildOption = canAddChild && trimmedQuery.length > 0 && !queryIsChild;
 
-  // "Create as root" logic: on root page, and typed text doesn't already exist as a concept
+  // "Create as root" logic: on root page. Allow if concept doesn't exist, or if it exists
+  // but doesn't have root edges for all enabled attributes (user can add with a different attribute).
+  // Hide only if concept already has root edges for every enabled attribute.
   // Guests cannot create concepts
-  const showCreateRootOption = !isGuest && isRootPage && trimmedQuery.length > 0 && !exactMatch;
+  const exactMatchIsFullyRooted = exactMatch && attributes.length > 0 &&
+    attributes.every(a => exactMatchRootAttributes.includes(a.name));
+  const showCreateRootOption = !isGuest && isRootPage && trimmedQuery.length > 0 && !exactMatchIsFullyRooted;
 
   const showAddOption = showAddChildOption || showCreateRootOption;
 
@@ -200,7 +208,7 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
                 Select attribute for "{pendingAction.name}":
               </div>
               <div style={styles.attributeButtons}>
-                {attributes.map(attr => (
+                {attributes.filter(a => !exactMatchRootAttributes.includes(a.name)).map(attr => (
                   <button
                     key={attr.id}
                     style={styles.attributeButton}
@@ -242,7 +250,7 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
               onClick={() => handleCreateRootClick(trimmedQuery)}
             >
               <span style={styles.addIcon}>+</span>
-              <span>Create "<strong>{trimmedQuery}</strong>" as root concept</span>
+              <span>{exactMatch ? 'Add' : 'Create'} "<strong>{trimmedQuery}</strong>" as root concept</span>
             </div>
           )}
 

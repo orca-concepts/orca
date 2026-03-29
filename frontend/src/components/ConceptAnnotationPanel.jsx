@@ -111,41 +111,67 @@ const ConceptAnnotationPanel = ({
     return () => { cancelled = true; };
   }, [conceptId, annotationSort, edgeIdFilter, selectedTagId, myCorpusesOnly, selectedCorpusId]);
 
-  // Load web links
+  // Load web links — edge-specific in children view, cross-context in flip view
   useEffect(() => {
     if (!conceptId) return;
     let cancelled = false;
     setWebLinksLoading(true);
-    const pathParam = (path || []).join(',');
-    votesAPI.getAllWebLinksForConcept(conceptId, pathParam || undefined)
-      .then(res => {
-        if (cancelled) return;
-        const flat = [];
-        const groups = res.data.groups || [];
-        const names = res.data.conceptNames || {};
-        setLinkConceptNames(names);
-        for (const group of groups) {
-          for (const link of group.links) {
-            flat.push({
-              ...link,
-              edgeId: group.edgeId,
-              parentId: group.parentId,
-              parentName: group.parentName,
-              graphPath: group.graphPath,
-              attributeName: group.attributeName,
-            });
+
+    if (isChildrenView && currentEdgeId) {
+      // Children view: load only links for the current edge
+      votesAPI.getWebLinks(currentEdgeId)
+        .then(res => {
+          if (cancelled) return;
+          setLinkConceptNames({});
+          const links = (res.data.webLinks || []).map(link => ({
+            ...link,
+            edgeId: currentEdgeId,
+            parentId: null,
+            parentName: null,
+            graphPath: path || [],
+            attributeName: null,
+          }));
+          links.sort((a, b) => b.voteCount - a.voteCount || new Date(b.createdAt) - new Date(a.createdAt));
+          setWebLinks(links);
+        })
+        .catch(err => {
+          console.error('Failed to load web links:', err);
+          if (!cancelled) setWebLinks([]);
+        })
+        .finally(() => { if (!cancelled) setWebLinksLoading(false); });
+    } else {
+      // Flip view or no edge: load all links across all contexts
+      const pathParam = (path || []).join(',');
+      votesAPI.getAllWebLinksForConcept(conceptId, pathParam || undefined)
+        .then(res => {
+          if (cancelled) return;
+          const flat = [];
+          const groups = res.data.groups || [];
+          const names = res.data.conceptNames || {};
+          setLinkConceptNames(names);
+          for (const group of groups) {
+            for (const link of group.links) {
+              flat.push({
+                ...link,
+                edgeId: group.edgeId,
+                parentId: group.parentId,
+                parentName: group.parentName,
+                graphPath: group.graphPath,
+                attributeName: group.attributeName,
+              });
+            }
           }
-        }
-        flat.sort((a, b) => b.voteCount - a.voteCount || new Date(b.createdAt) - new Date(a.createdAt));
-        setWebLinks(flat);
-      })
-      .catch(err => {
-        console.error('Failed to load web links:', err);
-        if (!cancelled) setWebLinks([]);
-      })
-      .finally(() => { if (!cancelled) setWebLinksLoading(false); });
+          flat.sort((a, b) => b.voteCount - a.voteCount || new Date(b.createdAt) - new Date(a.createdAt));
+          setWebLinks(flat);
+        })
+        .catch(err => {
+          console.error('Failed to load web links:', err);
+          if (!cancelled) setWebLinks([]);
+        })
+        .finally(() => { if (!cancelled) setWebLinksLoading(false); });
+    }
     return () => { cancelled = true; };
-  }, [conceptId, path?.join(',')]);
+  }, [conceptId, currentEdgeId, isChildrenView, path?.join(',')]);
 
   const handleAnnotationCardClick = (a) => {
     if (isGuest) {
@@ -379,6 +405,36 @@ const ConceptAnnotationPanel = ({
     }
   };
 
+  const handleRemoveLink = async (linkId) => {
+    setWebLinks(links => links.filter(l => l.id !== linkId));
+    try {
+      await votesAPI.removeWebLink(linkId);
+    } catch (err) {
+      console.error('Failed to remove web link:', err);
+      // Reload links on error to restore state
+      setWebLinksLoading(true);
+      if (isChildrenView && currentEdgeId) {
+        votesAPI.getWebLinks(currentEdgeId).then(res => {
+          setWebLinks((res.data.webLinks || []).map(link => ({
+            ...link, edgeId: currentEdgeId, parentId: null, parentName: null,
+            graphPath: path || [], attributeName: null,
+          })));
+        }).catch(() => {}).finally(() => setWebLinksLoading(false));
+      } else {
+        const pathParam = (path || []).join(',');
+        votesAPI.getAllWebLinksForConcept(conceptId, pathParam || undefined).then(res => {
+          const flat = [];
+          for (const group of (res.data.groups || [])) {
+            for (const link of group.links) {
+              flat.push({ ...link, edgeId: group.edgeId, parentId: group.parentId, parentName: group.parentName, graphPath: group.graphPath, attributeName: group.attributeName });
+            }
+          }
+          setWebLinks(flat);
+        }).catch(() => {}).finally(() => setWebLinksLoading(false));
+      }
+    }
+  };
+
   const wasEdited = (link) => {
     if (!link.updatedAt || !link.createdAt) return false;
     const created = new Date(link.createdAt).getTime();
@@ -547,6 +603,14 @@ const ConceptAnnotationPanel = ({
                   style={styles.editCommentBtn}
                 >
                   {link.comment ? 'Edit' : 'Add comment'}
+                </span>
+              )}
+              {isCreator && !isEditing && (
+                <span
+                  onClick={(e) => { e.stopPropagation(); handleRemoveLink(link.id); }}
+                  style={{ ...styles.editCommentBtn, color: '#999' }}
+                >
+                  Remove
                 </span>
               )}
             </span>

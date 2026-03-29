@@ -56,7 +56,7 @@ const conceptsController = {
         LEFT JOIN attributes a ON root_e.attribute_id = a.id
         LEFT JOIN votes v ON root_e.id = v.edge_id        ${annotationJoin}
         ${topAnnotationJoin}
-        WHERE c.id NOT IN (SELECT DISTINCT child_id FROM edges WHERE parent_id IS NOT NULL)
+        WHERE root_e.id IS NOT NULL
         GROUP BY c.id, c.name, c.created_at, root_e.id, root_e.created_at, a.id, a.name${sort === 'top_annotation' ? ', top_ann.top_votes' : ''}
         ${orderClause};
       `;
@@ -525,7 +525,22 @@ const conceptsController = {
         r => r.name.toLowerCase() === searchTerm.toLowerCase()
       );
 
-      res.json({ results, exactMatch });
+      // Check if the exact-match concept already has root edges (and which attributes)
+      let exactMatchRootAttributes = [];
+      if (exactMatch) {
+        const exactRow = result.rows.find(r => r.name.toLowerCase() === searchTerm.toLowerCase());
+        if (exactRow) {
+          const rootEdgeCheck = await pool.query(
+            `SELECT a.id as attribute_id, a.name as attribute_name
+             FROM edges e JOIN attributes a ON e.attribute_id = a.id
+             WHERE e.child_id = $1 AND e.parent_id IS NULL AND e.graph_path = '{}'`,
+            [exactRow.id]
+          );
+          exactMatchRootAttributes = rootEdgeCheck.rows.map(r => r.attribute_name);
+        }
+      }
+
+      res.json({ results, exactMatch, exactMatchRootAttributes });
     } catch (error) {
       console.error('Error searching concepts:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -737,25 +752,39 @@ const conceptsController = {
       try {
         await client.query('BEGIN');
 
-        // Check for duplicate name inside the transaction to prevent race conditions
+        // Check if concept name already exists — reuse if so (same pattern as createChildConcept)
         const existingConcept = await client.query(
-          'SELECT id FROM concepts WHERE LOWER(name) = LOWER($1)',
+          'SELECT id, name FROM concepts WHERE LOWER(name) = LOWER($1)',
           [name]
         );
+
+        let conceptId;
+        let conceptRow;
+
         if (existingConcept.rows.length > 0) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({
-            error: 'A concept with this name already exists'
-          });
+          conceptId = existingConcept.rows[0].id;
+          conceptRow = existingConcept.rows[0];
+
+          // Check if a root edge already exists for this concept + attribute
+          const existingRootEdge = await client.query(
+            'SELECT id FROM edges WHERE parent_id IS NULL AND child_id = $1 AND attribute_id = $2',
+            [conceptId, attributeId]
+          );
+          if (existingRootEdge.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+              error: 'A root concept with this name and attribute already exists'
+            });
+          }
+        } else {
+          // Create new concept
+          const result = await client.query(
+            'INSERT INTO concepts (name, created_by) VALUES ($1, $2) RETURNING *',
+            [name, req.user.userId]
+          );
+          conceptId = result.rows[0].id;
+          conceptRow = result.rows[0];
         }
-
-        // Create new concept
-        const result = await client.query(
-          'INSERT INTO concepts (name, created_by) VALUES ($1, $2) RETURNING *',
-          [name, req.user.userId]
-        );
-
-        const conceptId = result.rows[0].id;
 
         // Create root edge with attribute (parent_id = NULL, graph_path = empty)
         await client.query(
@@ -770,7 +799,7 @@ const conceptsController = {
 
         res.status(201).json({
           message: 'Root concept created successfully',
-          concept: result.rows[0],
+          concept: conceptRow,
           attribute: { id: parseInt(attributeId), name: attrName }
         });
       } catch (error) {

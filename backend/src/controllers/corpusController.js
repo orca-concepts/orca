@@ -855,7 +855,7 @@ const getDocument = async (req, res) => {
 
 // Create a new version of an existing document within a corpus
 // Copies the source document's text into a new document. Only allowed
-// users (or corpus owner) of the corpus can create versions.
+// Only document authors (uploader or coauthors) can create versions.
 const createVersion = async (req, res) => {
   const client = await pool.connect();
   try {
@@ -888,27 +888,13 @@ const createVersion = async (req, res) => {
       return res.status(400).json({ error: 'Could not extract text from the uploaded file' });
     }
 
-    // Verify corpus exists and user is owner or allowed user
+    // Verify corpus exists
     const corpusCheck = await client.query(
-      'SELECT id, created_by FROM corpuses WHERE id = $1',
+      'SELECT id FROM corpuses WHERE id = $1',
       [corpusId]
     );
     if (corpusCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Corpus not found' });
-    }
-
-    const isOwner = corpusCheck.rows[0].created_by === userId;
-    let isAllowedUser = false;
-    if (!isOwner) {
-      const allowedCheck = await client.query(
-        'SELECT id FROM corpus_allowed_users WHERE corpus_id = $1 AND user_id = $2',
-        [corpusId, userId]
-      );
-      isAllowedUser = allowedCheck.rows.length > 0;
-    }
-
-    if (!isOwner && !isAllowedUser) {
-      return res.status(403).json({ error: 'Only corpus owner or allowed users can create versions' });
     }
 
     // Verify source document exists (may be in this corpus or accessed via version history from another corpus)
