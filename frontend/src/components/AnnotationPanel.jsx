@@ -23,28 +23,23 @@ const buildOccurrenceItems = (text, body) => {
 };
 
 /**
- * AnnotationPanel — annotation creation form.
+ * AnnotationPanel — single-view annotation creation form.
  *
- * Props:
- *   - corpusId: the corpus context
- *   - documentId: the document being annotated
- *   - documentBody: full text of the document (for occurrence checking)
- *   - initialQuoteText: optional pre-filled quote text (from text selection)
- *   - onAnnotationCreated: callback after successful creation
- *   - onClose: callback to dismiss the panel
+ * All fields (quote, comment, concept, context) are visible on one panel.
+ * "Create Annotation" button is grayed out until a concept+context is selected.
  */
 const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText, onAnnotationCreated, onClose }) => {
-  const [step, setStep] = useState('form'); // 'form' | 'pickContext'
   const [quoteText, setQuoteText] = useState(initialQuoteText || '');
   const [comment, setComment] = useState('');
-  const [quoteOccurrenceItems, setQuoteOccurrenceItems] = useState([]); // occurrences of quoteText in doc
-  const [selectedQuoteOccurrence, setSelectedQuoteOccurrence] = useState(null); // 1-based
+  const [quoteOccurrenceItems, setQuoteOccurrenceItems] = useState([]);
+  const [selectedQuoteOccurrence, setSelectedQuoteOccurrence] = useState(null);
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [selectedConcept, setSelectedConcept] = useState(null);
   const [parentContexts, setParentContexts] = useState([]);
   const [loadingContexts, setLoadingContexts] = useState(false);
+  const [selectedEdge, setSelectedEdge] = useState(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
 
@@ -65,7 +60,6 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
     }
     const items = buildOccurrenceItems(trimmed, documentBody);
     setQuoteOccurrenceItems(items);
-    // Auto-select if exactly one occurrence
     setSelectedQuoteOccurrence(items.length === 1 ? 1 : null);
   }, [quoteText, documentBody]);
 
@@ -91,8 +85,10 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
   const handleSelectConcept = async (concept) => {
     try {
       setSelectedConcept(concept);
+      setSelectedEdge(null);
       setLoadingContexts(true);
-      setStep('pickContext');
+      setQuery('');
+      setSearchResults([]);
       setError(null);
 
       const res = await conceptsAPI.getConceptParents(concept.id);
@@ -148,6 +144,11 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
       });
 
       setParentContexts(enriched);
+
+      // Auto-select if only one context
+      if (enriched.length === 1) {
+        setSelectedEdge(enriched[0]);
+      }
     } catch (err) {
       console.error('Failed to load concept contexts:', err);
       setError('Failed to load concept contexts');
@@ -156,11 +157,18 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
     }
   };
 
-  const handlePickEdge = async (edgeId) => {
+  const handleClearConcept = () => {
+    setSelectedConcept(null);
+    setSelectedEdge(null);
+    setParentContexts([]);
+    setError(null);
+  };
+
+  const handleConfirmCreate = async () => {
+    if (!selectedEdge) return;
     try {
       setCreating(true);
       setError(null);
-      // Determine which occurrence to store
       const trimmedQuote = quoteText.trim();
       if (trimmedQuote && quoteOccurrenceItems.length > 1 && !selectedQuoteOccurrence) {
         setError('This text appears multiple times — please select which occurrence to link to.');
@@ -173,7 +181,7 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
       await corpusAPI.createAnnotation(
         corpusId,
         documentId,
-        edgeId,
+        selectedEdge.edge_id,
         trimmedQuote || null,
         comment.trim() || null,
         occurrence
@@ -186,139 +194,136 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
     }
   };
 
-  const handleBack = () => {
-    setStep('form');
-    setSelectedConcept(null);
-    setParentContexts([]);
-    setError(null);
-  };
+  const canCreate = !!selectedEdge && !creating;
 
   return (
     <div style={styles.panel}>
       <div style={styles.header}>
-        {step === 'pickContext' && (
-          <button onClick={handleBack} style={styles.backBtn}>←</button>
-        )}
-        <span style={styles.headerTitle}>
-          {step === 'form'
-            ? 'Annotate'
-            : `Pick context for "${selectedConcept?.name}"`
-          }
-        </span>
+        <span style={styles.headerTitle}>Annotate</span>
         <button onClick={onClose} style={styles.closeBtn}>✕</button>
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
 
-      {step === 'form' && (
-        <div style={styles.formSection}>
-          <div style={styles.fieldGroup}>
-            <label style={styles.fieldLabel}>
-              Quote <span style={styles.fieldOptional}>(optional)</span>
-            </label>
-            <textarea
-              value={quoteText}
-              onChange={(e) => setQuoteText(e.target.value)}
-              placeholder="Paste or type a passage from the document…"
-              style={styles.textarea}
-              rows={3}
-            />
-            {/* Occurrence feedback */}
-            {quoteText.trim() && documentBody && (() => {
-              if (quoteOccurrenceItems.length === 0) {
-                return (
-                  <div style={styles.quoteNote}>
-                    Text not found in document — will be saved as context only.
+      <div style={styles.formSection}>
+        {/* Quote field */}
+        <div style={styles.fieldGroup}>
+          <label style={styles.fieldLabel}>
+            Quote <span style={styles.fieldOptional}>(optional)</span>
+          </label>
+          <textarea
+            value={quoteText}
+            onChange={(e) => setQuoteText(e.target.value)}
+            placeholder="Paste or type a passage from the document…"
+            style={styles.textarea}
+            rows={3}
+          />
+          {quoteText.trim() && documentBody && (() => {
+            if (quoteOccurrenceItems.length === 0) {
+              return (
+                <div style={styles.quoteNote}>
+                  Text not found in document — will be saved as context only.
+                </div>
+              );
+            }
+            if (quoteOccurrenceItems.length > 1) {
+              return (
+                <div style={styles.occurrenceSection}>
+                  <div style={styles.occurrenceWarning}>
+                    This text appears {quoteOccurrenceItems.length} times — select which occurrence:
                   </div>
-                );
-              }
-              if (quoteOccurrenceItems.length > 1) {
-                return (
-                  <div style={styles.occurrenceSection}>
-                    <div style={styles.occurrenceWarning}>
-                      This text appears {quoteOccurrenceItems.length} times — select which occurrence:
-                    </div>
-                    <div style={styles.occurrenceList}>
-                      {quoteOccurrenceItems.map(item => (
-                        <button
-                          key={item.idx}
-                          type="button"
-                          style={{
-                            ...styles.occurrenceItem,
-                            ...(selectedQuoteOccurrence === item.idx ? styles.occurrenceItemSelected : {}),
-                          }}
-                          onClick={() => setSelectedQuoteOccurrence(item.idx)}
-                        >
-                          <span style={styles.occurrenceCtxText}>{item.before}</span>
-                          <strong style={styles.occurrenceMatchText}>{item.match}</strong>
-                          <span style={styles.occurrenceCtxText}>{item.after}</span>
-                        </button>
-                      ))}
-                    </div>
+                  <div style={styles.occurrenceList}>
+                    {quoteOccurrenceItems.map(item => (
+                      <button
+                        key={item.idx}
+                        type="button"
+                        style={{
+                          ...styles.occurrenceItem,
+                          ...(selectedQuoteOccurrence === item.idx ? styles.occurrenceItemSelected : {}),
+                        }}
+                        onClick={() => setSelectedQuoteOccurrence(item.idx)}
+                      >
+                        <span style={styles.occurrenceCtxText}>{item.before}</span>
+                        <strong style={styles.occurrenceMatchText}>{item.match}</strong>
+                        <span style={styles.occurrenceCtxText}>{item.after}</span>
+                      </button>
+                    ))}
                   </div>
-                );
-              }
-              return null;
-            })()}
-          </div>
-          <div style={styles.fieldGroup}>
-            <label style={styles.fieldLabel}>
-              Comment <span style={styles.fieldOptional}>(optional)</span>
-            </label>
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Add a note about this annotation…"
-              style={styles.textarea}
-              rows={2}
-            />
-          </div>
-          <div style={styles.fieldGroup}>
-            <label style={styles.fieldLabel}>Concept</label>
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search concepts…"
-              style={styles.searchInput}
-              maxLength={255}
-            />
-            {searching && <div style={styles.hint}>Searching…</div>}
-            {!searching && searchResults.length === 0 && query.trim().length > 0 && (
-              <div style={styles.hint}>No concepts found for "{query.trim()}"</div>
-            )}
-            {searchResults.length > 0 && (
-              <div style={styles.resultsList}>
-                {searchResults.map((result, i) => (
-                  <div
-                    key={`${result.id}-${i}`}
-                    style={styles.resultItem}
-                    onClick={() => handleSelectConcept(result)}
-                  >
-                    <span style={styles.resultName}>{result.name}</span>
-                    {result.similarity_badge && (
-                      <span style={styles.similarBadge}>similar</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
-      )}
 
-      {step === 'pickContext' && (
-        <div style={styles.contextSection}>
-          {loadingContexts ? (
-            <div style={styles.hint}>Loading contexts…</div>
-          ) : parentContexts.length === 0 ? (
-            <div style={styles.hint}>
-              This concept has no edges. It may need to be added to a graph first.
+        {/* Comment field */}
+        <div style={styles.fieldGroup}>
+          <label style={styles.fieldLabel}>
+            Comment <span style={styles.fieldOptional}>(optional)</span>
+          </label>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Add a note about this annotation…"
+            style={styles.textarea}
+            rows={2}
+          />
+        </div>
+
+        {/* Concept field */}
+        <div style={styles.fieldGroup}>
+          <label style={styles.fieldLabel}>Concept</label>
+          {selectedConcept ? (
+            <div style={styles.selectedConceptRow}>
+              <span style={styles.selectedConceptName}>{selectedConcept.name}</span>
+              <button onClick={handleClearConcept} style={styles.changBtn}>change</button>
             </div>
           ) : (
             <>
-              <div style={styles.contextHint}>Select the context (path) for this annotation:</div>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search concepts…"
+                style={styles.searchInput}
+                maxLength={255}
+              />
+              {searching && <div style={styles.hint}>Searching…</div>}
+              {!searching && searchResults.length === 0 && query.trim().length > 0 && (
+                <div style={styles.hint}>No concepts found for "{query.trim()}"</div>
+              )}
+              {searchResults.length > 0 && (
+                <div style={styles.resultsList}>
+                  {searchResults.map((result, i) => (
+                    <div
+                      key={`${result.id}-${i}`}
+                      style={styles.resultItem}
+                      onClick={() => handleSelectConcept(result)}
+                    >
+                      <span style={styles.resultName}>{result.name}</span>
+                      {result.similarity_badge && (
+                        <span style={styles.similarBadge}>similar</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Context picker — shown inline after concept is selected */}
+        {selectedConcept && (
+          <div style={styles.fieldGroup}>
+            <label style={styles.fieldLabel}>Context</label>
+            {loadingContexts ? (
+              <div style={styles.hint}>Loading contexts…</div>
+            ) : parentContexts.length === 0 ? (
+              <div style={styles.hint}>
+                This concept has no edges. It may need to be added to a graph first.
+              </div>
+            ) : (
               <div style={styles.contextList}>
                 {parentContexts.map((ctx, idx) => {
                   const edgeId = ctx.edge_id;
@@ -329,9 +334,11 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
                   return (
                     <button
                       key={edgeId || idx}
-                      style={{ ...styles.contextItem, opacity: creating ? 0.5 : 1 }}
-                      onClick={() => handlePickEdge(edgeId)}
-                      disabled={creating}
+                      style={{
+                        ...styles.contextItem,
+                        ...(selectedEdge?.edge_id === edgeId ? styles.contextItemSelected : {}),
+                      }}
+                      onClick={() => { setSelectedEdge(ctx); setError(null); }}
                     >
                       <div style={styles.contextPath}>
                         {fullChain.length > 0 && (
@@ -340,7 +347,7 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
                           </span>
                         )}
                         <span style={styles.contextChild}>
-                          {selectedConcept?.name}
+                          {selectedConcept.name}
                           {attrName && (
                             <span style={{ fontSize: '12px', color: '#888', marginLeft: '5px', fontWeight: '400' }}>
                               ({attrName})
@@ -354,11 +361,28 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
                   );
                 })}
               </div>
-            </>
-          )}
-          {creating && <div style={styles.hint}>Creating annotation…</div>}
+            )}
+          </div>
+        )}
+
+        {/* Action buttons — always visible */}
+        <div style={styles.actionButtons}>
+          <button
+            onClick={handleConfirmCreate}
+            disabled={!canCreate}
+            style={{
+              ...styles.createButton,
+              opacity: canCreate ? 1 : 0.4,
+              cursor: canCreate ? 'pointer' : 'default',
+            }}
+          >
+            {creating ? 'Creating...' : 'Create Annotation'}
+          </button>
+          <button onClick={onClose} style={styles.cancelButton}>
+            Cancel
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -385,14 +409,6 @@ const styles = {
     fontSize: '14px',
     fontWeight: '600',
     color: '#333',
-  },
-  backBtn: {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '16px',
-    color: '#555',
-    padding: '0 4px',
   },
   closeBtn: {
     background: 'none',
@@ -457,6 +473,31 @@ const styles = {
     fontStyle: 'normal',
     padding: '4px 0',
   },
+  selectedConceptRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 10px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    backgroundColor: '#fafaf8',
+  },
+  selectedConceptName: {
+    flex: 1,
+    fontSize: '14px',
+    color: '#333',
+    fontWeight: '600',
+  },
+  changBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '12px',
+    color: '#888',
+    padding: '0',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    textDecoration: 'underline',
+  },
   resultsList: {
     maxHeight: '180px',
     overflowY: 'auto',
@@ -483,18 +524,8 @@ const styles = {
     borderRadius: '8px',
     padding: '1px 6px',
   },
-  contextSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  contextHint: {
-    fontSize: '13px',
-    color: '#666',
-    marginBottom: '4px',
-  },
   contextList: {
-    maxHeight: '300px',
+    maxHeight: '200px',
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
@@ -509,6 +540,10 @@ const styles = {
     textAlign: 'left',
     fontFamily: '"EB Garamond", Georgia, serif',
     transition: 'border-color 0.15s',
+  },
+  contextItemSelected: {
+    border: '1px solid #333',
+    backgroundColor: '#f0ede8',
   },
   contextPath: {
     fontSize: '13px',
@@ -582,6 +617,32 @@ const styles = {
   occurrenceMatchText: {
     color: '#333',
     fontWeight: '600',
+  },
+  actionButtons: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+    marginTop: '4px',
+  },
+  createButton: {
+    padding: '8px 18px',
+    backgroundColor: '#333',
+    color: 'white',
+    border: '1px solid #333',
+    borderRadius: '3px',
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    padding: '8px 14px',
+    backgroundColor: 'transparent',
+    color: '#666',
+    border: '1px solid #ccc',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
   },
 };
 

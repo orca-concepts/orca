@@ -176,19 +176,6 @@ const FlipView = ({
     return 0;
   });
 
-  // Cycle through sort modes
-  const cycleSortMode = () => {
-    if (sortMode === 'links') setSortMode('similarity_desc');
-    else if (sortMode === 'similarity_desc') setSortMode('similarity_asc');
-    else setSortMode('links');
-  };
-
-  const getSortLabel = () => {
-    if (sortMode === 'links') return 'Sort: Links';
-    if (sortMode === 'similarity_desc') return 'Sort: Similarity ↓';
-    return 'Sort: Similarity ↑';
-  };
-
   /**
    * Compute a map of edgeId -> Set<conceptId> indicating which concept IDs
    * should be highlighted on each card, based on the current hover state.
@@ -290,12 +277,26 @@ const FlipView = ({
           <div style={styles.descriptionRow}>
             <p style={{ margin: 0 }}>
               {filteredParents.length} parent context{filteredParents.length !== 1 ? 's' : ''}
-              {isContextual && ' — sorted by ' + (sortMode === 'links' ? 'link votes' : 'similarity')}
             </p>
-            {isContextual && filteredParents.length > 1 && (
-              <button onClick={cycleSortMode} style={styles.sortButton}>
-                {getSortLabel()}
-              </button>
+            {isContextual && filteredParents.length > 0 && (
+              <div style={styles.sortToggleRow}>
+                {[
+                  { key: 'links', label: 'Links' },
+                  { key: 'similarity_desc', label: 'Similarity \u2193' },
+                  { key: 'similarity_asc', label: 'Similarity \u2191' },
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setSortMode(key)}
+                    style={{
+                      ...styles.sortToggleButton,
+                      ...(sortMode === key ? styles.sortToggleButtonActive : {}),
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -419,16 +420,27 @@ const styles = {
     justifyContent: 'space-between',
     gap: '12px',
   },
-  sortButton: {
-    padding: '4px 12px',
-    backgroundColor: 'transparent',
+  sortToggleRow: {
+    display: 'flex',
+    gap: '0px',
     border: '1px solid #bbb',
-    borderRadius: '2px',
+    borderRadius: '3px',
+    overflow: 'hidden',
+  },
+  sortToggleButton: {
+    padding: '4px 12px',
+    backgroundColor: 'white',
+    border: 'none',
+    borderRight: '1px solid #bbb',
     cursor: 'pointer',
     fontSize: '13px',
     fontFamily: '"EB Garamond", "Garamond", "Georgia", serif',
-    color: '#555',
+    color: '#888',
     whiteSpace: 'nowrap',
+  },
+  sortToggleButtonActive: {
+    backgroundColor: '#333',
+    color: 'white',
   },
   parentsGrid: {
     display: 'grid',
