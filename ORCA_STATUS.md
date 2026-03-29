@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** March 29, 2026 (Post-Phase 36 — Phase 37/38 bug & enhancement plan added; pre-launch QA & legal prep; codebase published under AGPL v3)
+**Last Updated:** March 29, 2026 (Phase 37 complete — pre-launch bug fixes; Phase 38 post-launch enhancements planned; codebase published under AGPL v3)
 
 ---
 
@@ -2099,15 +2099,15 @@ Phase 6: Complete. All four sub-phases implemented:
 
 ---
 
-### Phase 37: Pre-Launch Bug Fixes — ⏳ PLANNED
+### Phase 37: Pre-Launch Bug Fixes — ✅ COMPLETE
 
 **Goal:** Fix all bugs identified in the March 2026 QA pass that affect core functionality, user experience, or data integrity before public launch. Organized into six batches (37a–37f) grouped by file-touch area for efficient Claude Code sessions.
 
-**Approach:** Work through batches sequentially. Git commit after each batch. Run ORCA_TESTS.md Level 1 after each batch. Full Level 2 regression after all batches complete.
+**Completed:** All six batches implemented, tested (Level 1 after each batch), and committed.
 
 ---
 
-#### Phase 37a: Backend Controller Fixes — ⏳ PLANNED
+#### Phase 37a: Backend Controller Fixes — ✅ COMPLETE
 
 Five backend bugs across `conceptsController.js`, `votesController.js`, and `corpusController.js`.
 
@@ -2146,7 +2146,7 @@ Five backend bugs across `conceptsController.js`, `votesController.js`, and `cor
 
 ---
 
-#### Phase 37b: Auth & Registration — ⏳ PLANNED
+#### Phase 37b: Auth & Registration — ✅ COMPLETE
 
 One bug in the phone number registration flow.
 
@@ -2161,7 +2161,7 @@ One bug in the phone number registration flow.
 
 ---
 
-#### Phase 37c: Corpus & Document Frontend UX — ⏳ PLANNED
+#### Phase 37c: Corpus & Document Frontend UX — ✅ COMPLETE
 
 Five bugs in the corpus/document upload and annotation area.
 
@@ -2197,7 +2197,7 @@ Five bugs in the corpus/document upload and annotation area.
 
 ---
 
-#### Phase 37d: Quick Text & Style Fixes — ⏳ PLANNED
+#### Phase 37d: Quick Text & Style Fixes — ✅ COMPLETE
 
 Five small fixes across several files. All are cosmetic/text changes.
 
@@ -2210,6 +2210,7 @@ Five small fixes across several files. All are cosmetic/text changes.
 - **Symptom:** When a user votes for a swap, the visual indicator on the swap button or card is not shaded/styled the same way that save votes are (dark filled background).
 - **Fix:** Apply the same active/voted styling pattern used for save votes (▲ dark filled background) to swap vote indicators. Check both `ConceptGrid.jsx` (⇄ button on child cards) and `SwapModal.jsx` (vote buttons in the modal).
 - **Files:** `SwapModal.jsx`, `ConceptGrid.jsx`
+- **Status:** Partially complete. `SwapModal.jsx` vote buttons now correctly use active styling (`voteButtonActive`). However, the `ConceptGrid.jsx` ⇄ button cannot show per-user swap status because the backend's `getConceptWithChildren` does not return a `user_swapped` field in the children response (it returns `swap_count` but not whether the current user has swapped). The `swapButtonActive` style is defined and ready in ConceptGrid. **Deferred to Phase 38c** — when the swap vote system is overhauled, the backend will add `user_swapped` (via `BOOL_OR(rv.user_id = $userId)` subquery, same pattern as `user_voted` for saves).
 
 **Fix 3 — Unicode escape 'u/2026' in diff modal search bar:**
 - **Symptom:** The compare children diff view shows `u/2026` (a Unicode escape for the ellipsis character `…`) after the placeholder text in the search bar.
@@ -2230,7 +2231,7 @@ Five small fixes across several files. All are cosmetic/text changes.
 
 ---
 
-#### Phase 37e: Root Page & Tab Groups — ⏳ PLANNED
+#### Phase 37e: Root Page & Tab Groups — ✅ COMPLETE
 
 Two bugs related to root-level concept operations and tab group management.
 
@@ -2250,7 +2251,7 @@ Two bugs related to root-level concept operations and tab group management.
 
 ---
 
-#### Phase 37f: Flip View & Annotation Creation — ⏳ PLANNED
+#### Phase 37f: Flip View & Annotation Creation — ✅ COMPLETE
 
 Two bugs related to Flip View display and the annotation creation flow.
 
@@ -2364,6 +2365,9 @@ Two bugs related to Flip View display and the annotation creation flow.
 - Remove the sibling validation check from `addSwapVote`. The `replacement_edge_id` can be any valid edge, not just a sibling.
 - Update the `getSwapSuggestions` query to return all existing swap suggestions for the target edge, sorted by vote count descending (no longer filtered to siblings only).
 - The `replace_votes` table schema does not need to change — `edge_id` and `replacement_edge_id` are already generic FK references to `edges(id)`.
+
+**Backend changes (`conceptsController.js`) — deferred from Phase 37d:**
+- Add `user_swapped` field to the children response in `getConceptWithChildren`. Use a `BOOL_OR(rv.user_id = $userId)` subquery on `replace_votes`, matching the existing `user_voted` pattern for save votes. For guests, pass `-1` as user ID (same as save votes). This enables the frontend `ConceptGrid.jsx` ⇄ button to show per-user active styling (the `swapButtonActive` style is already defined and ready from Phase 37d).
 
 **Frontend changes (`SwapModal.jsx`):**
 - **Existing suggestions section:** Show all concepts that have received swap votes for this edge, sorted by vote count (highest first). Each card shows: concept name, attribute badge, parent context path, vote count, and a "Vote" / "Voted" toggle button.
