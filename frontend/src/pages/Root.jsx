@@ -56,7 +56,7 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
   useEffect(() => {
     loadRootConcepts();
     loadHiddenCount();
-  }, [sortMode]);
+  }, [sortMode, user]);
 
   const loadHiddenCount = async () => {
     if (!user) { setHiddenCount(0); return; }

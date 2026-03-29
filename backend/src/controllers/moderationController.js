@@ -121,11 +121,16 @@ const moderationController = {
         : [];
 
       // Query hidden edges for this parent context
-      // Always use consistent parameter indices: $1 = parentId (or ignored), $2 = graphPath, $3 = userId
       const isRootParent = parentId === 'null' || parentId === '0';
 
+      // Root and non-root use different parameter sets to avoid unused $1 type error
+      const parentClause = isRootParent ? 'e.parent_id IS NULL' : 'e.parent_id = $3';
+      const params = isRootParent
+        ? [childGraphPath, req.user.userId]
+        : [childGraphPath, req.user.userId, parseInt(parentId)];
+
       const result = await pool.query(
-        `SELECT 
+        `SELECT
           e.id AS edge_id,
           e.child_id,
           c.name AS concept_name,
@@ -136,17 +141,17 @@ const moderationController = {
           (SELECT COUNT(*) FROM concept_flags cf WHERE cf.edge_id = e.id) AS flag_count,
           (SELECT COUNT(*) FROM concept_flag_votes cfv WHERE cfv.edge_id = e.id AND cfv.vote_type = 'hide') AS hide_vote_count,
           (SELECT COUNT(*) FROM concept_flag_votes cfv WHERE cfv.edge_id = e.id AND cfv.vote_type = 'show') AS show_vote_count,
-          (SELECT cfv.vote_type FROM concept_flag_votes cfv WHERE cfv.edge_id = e.id AND cfv.user_id = $3) AS user_vote_type,
-          (SELECT COUNT(*) > 0 FROM concept_flags cf WHERE cf.edge_id = e.id AND cf.user_id = $3) AS user_flagged
+          (SELECT cfv.vote_type FROM concept_flag_votes cfv WHERE cfv.edge_id = e.id AND cfv.user_id = $2) AS user_vote_type,
+          (SELECT COUNT(*) > 0 FROM concept_flags cf WHERE cf.edge_id = e.id AND cf.user_id = $2) AS user_flagged
         FROM edges e
         JOIN concepts c ON e.child_id = c.id
         JOIN attributes a ON e.attribute_id = a.id
         LEFT JOIN users creator ON e.created_by = creator.id
-        WHERE ${isRootParent ? 'e.parent_id IS NULL' : 'e.parent_id = $1'}
-          AND e.graph_path = $2
+        WHERE ${parentClause}
+          AND e.graph_path = $1
           AND e.is_hidden = true
         ORDER BY flag_count DESC, e.created_at DESC`,
-        [isRootParent ? null : parseInt(parentId), childGraphPath, req.user.userId]
+        params
       );
 
       res.json({

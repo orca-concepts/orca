@@ -1421,10 +1421,7 @@ const votesController = {
         'UPDATE graph_tabs SET group_id = NULL WHERE group_id = $1 AND user_id = $2',
         [groupId, userId]
       );
-      await pool.query(
-        'UPDATE corpus_subscriptions SET group_id = NULL WHERE group_id = $1 AND user_id = $2',
-        [groupId, userId]
-      );
+      // Note: corpus_subscriptions.group_id was dropped in Phase 19d — no update needed
 
       const result = await pool.query(
         'DELETE FROM tab_groups WHERE id = $1 AND user_id = $2 RETURNING id',
