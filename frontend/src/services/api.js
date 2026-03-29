@@ -270,6 +270,13 @@ export const corpusAPI = {
   // Check for duplicate documents before uploading (Phase 7b)
   checkDuplicates: (body) =>
     api.post('/corpuses/check-duplicates', { body }),
+  checkDuplicatesFile: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/corpuses/check-duplicates', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 
   // Search documents by title (Phase 7e — for "Add existing document" flow)
   searchDocuments: (query, excludeCorpusId) =>

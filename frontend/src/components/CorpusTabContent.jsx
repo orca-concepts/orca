@@ -706,6 +706,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       setVersionFile(null);
       return;
     }
+    if (file.size > 10 * 1024 * 1024) {
+      setVersionFileError('File is too large. Maximum upload size is 10 MB.');
+      setVersionFile(null);
+      return;
+    }
     setVersionFileError('');
     setVersionFile(file);
   };
@@ -722,7 +727,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       handleOpenDocument(newDoc.id);
       await loadCorpus();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to create version');
+      setVersionFileError(err.response?.data?.error || 'Failed to create version');
     } finally {
       setCreatingVersion(false);
     }

@@ -381,7 +381,15 @@ const deleteCorpus = async (req, res) => {
 // similarity threshold, sorted by similarity descending.
 const checkDuplicates = async (req, res) => {
   try {
-    const { body } = req.body;
+    let body;
+
+    // Accept either a file upload (for PDF/DOCX) or JSON body text
+    if (req.file) {
+      const extracted = await extractTextFromFile(req.file.buffer, req.file.originalname);
+      body = extracted.body;
+    } else {
+      body = req.body.body;
+    }
 
     if (!body || !body.trim()) {
       return res.status(400).json({ error: 'Document body is required' });

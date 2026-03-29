@@ -622,6 +622,10 @@ const AppShell = () => {
   // ─── Corpus Tab Actions (Phase 7c) ──────────────────────
 
   const handleSubscribeToCorpus = useCallback(async (corpusId, corpusName, documentId, annotationId) => {
+    if (isGuest) {
+      handleRequestLogin();
+      return;
+    }
     try {
       await corpusAPI.subscribe(corpusId);
       const newTab = {
@@ -646,11 +650,13 @@ const AppShell = () => {
         if (annotationId) setPendingAnnotationId(annotationId);
         setActiveTab({ type: 'corpus', id: corpusId });
         await refreshSidebarItems();
+      } else if (err.response?.status === 401) {
+        handleRequestLogin();
       } else {
         alert(err.response?.data?.error || 'Failed to subscribe');
       }
     }
-  }, []);
+  }, [isGuest, handleRequestLogin]);
 
 
   const handleUnsubscribeFromCorpus = useCallback(async (corpusId) => {

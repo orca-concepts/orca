@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { corpusAPI } from '../services/api';
 
 const styles = {
   uploadSection: {
@@ -305,6 +306,52 @@ const styles = {
     color: '#333',
     lineHeight: '1.4',
   },
+  duplicateCheckNotice: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#888',
+    padding: '4px 0',
+  },
+  duplicateWarning: {
+    border: '1px solid #e0d0a0',
+    borderRadius: '4px',
+    backgroundColor: '#fdf8e8',
+    padding: '10px 12px',
+  },
+  duplicateWarningHeader: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontWeight: '600',
+    color: '#8a7020',
+    marginBottom: '6px',
+  },
+  duplicateMatch: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    gap: '6px',
+    padding: '3px 0',
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#333',
+  },
+  duplicateMatchTitle: {
+    fontWeight: '600',
+  },
+  duplicateMatchScore: {
+    color: '#8a7020',
+    fontSize: '12px',
+  },
+  duplicateMatchCorpuses: {
+    color: '#888',
+    fontSize: '12px',
+  },
+  duplicateWarningNote: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
+    marginTop: '6px',
+  },
 };
 
 function CorpusUploadForm({
@@ -328,6 +375,8 @@ function CorpusUploadForm({
   const [uploadTags, setUploadTags] = useState([]);
   const [tagInput, setTagInput] = useState('');
   const [copyrightConfirmed, setCopyrightConfirmed] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState([]);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [addSearchQuery, setAddSearchQuery] = useState('');
   const [addSearchResults, setAddSearchResults] = useState([]);
   const [addSearching, setAddSearching] = useState(false);
@@ -343,16 +392,40 @@ function CorpusUploadForm({
     return validExtensions.includes(ext);
   };
 
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
   const handleFileSelect = (file) => {
     if (!validateFileExtension(file)) {
       setUploadFileError('Unsupported file type. Please upload .txt, .md, .pdf, or .docx files.');
       setUploadFile(null);
       return;
     }
+    if (file.size > MAX_FILE_SIZE) {
+      setUploadFileError('File is too large. Maximum upload size is 10 MB.');
+      setUploadFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     setUploadFileError('');
     setUploadFile(file);
+    setDuplicateMatches([]);
     const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.'));
     setUploadTitle(nameWithoutExt);
+
+    // Run duplicate check — send file to backend for text extraction and similarity check
+    setCheckingDuplicates(true);
+    corpusAPI.checkDuplicatesFile(file)
+      .then(res => {
+        const matches = res.data?.matches || [];
+        setDuplicateMatches(matches);
+      })
+      .catch(() => {
+        // Duplicate check is best-effort; don't block upload
+        setDuplicateMatches([]);
+      })
+      .finally(() => {
+        setCheckingDuplicates(false);
+      });
   };
 
   const doFileUpload = async () => {
@@ -365,10 +438,13 @@ function CorpusUploadForm({
       setTagInput('');
       setUploadFileError('');
       setCopyrightConfirmed(false);
+      setDuplicateMatches([]);
       setShowUpload(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       onComplete();
     } catch (err) {
-      // error handling left to parent
+      const msg = err.response?.data?.error || 'Upload failed. Please try again.';
+      setUploadFileError(msg);
     } finally {
       setUploading(false);
     }
@@ -425,7 +501,21 @@ function CorpusUploadForm({
       <div style={styles.uploadButtonRow}>
         <button
           style={styles.uploadToggle}
-          onClick={() => { setShowUpload(!showUpload); setShowAddExisting(false); }}
+          onClick={() => {
+            if (showUpload) {
+              // Cancelling: reset all upload state
+              setUploadFile(null);
+              setUploadTitle('');
+              setUploadTags([]);
+              setTagInput('');
+              setUploadFileError('');
+              setCopyrightConfirmed(false);
+              setDuplicateMatches([]);
+              if (fileInputRef.current) fileInputRef.current.value = '';
+            }
+            setShowUpload(!showUpload);
+            setShowAddExisting(false);
+          }}
         >
           {showUpload ? 'Cancel upload' : '+ Upload Document'}
         </button>
@@ -483,6 +573,28 @@ function CorpusUploadForm({
           />
           {uploadFileError && (
             <div style={styles.fileError}>{uploadFileError}</div>
+          )}
+          {checkingDuplicates && (
+            <div style={styles.duplicateCheckNotice}>Checking for similar documents...</div>
+          )}
+          {duplicateMatches.length > 0 && (
+            <div style={styles.duplicateWarning}>
+              <div style={styles.duplicateWarningHeader}>Similar documents found:</div>
+              {duplicateMatches.map((match, idx) => (
+                <div key={idx} style={styles.duplicateMatch}>
+                  <span style={styles.duplicateMatchTitle}>{match.title}</span>
+                  <span style={styles.duplicateMatchScore}>
+                    {Math.round((match.similarityScore || match.similarity_score || 0) * 100)}% similar
+                  </span>
+                  {match.corpuses && match.corpuses.length > 0 && (
+                    <span style={styles.duplicateMatchCorpuses}>
+                      in {match.corpuses.map(c => c.name || c).join(', ')}
+                    </span>
+                  )}
+                </div>
+              ))}
+              <div style={styles.duplicateWarningNote}>You can still upload if this is a different document.</div>
+            </div>
           )}
           <input
             type="text"

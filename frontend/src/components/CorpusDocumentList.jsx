@@ -20,6 +20,7 @@ function CorpusDocumentList({
   const [allDocSearch, setAllDocSearch] = useState('');
   const [tagFilter, setTagFilter] = useState(null);
   const [docTagMenuId, setDocTagMenuId] = useState(null);
+  const [docTagMenuSection, setDocTagMenuSection] = useState(null); // 'my' or 'all'
   const [docTagInput, setDocTagInput] = useState('');
   const [deleteDocTarget, setDeleteDocTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -101,8 +102,8 @@ function CorpusDocumentList({
     return bFav - aFav;
   });
 
-  const renderTagMenu = (doc) => {
-    if (docTagMenuId !== doc.id) return null;
+  const renderTagMenu = (doc, section) => {
+    if (docTagMenuId !== doc.id || docTagMenuSection !== section) return null;
     const existingTagIds = (doc.tags || []).map(t => t.id);
     const suggestions = getTagSuggestions(docTagInput, existingTagIds);
     return (
@@ -125,6 +126,7 @@ function CorpusDocumentList({
                 e.stopPropagation();
                 await onAssignTag(doc.id, tag);
                 setDocTagMenuId(null);
+                setDocTagMenuSection(null);
                 setDocTagInput('');
               }}
               onMouseOver={e => { e.currentTarget.style.backgroundColor = '#f5f5f5'; }}
@@ -202,11 +204,13 @@ function CorpusDocumentList({
               title={hasTags ? 'Change tag' : 'Add tag'}
               onClick={(e) => {
                 e.stopPropagation();
-                if (docTagMenuId === doc.id) {
+                if (docTagMenuId === doc.id && docTagMenuSection === (isMyDocsSection ? 'my' : 'all')) {
                   setDocTagMenuId(null);
+                  setDocTagMenuSection(null);
                   setDocTagInput('');
                 } else {
                   setDocTagMenuId(doc.id);
+                  setDocTagMenuSection(isMyDocsSection ? 'my' : 'all');
                   setDocTagInput('');
                 }
               }}
@@ -244,7 +248,7 @@ function CorpusDocumentList({
             </button>
           )}
         </div>
-        {renderTagMenu(doc)}
+        {renderTagMenu(doc, isMyDocsSection ? 'my' : 'all')}
       </div>
     );
   };

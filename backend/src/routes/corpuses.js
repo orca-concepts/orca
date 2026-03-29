@@ -19,7 +19,8 @@ router.get('/mine', authenticateToken, corpusController.listMyCorpuses);
 router.post('/create', authenticateToken, corpusController.createCorpus);
 
 // Check for duplicate documents before uploading (Phase 7b — auth required)
-router.post('/check-duplicates', authenticateToken, corpusController.checkDuplicates);
+// Accepts either JSON { body } or multipart file upload (for PDF/DOCX server-side text extraction)
+router.post('/check-duplicates', authenticateToken, upload.single('file'), corpusController.checkDuplicates);
 
 // Search documents by title (Phase 7e — for "Add existing document" UI, auth required)
 router.get('/documents/search', authenticateToken, corpusController.searchDocuments);
