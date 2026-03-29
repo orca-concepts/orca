@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** March 28, 2026 (Post-Phase 36 — Pre-launch QA & legal prep; codebase published under AGPL v3)
+**Last Updated:** March 29, 2026 (Post-Phase 36 — Phase 37/38 bug & enhancement plan added; pre-launch QA & legal prep; codebase published under AGPL v3)
 
 ---
 
@@ -6648,6 +6648,505 @@ Three-step flow rendered as a fixed-position overlay (z-index 10000, semi-transp
 - `message1.png` through `message4.png` — Messaging feature screenshots
 
 **Backend:** `pagesController.js` + `routes/pages.js`. Valid slugs hardcoded: `['using-orca', 'constitution', 'donate']`. Database tables: `page_comments`, `page_comment_votes` (see Database Schema section).
+
+---
+
+### Phase 37: Pre-Launch Bug Fixes — ⏳ PLANNED
+
+**Goal:** Fix all bugs identified in the March 2026 QA pass that affect core functionality, user experience, or data integrity before public launch. Organized into six batches (37a–37f) grouped by file-touch area for efficient Claude Code sessions.
+
+**Approach:** Work through batches sequentially. Git commit after each batch. Run ORCA_TESTS.md Level 1 after each batch. Full Level 2 regression after all batches complete.
+
+---
+
+#### Phase 37a: Backend Controller Fixes — ⏳ PLANNED
+
+Five backend bugs across `conceptsController.js`, `votesController.js`, and `corpusController.js`.
+
+**Bug 1 — Logged-out users can't see swap votes:**
+- **Symptom:** Guest users see no swap vote counts on concept children.
+- **Root cause hypothesis:** The swap count subquery in `getConceptWithChildren` may be missing from the `optionalAuth` code path, or the query may filter by authenticated user ID in a way that returns 0 for guests.
+- **Fix:** Ensure the `swap_count` subquery (via `replace_votes`) runs identically for authenticated and guest users. The swap count is a public aggregate — no user-specific filtering needed.
+- **Files:** `conceptsController.js`
+
+**Bug 2 — Can't add root concept if name exists anywhere in database:**
+- **Symptom:** Creating a root concept is rejected if the concept name already exists as a non-root concept anywhere, instead of only checking for existing root edges with that name.
+- **Root cause hypothesis:** The backend's duplicate check in `createRootConcept` looks at the `concepts` table globally (checking if the name exists at all) instead of checking specifically for existing root edges with that concept ID and selected attribute.
+- **Fix:** The check should allow reuse of existing concept names as roots. The constraint should be: "does a root edge already exist for this concept ID with this attribute?" — not "does this concept name exist anywhere." This matches how child concept creation works (reuses existing concept rows).
+- **Files:** `conceptsController.js`
+
+**Bug 3 — Corpus members can add document versions (should be authors only):**
+- **Symptom:** Users who are corpus allowed members (but not document authors/coauthors) can upload new versions of a document. Only the original uploader and coauthors should be able to.
+- **Root cause hypothesis:** The `createVersion` endpoint checks corpus membership (`corpus_allowed_users`) instead of (or in addition to) author status (`documents.uploaded_by` + `document_authors`).
+- **Fix:** Change the permission check in `createVersion` to verify the requesting user is a document author (uploader or coauthor via root document lookup), not just a corpus member.
+- **Files:** `corpusController.js`
+
+**Bug 4 — Web links show across all contexts instead of being edge-specific:**
+- **Symptom:** A web link added to one parent context for a concept appears in all contexts for that concept. Web links should be edge-specific (tied to a specific parent context), only compiling across contexts in the Web Links tab's cross-context view.
+- **Root cause hypothesis:** The query fetching web links for the current context may be using `child_id` (concept-level) instead of the specific `edge_id` for the current context.
+- **Fix:** Ensure the Annotations tab's web links query filters by the current `edge_id`, not by `child_id`. The Web Links tab (cross-context compilation) can continue using `child_id` — that's its purpose.
+- **Files:** `votesController.js`, `ConceptAnnotationPanel.jsx`
+- **Related architecture decision:** #58 ("Web Links Are Context-Specific (Edge-Tied)")
+
+**Bug 5 — Web link creator cannot remove their own link:**
+- **Symptom:** The delete/remove button for a web link doesn't work or doesn't appear for the user who added it.
+- **Root cause hypothesis:** Frontend permission check may be comparing user IDs incorrectly (e.g., `user.userId` vs `user.id` — the known frontend auth context pattern from Architecture Decision #100), or the backend `removeWebLink` endpoint may have a validation issue.
+- **Fix:** Verify the frontend `added_by` comparison uses `user.id` (not `user.userId`), and verify the backend `removeWebLink` endpoint correctly checks `added_by = req.user.userId`.
+- **Files:** `votesController.js`, `ConceptAnnotationPanel.jsx`
+
+**Suggested git commit:** `fix: 37a — swap votes guest view, root concept creation, version permissions, web links context, web link deletion`
+
+---
+
+#### Phase 37b: Auth & Registration — ⏳ PLANNED
+
+One bug in the phone number registration flow.
+
+**Bug — Phone "already exists" error shows too late:**
+- **Symptom:** During registration, the user can send the OTP code before being told the phone number is already registered. The check should happen as soon as the phone number is entered, before the code is sent.
+- **Root cause hypothesis:** The phone uniqueness check currently lives in `verifyRegister` (after code verification), not in `sendCode` (before sending the OTP).
+- **Fix:** Add a phone uniqueness check to the `sendCode` endpoint. When `intent=register` (or a new parameter indicating registration), look up the phone number via `phone_lookup` (HMAC-SHA256). If a user already exists with that `phone_lookup`, return an error immediately — before calling Twilio. The frontend should display this error on the phone number input step. For `intent=login`, the existing flow is fine (user must exist).
+- **Implementation detail:** The `sendCode` endpoint currently doesn't distinguish between login and register intents. Add an optional `intent` query parameter or body field (`'login'` or `'register'`). For `register` intent, check uniqueness first. For `login` intent, optionally check that the user exists (nice-to-have: "no account with this phone number" error before sending code).
+- **Files:** `authController.js`, `routes/auth.js`, `LoginModal.jsx`, `AuthContext.jsx`, `api.js`
+
+**Suggested git commit:** `fix: 37b — check phone uniqueness before sending OTP code during registration`
+
+---
+
+#### Phase 37c: Corpus & Document Frontend UX — ⏳ PLANNED
+
+Five bugs in the corpus/document upload and annotation area.
+
+**Bug 1 — Guest error opening documents from graphs:**
+- **Symptom:** Logged-out users clicking a document link from `ConceptAnnotationPanel` get a JavaScript error or failed API call instead of the login modal.
+- **Fix:** Catch 401 errors from document-related API calls in the annotation panel and trigger the login modal (via `AppShell`'s `showLoginModal` state or the existing login modal pattern). The login modal should appear with a message like "Log in to view documents."
+- **Files:** `ConceptAnnotationPanel.jsx`, `AppShell.jsx`
+
+**Bug 2 — Silent failure for docs over 10MB:**
+- **Symptom:** When a file exceeds 10MB, the upload fails silently — no error message shown to the user.
+- **Root cause hypothesis:** The multer `LIMIT_FILE_SIZE` error middleware may not be surfacing the error response to the frontend, or the frontend's error handler doesn't display the 413 response.
+- **Fix:** Verify the backend error middleware catches `MulterError` with code `LIMIT_FILE_SIZE` and returns a clear 413 JSON response. Verify the frontend upload handlers (`doFileUpload`, `doVersionUpload`) display `err.response?.data?.error` for 413 responses. Consider also adding a client-side file size check before upload for instant feedback.
+- **Files:** `corpusController.js` (error middleware), `CorpusUploadForm.jsx` or `CorpusTabContent.jsx`
+
+**Bug 3 — Tag search opens in both My Docs and All Docs:**
+- **Symptom:** After clicking "Add tag," the search bar opens in both the My Documents and All Documents sections simultaneously, and typing appears in both. Only one search bar should be active.
+- **Root cause hypothesis:** The tag search state is shared or duplicated between the two document list sections, likely because both sections reference the same state variable or the tag UI is rendered in both places.
+- **Fix:** Ensure the tag search UI is scoped to the specific document being tagged. The search bar should only appear in the section where the user clicked "Add tag," not in both sections.
+- **Files:** `CorpusTabContent.jsx` or `CorpusDocumentList.jsx`
+
+**Bug 4 — Can't remove cancelled upload from tray:**
+- **Symptom:** If the user cancels a document upload mid-process, the file remains in the upload UI tray. The only way to clear it is to refresh the page.
+- **Fix:** Reset all upload-related state (`uploadFile`, `uploadDragOver`, `uploadFileError`, etc.) when the user cancels an upload. The cancel action should return the upload UI to its initial empty state.
+- **Files:** `CorpusUploadForm.jsx` or `CorpusTabContent.jsx`
+
+**Bug 5 — Duplicate document similarity percentage missing:**
+- **Symptom:** The similarity percentage that used to appear during upload (warning about potential duplicate documents) is no longer showing. This feature existed before Phase 22a (file upload rewrite) and was likely lost during the rewrite.
+- **Root cause hypothesis:** The `checkDuplicates` endpoint still exists in `corpusController.js`, but the frontend upload flow no longer calls it after the Phase 22a rewrite removed the old `handleCheckAndUpload` function.
+- **Fix:** Reconnect the duplicate check to the file upload flow. After file selection (but before upload), call the `checkDuplicates` endpoint with the extracted text. If matches are found, display the similarity percentage and document title(s) as a warning, with an option to proceed or cancel. The backend `checkDuplicates` uses `pg_trgm similarity()` on the first 5,000 characters with a 0.3 threshold (Architecture Decision #69).
+- **Files:** `corpusController.js` (verify endpoint still works), `CorpusUploadForm.jsx` or `CorpusTabContent.jsx`
+
+**Suggested git commit:** `fix: 37c — guest document access, upload size error, tag search scope, cancelled upload reset, duplicate check reconnect`
+
+---
+
+#### Phase 37d: Quick Text & Style Fixes — ⏳ PLANNED
+
+Five small fixes across several files. All are cosmetic/text changes.
+
+**Fix 1 — Long concept names squish sorting toggles:**
+- **Symptom:** In the concept view, very long concept names push the sort toggles (Graph Votes | Newest | Annotations | Top Annotation) off-screen or make them invisible.
+- **Fix:** Add `overflow: hidden`, `textOverflow: 'ellipsis'`, `whiteSpace: 'nowrap'` to the concept name container, or use `flexShrink: 0` on the sort toggle row to prevent it from being compressed. The sort toggles should always be visible.
+- **Files:** `Concept.jsx`
+
+**Fix 2 — Swap vote shading doesn't match save vote shading:**
+- **Symptom:** When a user votes for a swap, the visual indicator on the swap button or card is not shaded/styled the same way that save votes are (dark filled background).
+- **Fix:** Apply the same active/voted styling pattern used for save votes (▲ dark filled background) to swap vote indicators. Check both `ConceptGrid.jsx` (⇄ button on child cards) and `SwapModal.jsx` (vote buttons in the modal).
+- **Files:** `SwapModal.jsx`, `ConceptGrid.jsx`
+
+**Fix 3 — Unicode escape 'u/2026' in diff modal search bar:**
+- **Symptom:** The compare children diff view shows `u/2026` (a Unicode escape for the ellipsis character `…`) after the placeholder text in the search bar.
+- **Fix:** Replace the escaped Unicode with a literal ellipsis character `…` in the placeholder string, or remove it entirely.
+- **Files:** `DiffModal.jsx`
+
+**Fix 4 — Search results show redundant "child: value" label:**
+- **Symptom:** In search results, concepts that are already children of the current concept show "child: value" as a badge. Since all graphs are single-attribute (Phase 20a), the attribute name is redundant. Should just say "child."
+- **Fix:** Change the badge text from `child: ${attributeName}` to just `child` in the search result rendering.
+- **Files:** `SearchField.jsx`
+
+**Fix 5 — Unsubscribe warning says "removes the corpus tab" (too vague):**
+- **Symptom:** The unsubscribe confirmation dialog says "removes the corpus tab" which sounds like it might delete the corpus or its data. Should clarify it only removes the tab from the user's sidebar.
+- **Fix:** Change the warning text to "removes the corpus tab from your sidebar" or similar clarification.
+- **Files:** `CorpusTabContent.jsx` or `CorpusDetailView.jsx` (wherever the unsubscribe confirmation lives)
+
+**Suggested git commit:** `fix: 37d — long name layout, swap vote shading, diff modal unicode, search label, unsubscribe text`
+
+---
+
+#### Phase 37e: Root Page & Tab Groups — ⏳ PLANNED
+
+Two bugs related to root-level concept operations and tab group management.
+
+**Bug 1 — Hiding a concept on the root page doesn't work:**
+- **Symptom:** Flagging a root-level concept to trigger hiding (10+ flags → `is_hidden = true`) does not work. The concept remains visible on the root page after exceeding the flag threshold.
+- **Root cause hypothesis:** Root edges have `parent_id = NULL` and `graph_path = '{}'`. The flagging system in `moderationController.js` may not correctly identify or process root edges. The `getRootConcepts` query's `is_hidden` filter may also not apply to root edges correctly.
+- **Fix:** Trace the flag → hide pipeline for root edges specifically. Ensure: (1) the `flagEdge` endpoint can accept root edge IDs, (2) the `is_hidden` update works on root edges, (3) the `getRootConcepts` query filters `WHERE e.is_hidden = false` on the root edge join. If root edges are excluded from flagging entirely, that's the core issue.
+- **Files:** `moderationController.js`, `conceptsController.js` (`getRootConcepts`), `Root.jsx`
+
+**Bug 2 — Deleting a tab group gives internal server error:**
+- **Symptom:** Server returns 500 when trying to delete a tab group.
+- **Root cause hypothesis:** The delete endpoint may have a missing column reference, an FK constraint issue, or a bug in the SQL (e.g., trying to update `group_id` on both `graph_tabs` and `saved_tabs` but one of the table references is stale or the query fails).
+- **Fix:** Check the `deleteTabGroup` endpoint's SQL. Per the schema, deleting a group should set `group_id = NULL` on member tabs (via `ON DELETE SET NULL` on the FK). The backend endpoint may be trying to do this manually and failing, or it may be trying to delete the `tab_groups` row before properly handling `sidebar_items` references.
+- **Files:** Backend controller handling tab groups (likely in the sidebar/tab management routes), `AppShell.jsx`
+
+**Suggested git commit:** `fix: 37e — root concept hiding, tab group deletion`
+
+---
+
+#### Phase 37f: Flip View & Annotation Creation — ⏳ PLANNED
+
+Two bugs related to Flip View display and the annotation creation flow.
+
+**Bug 1 — No sorting options visible in Flip View:**
+- **Symptom:** The sort-by-similarity toggle (which should cycle through Sort by Links → Sort by Similarity ↓ → Sort by Similarity ↑) is not visible in Flip View. Per the status doc (Phase 4), this feature exists and should be displayed as flat view options (not a dropdown).
+- **Root cause hypothesis:** The sort controls may have been accidentally removed or hidden during a visual cleanup phase (Phase 28a or 30d). The backend similarity computation still exists in `getConceptParents`.
+- **Fix:** Verify the sort toggle UI exists in `FlipView.jsx`. If missing, re-add it as a flat horizontal toggle row (matching the Phase 29c sort selector style: `Graph Votes | Similarity ↓ | Similarity ↑`). If present but hidden, fix the rendering condition. Only show in contextual Flip View (similarity requires an origin context).
+- **Files:** `FlipView.jsx`
+
+**Bug 2 — Annotation auto-creates when concept is selected:**
+- **Symptom:** During annotation creation, selecting a concept immediately creates the annotation before the user has had a chance to add quote text or a comment. The annotation should not be created until the user explicitly confirms.
+- **Root cause hypothesis:** The annotation creation flow treats concept selection as the final step and immediately calls `createAnnotation`. There is no intermediate "review and confirm" step.
+- **Fix:** Restructure the annotation creation flow to be multi-step with explicit confirmation:
+  1. User opens annotation panel (via "Annotate" button or text selection shortcut)
+  2. User fills in fields: quote text (optional, pre-filled if text was selected), comment (optional), concept search + selection, context/edge selection
+  3. All fields are editable and visible before creation
+  4. User clicks a "Create Annotation" confirm button to finalize
+  5. Only then does the frontend call the `createAnnotation` API
+- **Files:** Annotation creation component (likely in `CorpusTabContent.jsx` or `AnnotationPanel.jsx`)
+
+**Suggested git commit:** `fix: 37f — flip view sorting controls, annotation creation confirm step`
+
+---
+
+#### Phase 37 Architecture Decisions
+
+- **Architecture Decision #214 — Phone Uniqueness Check Moved to Send-Code Step (Phase 37b):** The phone number uniqueness check for registration is moved from `verifyRegister` (after OTP verification) to `sendCode` (before sending the OTP). A new `intent` parameter (`'login'` or `'register'`) on the `sendCode` endpoint controls the behavior: for `register` intent, the endpoint checks `phone_lookup` and rejects if the phone already exists; for `login` intent, no uniqueness check (user must exist). This prevents wasting Twilio API calls and gives users immediate feedback.
+
+- **Architecture Decision #215 — Annotation Creation Requires Explicit Confirmation (Phase 37f):** Annotation creation is changed from "auto-create on concept selection" to a multi-step flow with an explicit "Create Annotation" button. All fields (quote text, comment, concept, context) are visible and editable before creation. This prevents accidental annotations and allows users to add quote text and comments before committing. The text selection shortcut still pre-fills the quote field but does not auto-create.
+
+#### Phase 37 Verification Checklist
+1. Guest users see swap vote counts on concept children (37a)
+2. Root concept creation succeeds when concept name exists as non-root elsewhere (37a)
+3. Non-author corpus members get 403 when trying to create a document version (37a)
+4. Web links added in one context do NOT appear in other contexts (37a)
+5. Web link creator can remove their own link (37a)
+6. Registration shows "phone already exists" error before sending OTP code (37b)
+7. Guest users clicking documents from graph see login modal, not error (37c)
+8. Files over 10MB show a clear error message on upload (37c)
+9. Tag search bar opens in only one document section at a time (37c)
+10. Cancelling an upload clears the file from the upload UI (37c)
+11. Duplicate document warning with similarity percentage appears during upload (37c)
+12. Long concept names don't push sort toggles off-screen (37d)
+13. Swap vote indicators use same shading style as save votes (37d)
+14. Diff modal search bar has no Unicode escape characters (37d)
+15. Search results for existing children say "child" not "child: value" (37d)
+16. Unsubscribe warning says "removes the corpus tab from your sidebar" (37d)
+17. Root concepts can be flagged and hidden when flag threshold is reached (37e)
+18. Deleting a tab group succeeds without server error (37e)
+19. Flip View shows sort-by-similarity toggle in contextual mode (37f)
+20. Annotation creation requires explicit "Create Annotation" button click (37f)
+21. Clean build: `cd frontend && npm run build` succeeds after all batches
+
+---
+
+### Phase 38: Post-Launch Enhancements — ⏳ PLANNED
+
+**Goal:** New features and improvements planned for after public launch. Each sub-phase is independent and can be implemented in any order based on user feedback and priorities. Complexity estimates included for planning.
+
+---
+
+#### Phase 38a: Flip View Navigation Stays on Current Concept — ⏳ PLANNED
+
+**Complexity:** Medium
+
+**Current behavior:** Clicking an alt parent card in Flip View navigates to that parent concept's children view (you leave the current concept).
+
+**New behavior:** Clicking an alt parent card switches context — the current concept stays the same, but the graph path updates to show the concept's children as they appear under the clicked parent. The user stays on the same concept but sees it in a different parent context.
+
+**Implementation:**
+- `FlipView.jsx`: Change the `onParentClick` handler to navigate within the current concept by updating the path (replacing the current parent context with the clicked parent context) instead of navigating to the parent concept itself.
+- `Concept.jsx`: The `navigateInTab` call should keep `conceptId` the same but update the `path` to the clicked parent's context path.
+- `AppShell.jsx`: The graph tab update should reflect the new path without changing the concept ID.
+- After navigation, the view should switch from Flip View to children view (since you're now viewing the concept in the new context).
+
+**Files:** `FlipView.jsx`, `Concept.jsx`, `AppShell.jsx`
+
+---
+
+#### Phase 38b: Swap Votes on Root-Level Concepts — ⏳ PLANNED
+
+**Complexity:** Medium
+
+**Current behavior:** Swap votes (⇄) only work for children of a concept (sibling relationships). Root-level concepts on the root page have no swap vote capability.
+
+**New behavior:** Root concepts can be swap-voted against other root concepts. The ⇄ button appears on root concept cards. The swap modal shows other root concepts as swap targets.
+
+**Implementation:**
+- Root edges have `parent_id = NULL` and `graph_path = '{}'`. "Siblings" at the root level are all other root edges (same attribute).
+- Backend: Extend swap vote validation to handle root edges. Two root edges are "siblings" if they share the same attribute (since all root edges have `parent_id = NULL` and `graph_path = '{}'`).
+- Frontend: Add ⇄ button to root concept cards in `Root.jsx`. Open the `SwapModal` with root context.
+- `SwapModal.jsx`: Handle the root case — fetch root siblings via a query for root edges with the same attribute as the target.
+
+**Note:** This should be implemented before or alongside Phase 38c (expanded swap votes) since 38c removes the sibling restriction entirely.
+
+**Files:** `Root.jsx`, `votesController.js`, `SwapModal.jsx`, `conceptsController.js`
+
+---
+
+#### Phase 38c: Expanded Swap Votes — Any Concept via Search — ⏳ PLANNED
+
+**Complexity:** High
+
+**Current behavior:** Swap votes are restricted to siblings (children of the same parent in the same graph context). The backend validates the sibling relationship before accepting a swap vote.
+
+**New behavior:** Any concept in any context can be a swap target. The swap modal includes a search function to find concepts across the entire database. The sibling validation is removed entirely from the backend.
+
+**Implementation:**
+
+**Backend changes (`votesController.js`):**
+- Remove the sibling validation check from `addSwapVote`. The `replacement_edge_id` can be any valid edge, not just a sibling.
+- Update the `getSwapSuggestions` query to return all existing swap suggestions for the target edge, sorted by vote count descending (no longer filtered to siblings only).
+- The `replace_votes` table schema does not need to change — `edge_id` and `replacement_edge_id` are already generic FK references to `edges(id)`.
+
+**Frontend changes (`SwapModal.jsx`):**
+- **Existing suggestions section:** Show all concepts that have received swap votes for this edge, sorted by vote count (highest first). Each card shows: concept name, attribute badge, parent context path, vote count, and a "Vote" / "Voted" toggle button.
+- **Search section:** New search input field (reusing the `SearchField` pattern with debounced `pg_trgm` search). Results show concept name, attribute badge, and all parent contexts. User selects a specific context (edge) to vote for.
+- **Navigation:** Each suggestion card and search result card has a navigation icon/button that opens the concept in a new graph tab (so the user can inspect it without losing their place). This is separate from the vote button.
+- **No sibling/non-sibling distinction:** The suggestions list doesn't differentiate between siblings and non-siblings. All swap suggestions are treated equally.
+
+**Architecture Decision #216 — Swap Votes Expanded Beyond Siblings (Phase 38c):** The sibling-only restriction on swap votes is removed. Any concept-in-context (edge) can be proposed as a replacement for any other. This reflects the reality that better alternatives may exist outside the immediate sibling set — a concept might better belong in a completely different branch of the hierarchy. The `replace_votes` schema is unchanged; only the backend validation and frontend UI expand scope.
+
+**Files:** `SwapModal.jsx`, `votesController.js`, `api.js`, `ConceptGrid.jsx` (if swap button behavior changes)
+
+---
+
+#### Phase 38d: Graph Votes Page Revamp — Flat with Corpus Badges — ⏳ PLANNED
+
+**Complexity:** Medium-High
+
+**Current behavior:** The Graph Votes page (`SavedPageOverlay.jsx`) organizes saved concept trees into corpus-based tabs (one tab per subscribed corpus, plus "Uncategorized"). Trees are assigned to corpus tabs based on whether any concept in the tree appears as an annotation in that corpus.
+
+**Problem:** Some voted-for concepts are children of annotation concepts but don't appear as annotations themselves. These fall through the corpus tab assignment and are invisible — not shown in any tab.
+
+**New behavior:** Remove corpus tabs entirely. Show ALL graph trees the user has votes in on a single flat page. Trees that contain any concept appearing as an annotation in a subscribed corpus get a corpus badge (or multiple badges if the concept appears in multiple subscribed corpuses). Trees with no corpus associations appear without badges.
+
+**Implementation:**
+
+**Backend changes (`votesController.js`):**
+- Simplify the `getUserSaves` endpoint (or create a new one) to return ALL saved edges without corpus tab grouping.
+- Add a separate query that maps concept IDs to subscribed corpus names via `document_annotations` → `corpus_subscriptions`. Return this as a `conceptCorpusBadges` lookup alongside the saved edges.
+
+**Frontend changes (`SavedPageOverlay.jsx`):**
+- Remove the internal tab bar and corpus tab logic.
+- Render all trees in a single scrollable list.
+- Each tree card shows corpus badges (small colored pills with corpus name) if any concept in that tree has annotations in subscribed corpuses.
+- Trees can still be reordered (the `saved_tree_order_v2` table may need to work without `corpus_id`, or use `corpus_id = NULL` for all entries in the new flat model).
+- Sorting: default order by total vote count across the tree, with manual reordering preserved.
+
+**Architecture Decision #217 — Graph Votes Page Flattened (Phase 38d):** The corpus-based tab system on the Graph Votes page is replaced with a single flat list showing all trees. Corpus badges on tree cards indicate annotation membership. This fixes the problem of "missing" trees that fell through corpus assignment (e.g., children of annotation concepts that aren't annotations themselves). The flat view is also simpler to understand — users see everything in one place.
+
+**Files:** `SavedPageOverlay.jsx`, `votesController.js`, `api.js`
+
+---
+
+#### Phase 38e: Color Set Threshold & Count-Based Sorting — ⏳ PLANNED
+
+**Complexity:** Medium
+
+**Current behavior:** All vote sets get a color swatch regardless of size (even solo vote sets with 1 user). Swatches are ordered by Jaccard similarity (nearest-neighbor algorithm).
+
+**New behavior:**
+- **Threshold:** Only vote sets with 10+ users get a color swatch. Users whose vote pattern matches fewer than 10 people see no swatch for their pattern.
+- **Sorting:** Swatches ordered left-to-right by user count (largest set first). Jaccard similarity sorting removed.
+- **Scaling (future consideration):** Threshold may scale with total active users to keep color sets representing meaningful consensus. Suggested formula: `threshold = max(10, floor(total_active_users * 0.01))` — at 1,000 users it's 10, at 5,000 it's 50. This can be implemented when there's real user data to calibrate against.
+
+**Implementation:**
+
+**Backend changes (`conceptsController.js`):**
+- In `getVoteSets`: After computing vote sets, filter out sets with `userCount < 10` before returning.
+- Remove the Jaccard similarity nearest-neighbor sorting logic. Replace with simple `ORDER BY user_count DESC`.
+- The `userSetIndex` (which set the current user belongs to) should return `null` if the user's set was filtered out by the threshold.
+- `edgeToSets` mapping should only include sets that pass the threshold.
+
+**Frontend changes (`VoteSetBar.jsx`, `Concept.jsx`):**
+- Handle the case where the user has no visible swatch (their set was below threshold). No "Your vote set" border highlight in this case.
+- Swatches render left-to-right by user count (the backend already returns them sorted).
+- Remove any Jaccard-related display logic.
+
+**Architecture Decision #218 — Color Set Visibility Threshold (Phase 38e):** Vote sets with fewer than 10 users are hidden from the color swatch display. This prevents the swatch bar from being cluttered with many small, meaningless patterns when the user base is small. Users below the threshold can still see their own votes (via the ▲ indicators on child cards) but won't see a dedicated color swatch. The threshold may be scaled with total user count in the future. Swatches are ordered by user count (largest first) instead of Jaccard similarity, since the similarity ordering was confusing and the primary signal is "how many people share this pattern."
+
+**Files:** `conceptsController.js`, `VoteSetBar.jsx`, `Concept.jsx`
+
+---
+
+#### Phase 38f: Filter Annotations by Attribute — ⏳ PLANNED
+
+**Complexity:** Low-Medium
+
+**Current behavior:** The annotation panel for a document shows all annotations regardless of attribute. The only filters are identity-based (All | Corpus Members | Author).
+
+**New behavior:** Add attribute filter toggles below the identity filter: `All | Value | Action | Tool | Question`. These are flat horizontal toggles (matching the identity filter style). The attribute filter composes with the identity filter — you can view "Author annotations that are [value]" by selecting both.
+
+**Implementation:**
+- Frontend-only filter on existing annotation data (annotations already include `attribute_name` via the edge join).
+- New state variable `attributeFilter` in `CorpusTabContent.jsx` (default: `'all'`).
+- Filter annotations client-side before rendering: if `attributeFilter !== 'all'`, only show annotations where `annotation.attribute_name === attributeFilter`.
+- Toggle row renders below the identity filter row, same styling (flat buttons with active/inactive states).
+- Only show enabled attributes (from `ENABLED_ATTRIBUTES` env var, already available via `getAttributes` API).
+
+**Files:** `CorpusTabContent.jsx`
+
+---
+
+#### Phase 38g: Sort Annotations by Quote Position — ⏳ PLANNED
+
+**Complexity:** Medium
+
+**Current behavior:** Annotations are sorted by vote count descending.
+
+**New behavior:** Add a "Sort by Position" option that orders annotations by where their `quote_text` appears in the document body. Annotations with no `quote_text` appear at the top (they're document-level annotations with no specific location). This sort option can be combined with the attribute filter (Phase 38f) — e.g., view only [value] annotations sorted by position.
+
+**Implementation:**
+- At render time, for each annotation with `quote_text`, compute the position by searching for `quote_text` in the document body (using `indexOf` or the same `TreeWalker` logic used for quote navigation). Use `quote_occurrence` to disambiguate multiple matches.
+- Cache computed positions to avoid re-searching on every render.
+- New sort toggle: `Votes | Position` (flat horizontal, composable with attribute filter).
+- Annotations with no `quote_text` get position `-1` (sort to top).
+- Secondary sort within same position: vote count descending.
+
+**Files:** `CorpusTabContent.jsx`
+
+---
+
+#### Phase 38h: Add as Annotation from Graph View — ⏳ PLANNED
+
+**Complexity:** High
+
+**Current behavior:** Annotations can only be created from the document viewer (inside a corpus tab). To annotate a document with a concept, you must first navigate to the document, then create the annotation.
+
+**New behavior:** A new "Add as Annotation" button in the concept view (graph context) lets users annotate documents with the current concept without leaving the graph. Opens a modal listing subscribed corpuses with their documents. Clicking a document card opens the annotation creation panel with the concept pre-filled. Existing annotations for that concept on that document are shown to prevent duplicates.
+
+**Implementation:**
+
+**New modal component (`AnnotateFromGraphModal.jsx`):**
+- Lists user's subscribed corpuses as expandable sections.
+- Each corpus section shows its documents as clickable cards.
+- Clicking a document card:
+  1. Fetches existing annotations for this concept on this document (new backend endpoint).
+  2. Shows the existing annotations (if any) so the user can see what's already there.
+  3. Opens the annotation creation form with: concept pre-filled (current concept + edge), document selected, fields for quote text (optional) and comment (optional), "Create Annotation" confirm button.
+- The corpus + document determines the `corpus_id` and `document_id` for the annotation. The `edge_id` comes from the current concept's context.
+
+**New backend endpoint:**
+- `GET /api/documents/:documentId/annotations-for-concept/:conceptId?corpusId=N` — returns all annotations on this document in this corpus that reference any edge for this concept. Used to show existing annotations and prevent duplicates.
+
+**Frontend integration:**
+- "Add as Annotation" button appears in the concept view header (or action row), next to the existing action buttons.
+- Button only visible to logged-in users with at least one corpus subscription.
+
+**Files:** New `AnnotateFromGraphModal.jsx`, `Concept.jsx`, `corpusController.js` or `conceptsController.js`, `api.js`
+
+---
+
+#### Phase 38i: Delete Any Document Version — ⏳ PLANNED
+
+**Complexity:** Unknown (requires investigation)
+
+**Current behavior:** Per bug report, only the latest version can be deleted. It's unclear whether this is a frontend limitation (UI only shows delete button on latest version) or a backend restriction.
+
+**Investigation needed:**
+1. Check `corpusController.js` `deleteDocument` endpoint — does it restrict deletion to the latest version, or can it accept any version ID?
+2. Check `CorpusTabContent.jsx` — does the delete button only render for the latest version in the version navigator?
+3. Check the version chain integrity logic — deleting a mid-chain version sets `source_document_id = NULL` on downstream versions (via `ON DELETE SET NULL`). Is this handled gracefully in the UI?
+
+**After investigation:** If it's frontend-only, add delete buttons to all versions in the version navigator (with appropriate confirmation dialogs noting that the version chain will be broken). If it's backend, update the endpoint to accept any version ID and handle chain integrity.
+
+**Files:** `CorpusTabContent.jsx`, possibly `corpusController.js`
+
+---
+
+#### Phase 38j: Annotation Citation Links — ⏳ PLANNED
+
+**Complexity:** High
+
+**Goal:** Enable users to cite Orca annotations in external research documents. When those documents are later uploaded to Orca, cited annotations are automatically detected and displayed.
+
+**User flow:**
+1. User views Document A in Orca, sees a useful annotation
+2. Clicks "Cite" button on the annotation → plain URL copied to clipboard (e.g., `https://orca.app/cite/a/456`)
+3. User pastes URL into their research doc (Google Docs, Word, etc.)
+4. User uploads their document to Orca as Document B
+5. During text extraction, backend scans for `orca.app/cite/a/` URLs via regex
+6. For each detected citation URL, backend resolves the annotation ID, stores a row in `document_citation_links` with snapshot metadata (concept name, quote snippet, document title, corpus name) for dead-link resilience
+7. Document B's annotation panel shows a "Cited Annotations" section listing all detected citations as cards
+8. Citation URLs in Document B's body render as clickable links in the document viewer
+9. Clicking a citation card (or body link) navigates to the annotation in Document A's corpus context
+
+**New database table:**
+
+```sql
+CREATE TABLE document_citation_links (
+  id SERIAL PRIMARY KEY,
+  citing_document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+  cited_annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE SET NULL,
+  citation_url TEXT NOT NULL,
+  snapshot_concept_name VARCHAR(255),
+  snapshot_quote_text TEXT,
+  snapshot_document_title VARCHAR(500),
+  snapshot_corpus_name VARCHAR(255),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_citation_links_citing_doc ON document_citation_links(citing_document_id);
+CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cited_annotation_id);
+```
+
+**Key design decisions:**
+- `cited_annotation_id` uses `ON DELETE SET NULL` — when the original annotation's document is deleted (cascading to the annotation), the citation row survives with `cited_annotation_id = NULL` but snapshot fields still show useful info.
+- Detection happens at upload time and version upload time only (no re-scanning).
+- Citation URLs are plain format: `https://{domain}/cite/a/{annotation_id}`.
+- Non-Orca users visiting the URL see a login prompt.
+- Snapshot metadata stored at detection time: `snapshot_concept_name`, `snapshot_quote_text`, `snapshot_document_title`, `snapshot_corpus_name`. These survive even if the original annotation or document is later deleted.
+
+**Backend work:**
+- **Citation URL generation:** No backend change needed — the URL format is deterministic from the annotation ID. Frontend generates it.
+- **Citation detection in upload pipeline:** After text extraction in `uploadDocument` and `createVersion`, run a regex scan for `cite/a/(\d+)` URLs. For each match, resolve the annotation ID, fetch snapshot data (concept name via edge → concept join, quote text, document title, corpus name), and batch-insert into `document_citation_links`.
+- **New endpoint:** `GET /api/documents/:id/citations` — returns all citation links for a document. For each citation: if `cited_annotation_id` is not null, fetch live annotation data (current concept name, quote text, document title, corpus name, annotation ID for navigation). If null, return snapshot data with an "unavailable" flag.
+- **Citation URL route:** `/cite/a/:annotationId` — resolves to the correct corpus + document view with the annotation highlighted. If the user is not logged in, show the login modal. If the annotation no longer exists, show a "this annotation is no longer available" message.
+
+**Frontend work:**
+- **"Cite" button** on each annotation card in the document viewer. Copies the citation URL to clipboard. Shows brief "Copied!" confirmation tooltip.
+- **"Cited Annotations" section** in the annotation panel for documents that have citations. Renders below the main annotations list. Each citation card shows: concept name, quote snippet (truncated), source document title, corpus name. Uses live data when annotation exists; snapshot data with "(no longer available)" indicator when it doesn't.
+- **Citation card click:** Navigates to the source document in the correct corpus tab, scrolling to and highlighting the cited annotation. If the annotation is unavailable, shows a message.
+- **Body link rendering:** In the document body, citation URLs (`cite/a/...`) are detected and rendered as styled clickable links (underlined, distinguished from regular text). Clicking a body link has the same navigation behavior as clicking the citation card.
+
+**Architecture Decision #219 — Citation Links with Dead-Link Resilience (Phase 38j):** Annotation citations store snapshot metadata at detection time (concept name, quote text, document title, corpus name) in addition to the annotation FK. When the cited annotation's document is deleted (cascading to the annotation row), the `cited_annotation_id` becomes NULL via `ON DELETE SET NULL`, but the snapshot fields preserve enough information to display a meaningful "this annotation is no longer available" card. This is consistent with Orca's philosophy of preserving provenance information even when source entities are removed.
+
+**Files:** `migrate.js`, `corpusController.js` (upload pipeline), new `citationController.js` or additions to `corpusController.js`, `routes/documents.js` or new `routes/citations.js`, `api.js`, `CorpusTabContent.jsx` (annotation panel + body renderer), `App.jsx` or `AppShell.jsx` (citation URL route)
+
+---
+
+#### Phase 38 Implementation Priority (suggested)
+
+Based on impact and dependencies:
+1. **38a** (Flip View navigation) — quick win, improves core navigation
+2. **38f** (attribute filter) — low complexity, useful for researchers
+3. **38g** (position sort) — medium complexity, natural companion to 38f
+4. **38d** (Graph Votes revamp) — fixes a real data visibility bug
+5. **38e** (color set threshold) — should wait until there are real users to calibrate
+6. **38b** (root swap votes) — implement before 38c
+7. **38c** (expanded swap votes) — depends on 38b
+8. **38h** (annotate from graph) — high complexity, high value for power users
+9. **38i** (delete any version) — needs investigation first
+10. **38j** (citation links) — highest complexity, biggest differentiator for academic use case
 
 ---
 
