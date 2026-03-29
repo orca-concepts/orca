@@ -869,22 +869,26 @@ const votesController = {
 
       const userId = req.user.userId;
 
-      // Get all swap vote replacements for this edge, grouped by replacement sibling
+      // Get all swap vote replacements for this edge (Phase 38b: no sibling filtering)
       const result = await pool.query(
-        `SELECT 
+        `SELECT
           rv.replacement_edge_id,
           e.child_id AS replacement_child_id,
           c.name AS replacement_name,
           a.id AS replacement_attribute_id,
           a.name AS replacement_attribute_name,
+          e.parent_id AS replacement_parent_id,
+          pc.name AS replacement_parent_name,
+          e.graph_path AS replacement_graph_path,
           COUNT(rv.id) AS vote_count,
           BOOL_OR(rv.user_id = $2) AS user_voted
         FROM replace_votes rv
         JOIN edges e ON e.id = rv.replacement_edge_id
         JOIN concepts c ON c.id = e.child_id
         JOIN attributes a ON a.id = e.attribute_id
+        LEFT JOIN concepts pc ON pc.id = e.parent_id
         WHERE rv.edge_id = $1
-        GROUP BY rv.replacement_edge_id, e.child_id, c.name, a.id, a.name
+        GROUP BY rv.replacement_edge_id, e.child_id, c.name, a.id, a.name, e.parent_id, pc.name, e.graph_path
         ORDER BY vote_count DESC, c.name`,
         [edgeId, userId]
       );
@@ -902,6 +906,9 @@ const votesController = {
           replacementName: row.replacement_name,
           replacementAttributeId: row.replacement_attribute_id,
           replacementAttributeName: row.replacement_attribute_name,
+          parentId: row.replacement_parent_id,
+          parentName: row.replacement_parent_name,
+          graphPath: row.replacement_graph_path,
           voteCount: parseInt(row.vote_count),
           userVoted: row.user_voted
         })),
@@ -928,26 +935,14 @@ const votesController = {
 
       const userId = req.user.userId;
 
-      // Verify both edges exist and are siblings (same parent_id and graph_path)
+      // Verify both edges exist (Phase 38b: sibling validation removed — any edge can be a swap target)
       const edgeCheck = await pool.query(
-        'SELECT id, parent_id, graph_path FROM edges WHERE id = ANY($1::integer[])',
+        'SELECT id FROM edges WHERE id = ANY($1::integer[])',
         [[edgeId, replacementEdgeId]]
       );
 
       if (edgeCheck.rows.length < 2) {
         return res.status(404).json({ error: 'One or both edges not found' });
-      }
-
-      const sourceEdge = edgeCheck.rows.find(e => e.id === edgeId);
-      const replacementEdge = edgeCheck.rows.find(e => e.id === replacementEdgeId);
-
-      // Sibling check: same parent_id and same graph_path
-      const sameParent = sourceEdge.parent_id === replacementEdge.parent_id || 
-        (sourceEdge.parent_id === null && replacementEdge.parent_id === null);
-      const samePath = JSON.stringify(sourceEdge.graph_path) === JSON.stringify(replacementEdge.graph_path);
-
-      if (!sameParent || !samePath) {
-        return res.status(400).json({ error: 'Replacement must be a sibling in the same context' });
       }
 
       // Phase 20c: Mutual exclusivity — remove any save vote for this edge before swapping.

@@ -119,12 +119,15 @@ const ConceptGrid = ({
                   </button>
                   {onSwapClick ? (
                     <button
-                      style={styles.swapButton}
+                      style={{
+                        ...styles.swapButton,
+                        ...(concept.user_swapped ? styles.swapButtonActive : {}),
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         onSwapClick(concept);
                       }}
-                      title="Pick another child concept in this context you prefer to this one"
+                      title="Pick another concept you prefer to this one"
                     >
                       ⇄ {concept.swap_count || 0}
                     </button>

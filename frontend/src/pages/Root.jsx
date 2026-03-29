@@ -5,6 +5,7 @@ import ConceptGrid from '../components/ConceptGrid';
 import SearchField from '../components/SearchField';
 import DiffModal from '../components/DiffModal';
 import HiddenConceptsView from '../components/HiddenConceptsView';
+import SwapModal from '../components/SwapModal';
 
 const ATTR_FILTER_KEY = 'orca_root_attribute_filter';
 
@@ -24,6 +25,9 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
   // Phase 16c: Hidden root concepts state
   const [hiddenCount, setHiddenCount] = useState(0);
   const [showHiddenPanel, setShowHiddenPanel] = useState(false);
+
+  // Phase 38b: Swap modal state for root concepts
+  const [swapModalEdge, setSwapModalEdge] = useState(null);
 
   // Phase 25b: Attribute filter state
   const [availableAttributes, setAvailableAttributes] = useState([]);
@@ -156,6 +160,35 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
     }
   };
 
+  // Phase 38b: Swap vote on root concepts
+  const handleSwapClick = (concept) => {
+    setSwapModalEdge({
+      edgeId: concept.edge_id,
+      conceptName: concept.name,
+      conceptId: concept.id,
+    });
+  };
+
+  const handleSwapModalClose = () => setSwapModalEdge(null);
+
+  const handleSwapVoteChanged = () => {
+    // Optimistically clear any save for this edge in local state (mutual exclusivity)
+    if (swapModalEdge) {
+      const eid = swapModalEdge.edgeId;
+      setConcepts(prev => prev.map(c =>
+        c.edge_id === eid
+          ? {
+              ...c,
+              user_voted: false,
+              vote_count: c.user_voted ? Math.max(0, (parseInt(c.vote_count) || 1) - 1) : (parseInt(c.vote_count) || 0),
+              user_swapped: true,
+            }
+          : c
+      ));
+    }
+    loadRootConcepts();
+  };
+
   return (
     <div style={styles.container}>
       <main style={styles.main}>
@@ -234,6 +267,7 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
               concepts={filtered}
               onConceptClick={handleConceptClick}
               onVote={isGuest ? undefined : handleVote}
+              onSwapClick={isGuest ? undefined : handleSwapClick}
               onCompareChildren={handleCompareChildren}
               onFlag={isGuest ? undefined : handleFlag}
               onUnflag={isGuest ? undefined : handleUnflag}
@@ -264,6 +298,17 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
         initialConcept={diffInitialConcept}
         isGuest={isGuest}
       />
+
+      {/* Phase 38b: Swap Modal for root concepts */}
+      {swapModalEdge && (
+        <SwapModal
+          edgeId={swapModalEdge.edgeId}
+          conceptName={swapModalEdge.conceptName}
+          siblings={concepts.filter(c => c.edge_id !== swapModalEdge.edgeId)}
+          onClose={handleSwapModalClose}
+          onSwapVoteChanged={handleSwapVoteChanged}
+        />
+      )}
 
       {/* Phase 16c: Hidden Concepts Panel */}
       {showHiddenPanel && (

@@ -46,6 +46,8 @@ const conceptsController = {
           a.name as attribute_name,
           COALESCE(COUNT(DISTINCT v.id), 0) as vote_count,
           BOOL_OR(v.user_id = $1) as user_voted,
+          (SELECT COUNT(DISTINCT rv.user_id) FROM replace_votes rv WHERE rv.edge_id = root_e.id) as swap_count,
+          (SELECT COUNT(*) > 0 FROM replace_votes rv WHERE rv.edge_id = root_e.id AND rv.user_id = $1) as user_swapped,
           (SELECT COUNT(*) FROM concept_flags cf WHERE cf.edge_id = root_e.id) as flag_count,
           (SELECT COUNT(*) > 0 FROM concept_flags cf WHERE cf.edge_id = root_e.id AND cf.user_id = $1) as user_flagged
           ${annotationSelect}
@@ -141,6 +143,7 @@ const conceptsController = {
           BOOL_OR(v.user_id = $2) as user_voted,
           COUNT(DISTINCT child_edges.id) as child_count,
           (SELECT COUNT(DISTINCT rv.user_id) FROM replace_votes rv WHERE rv.edge_id = e.id) as swap_count,
+          (SELECT COUNT(*) > 0 FROM replace_votes rv WHERE rv.edge_id = e.id AND rv.user_id = $2) as user_swapped,
           (SELECT COUNT(*) FROM concept_flags cf WHERE cf.edge_id = e.id) as flag_count,
           (SELECT COUNT(*) > 0 FROM concept_flags cf WHERE cf.edge_id = e.id AND cf.user_id = $2) as user_flagged
           ${annotationSelect}
