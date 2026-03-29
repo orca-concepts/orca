@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import AnnotationPanel from './AnnotationPanel';
@@ -115,6 +115,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   const [layerFilter, setLayerFilter] = useState(null); // null = default (all), 'corpus_members', 'author'
   const [attributeFilter, setAttributeFilter] = useState('all'); // 'all' or an attribute name like 'value'
   const [enabledAttributes, setEnabledAttributes] = useState([]);
+  const [annotationSort, setAnnotationSort] = useState('votes'); // 'votes' or 'position'
   const [isAllowedUser, setIsAllowedUser] = useState(false);
   const [isCorpusOwner, setIsCorpusOwner] = useState(false);
   const [isAuthor, setIsAuthor] = useState(false);
@@ -452,12 +453,30 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     }
   }, [layerFilter]);
 
-  // Reset concept navigation state and attribute filter when document changes
+  // Reset concept navigation state, attribute filter, and sort when document changes
   useEffect(() => {
     setConceptNavState({});
     setAttributeFilter('all');
+    setAnnotationSort('votes');
   }, [subView?.documentId]);
 
+
+  // ─── Quote position cache for position-based sort (Phase 38g) ───
+  const annotationsWithPositions = useMemo(() => {
+    if (!annotations || !document?.body) return annotations;
+    return annotations.map(a => {
+      if (!a.quote_text) return { ...a, _quotePosition: -1 };
+      let pos = -1;
+      let searchFrom = 0;
+      const occurrence = a.quote_occurrence || 1;
+      for (let i = 0; i < occurrence; i++) {
+        pos = document.body.indexOf(a.quote_text, searchFrom);
+        if (pos === -1) break;
+        searchFrom = pos + 1;
+      }
+      return { ...a, _quotePosition: pos === -1 ? -1 : pos };
+    });
+  }, [annotations, document?.body]);
 
   // ─── Text Selection for Annotations ───────────────
   const handleMouseUp = useCallback((e) => {
@@ -1000,54 +1019,74 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               {annotations.length} annotation{annotations.length !== 1 ? 's' : ''}
             </span>
           )}
-          {/* Phase 26d: Identity-based filter toggle (visible to all logged-in users) */}
-          {!isGuest && (
-            <div style={styles.layerToggle}>
-              <button
-                onClick={() => setLayerFilter(null)}
-                style={{
-                  ...styles.layerToggleBtn,
-                  ...(layerFilter === null ? styles.layerToggleBtnActive : {}),
-                }}
-              >All</button>
-              <button
-                onClick={() => setLayerFilter('corpus_members')}
-                style={{
-                  ...styles.layerToggleBtn,
-                  ...(layerFilter === 'corpus_members' ? styles.layerToggleBtnActive : {}),
-                }}
-              >Corpus Members</button>
-              <button
-                onClick={() => setLayerFilter('author')}
-                style={{
-                  ...styles.layerToggleBtn,
-                  ...(layerFilter === 'author' ? styles.layerToggleBtnActive : {}),
-                }}
-              >Author</button>
-            </div>
-          )}
-          {/* Phase 38f: Attribute filter toggle */}
-          {enabledAttributes.length > 1 && (
-            <div style={{ ...styles.layerToggle, marginTop: '6px' }}>
-              <button
-                onClick={() => setAttributeFilter('all')}
-                style={{
-                  ...styles.layerToggleBtn,
-                  ...(attributeFilter === 'all' ? styles.layerToggleBtnActive : {}),
-                }}
-              >All</button>
-              {enabledAttributes.map(attr => (
+          <div style={styles.filterStack}>
+            {/* Phase 26d: Identity-based filter toggle (visible to all logged-in users) */}
+            {!isGuest && (
+              <div style={styles.layerToggle}>
                 <button
-                  key={attr.id}
-                  onClick={() => setAttributeFilter(attr.name)}
+                  onClick={() => setLayerFilter(null)}
                   style={{
                     ...styles.layerToggleBtn,
-                    ...(attributeFilter === attr.name ? styles.layerToggleBtnActive : {}),
+                    ...(layerFilter === null ? styles.layerToggleBtnActive : {}),
                   }}
-                >{attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}</button>
-              ))}
+                >All</button>
+                <button
+                  onClick={() => setLayerFilter('corpus_members')}
+                  style={{
+                    ...styles.layerToggleBtn,
+                    ...(layerFilter === 'corpus_members' ? styles.layerToggleBtnActive : {}),
+                  }}
+                >Corpus Members</button>
+                <button
+                  onClick={() => setLayerFilter('author')}
+                  style={{
+                    ...styles.layerToggleBtn,
+                    ...(layerFilter === 'author' ? styles.layerToggleBtnActive : {}),
+                  }}
+                >Author</button>
+              </div>
+            )}
+            {/* Phase 38f: Attribute filter toggle */}
+            {enabledAttributes.length > 1 && (
+              <div style={styles.layerToggle}>
+                <button
+                  onClick={() => setAttributeFilter('all')}
+                  style={{
+                    ...styles.layerToggleBtn,
+                    ...(attributeFilter === 'all' ? styles.layerToggleBtnActive : {}),
+                  }}
+                >All</button>
+                {enabledAttributes.map(attr => (
+                  <button
+                    key={attr.id}
+                    onClick={() => setAttributeFilter(attr.name)}
+                    style={{
+                      ...styles.layerToggleBtn,
+                      ...(attributeFilter === attr.name ? styles.layerToggleBtnActive : {}),
+                    }}
+                  >{attr.name.charAt(0).toUpperCase() + attr.name.slice(1)}</button>
+                ))}
+              </div>
+            )}
+            {/* Phase 38g: Annotation sort toggle */}
+            <div style={styles.layerToggle}>
+              <span style={styles.sortLabel}>Sort:</span>
+              <button
+                onClick={() => setAnnotationSort('votes')}
+                style={{
+                  ...styles.layerToggleBtn,
+                  ...(annotationSort === 'votes' ? styles.layerToggleBtnActive : {}),
+                }}
+              >Votes</button>
+              <button
+                onClick={() => setAnnotationSort('position')}
+                style={{
+                  ...styles.layerToggleBtn,
+                  ...(annotationSort === 'position' ? styles.layerToggleBtnActive : {}),
+                }}
+              >Position</button>
             </div>
-          )}
+          </div>
         </div>
 
         <div style={styles.docInfo}>
@@ -1362,9 +1401,22 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
             </div>
 
             {(() => {
+              const source = annotationsWithPositions || annotations;
               const filteredAnnotations = attributeFilter === 'all'
-                ? annotations
-                : annotations.filter(a => a.attribute_name === attributeFilter);
+                ? source
+                : source.filter(a => a.attribute_name === attributeFilter);
+              const sortedAnnotations = [...filteredAnnotations].sort((a, b) => {
+                if (annotationSort === 'position') {
+                  const posA = a._quotePosition ?? -1;
+                  const posB = b._quotePosition ?? -1;
+                  if (posA === -1 && posB === -1) return (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0);
+                  if (posA === -1) return -1;
+                  if (posB === -1) return 1;
+                  if (posA !== posB) return posA - posB;
+                  return (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0);
+                }
+                return (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0);
+              });
               return annotationsLoading ? (
               <div style={styles.annLoadingText}>Loading…</div>
             ) : annotations.length === 0 ? (
@@ -1373,7 +1425,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               <div style={styles.annEmptyText}>No annotations match the selected filters.</div>
             ) : (
               <div style={styles.annotationList}>
-                {[...filteredAnnotations].sort((a, b) => (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0)).map(ann => {
+                {sortedAnnotations.map(ann => {
                   const isSelected = selectedAnnotation?.id === ann.id;
                   const quoteNotFound = quoteNotFoundAnnId === ann.id;
                   return (
@@ -1984,9 +2036,17 @@ const styles = {
   },
   headerBar: {
     display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    marginBottom: '16px',
+    alignItems: 'flex-start',
+    gap: '10px',
+    marginBottom: '12px',
+    flexWrap: 'wrap',
+  },
+  filterStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: '4px',
+    marginLeft: 'auto',
   },
   backButton: {
     padding: '6px 12px',
@@ -2529,6 +2589,12 @@ const styles = {
   layerToggleBtnActive: {
     backgroundColor: '#333',
     color: 'white',
+  },
+  sortLabel: {
+    padding: '3px 8px',
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#888',
   },
   annotationHighlightEditorial: {
     backgroundColor: 'rgba(90, 122, 90, 0.15)',
