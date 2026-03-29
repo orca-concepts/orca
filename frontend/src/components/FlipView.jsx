@@ -106,9 +106,9 @@ const FlipView = ({
       // Tab mode: use the callback provided by Concept.jsx
       externalParentClick(parent);
     } else {
-      // Standalone mode: URL navigation
-      const pathToParent = parent.graph_path.slice(0, -1).join(',');
-      navigate(`/concept/${parent.id}?path=${pathToParent}`);
+      // Standalone mode: stay on the current concept but switch to the new parent's context (Phase 38a)
+      const newPath = parent.graph_path.join(',');
+      navigate(`/concept/${concept.id}?path=${newPath}`);
     }
   };
 

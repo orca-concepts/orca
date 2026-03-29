@@ -356,10 +356,10 @@ const Concept = ({
     }
   };
 
-  // When user clicks an alt parent card in Flip View, navigate to that parent
+  // When user clicks an alt parent card in Flip View, stay on the current concept
+  // but switch to the clicked parent's context (Phase 38a)
   const handleFlipViewParentClick = (parent) => {
-    const pathToParent = parent.graph_path.slice(0, -1);
-    navigateInTab(parent.id, pathToParent, 'children');
+    navigateInTab(effectiveConceptId, parent.graph_path, 'children');
   };
 
   const handleConceptAdded = () => {
