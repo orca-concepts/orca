@@ -530,7 +530,7 @@ const Concept = ({
   }
 
   const searchPath = path.slice(0, -1).join(',');
-  const getSiblingsForSwap = (excludeEdgeId) => children.filter(c => c.edge_id !== excludeEdgeId);
+
 
   const effectiveIndices = getEffectiveActiveSetIndices();
   const hasActiveFilters = effectiveIndices.length > 0;
@@ -734,7 +734,6 @@ const Concept = ({
         <SwapModal
           edgeId={swapModalEdge.edgeId}
           conceptName={swapModalEdge.conceptName}
-          siblings={getSiblingsForSwap(swapModalEdge.edgeId)}
           onClose={handleSwapModalClose}
           onSwapVoteChanged={handleSwapVoteChanged}
         />

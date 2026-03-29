@@ -304,7 +304,6 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
         <SwapModal
           edgeId={swapModalEdge.edgeId}
           conceptName={swapModalEdge.conceptName}
-          siblings={concepts.filter(c => c.edge_id !== swapModalEdge.edgeId)}
           onClose={handleSwapModalClose}
           onSwapVoteChanged={handleSwapVoteChanged}
         />
