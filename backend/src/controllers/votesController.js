@@ -447,23 +447,20 @@ const votesController = {
   },
 
   // ============================================================
-  // Saved Page — Corpus-Based Grouping (Phase 7c Overhaul)
+  // Graph Votes Page — Flat list with corpus badges (Phase 38d)
   // ============================================================
 
-  // Get all user's saves grouped by corpus (via annotation membership).
-  // A save appears in a corpus tab if:
-  //   - The edge itself has an annotation in that corpus, OR
-  //   - Any descendant edge in the same branch has an annotation in that corpus
-  // Saves not associated with any corpus go in the "uncategorized" bucket.
-  // Returns: { corpusTabs: [ { corpusId, corpusName, isSubscribed, edges: [...] } ],
-  //            uncategorizedEdges: [...], conceptNames: {...} }
+  // Get all user's saves as a flat list with corpus badge metadata.
+  // For each concept the user has voted on, finds which subscribed corpuses
+  // have annotations referencing that concept (for badge display).
+  // Returns: { saves: [...], conceptNames: {...}, conceptCorpusBadges: {...} }
   getUserSavesByCorpus: async (req, res) => {
     try {
       const userId = req.user.userId;
 
-      // Step 1: Get ALL of the user's saved edges (no tab filter)
+      // Step 1: Get ALL of the user's saved edges (no grouping)
       const savesResult = await pool.query(`
-        SELECT 
+        SELECT
           e.id AS edge_id,
           e.parent_id,
           e.child_id,
@@ -499,158 +496,35 @@ const votesController = {
       }));
 
       if (allEdges.length === 0) {
-        return res.json({ corpusTabs: [], uncategorizedEdges: [], conceptNames: {} });
+        return res.json({ saves: [], conceptNames: {}, conceptCorpusBadges: {} });
       }
 
-      // Step 2: For each saved edge, find which corpuses it's associated with via annotations.
-      // An edge is associated with a corpus if:
-      //   (a) The edge itself has an annotation in that corpus, OR
-      //   (b) Any descendant edge (in the same branch) has an annotation in that corpus
-      //
-      // We do this by collecting all saved edge IDs, then finding all annotations on those edges,
-      // then for each annotation, walking UP the saved edges to mark all ancestors in that branch.
+      // Step 2: For each concept the user has voted on, find which subscribed
+      // corpuses have annotations referencing that concept (via any edge).
+      // This provides corpus badge data for the flat Graph Votes page.
+      const childIds = [...new Set(allEdges.map(e => e.childId))];
 
-      const savedEdgeIds = allEdges.map(e => e.edgeId);
+      const badgeResult = await pool.query(`
+        SELECT DISTINCT e.child_id AS concept_id, cor.id AS corpus_id, cor.name AS corpus_name
+        FROM edges e
+        JOIN document_annotations da ON da.edge_id = e.id
+        JOIN corpus_subscriptions cs ON cs.corpus_id = da.corpus_id AND cs.user_id = $1
+        JOIN corpuses cor ON cor.id = da.corpus_id
+        WHERE e.child_id = ANY($2::integer[])
+      `, [userId, childIds]);
 
-      // Find all annotations on ANY of the user's saved edges
-      const annotationResult = await pool.query(`
-        SELECT DISTINCT da.edge_id, da.corpus_id
-        FROM document_annotations da
-        WHERE da.edge_id = ANY($1::integer[])
-      `, [savedEdgeIds]);
-
-      // Build a direct map: edgeId -> Set of corpusIds (from direct annotations)
-      const directAnnotations = {};
-      annotationResult.rows.forEach(row => {
-        if (!directAnnotations[row.edge_id]) directAnnotations[row.edge_id] = new Set();
-        directAnnotations[row.edge_id].add(row.corpus_id);
+      // Build conceptCorpusBadges lookup: conceptId -> [{corpusId, corpusName}]
+      const conceptCorpusBadges = {};
+      badgeResult.rows.forEach(row => {
+        const cid = row.concept_id;
+        if (!conceptCorpusBadges[cid]) conceptCorpusBadges[cid] = [];
+        conceptCorpusBadges[cid].push({
+          corpusId: row.corpus_id,
+          corpusName: row.corpus_name,
+        });
       });
 
-      // Also check: for edges that are NOT directly annotated, do any of their
-      // descendant saved edges have annotations? If so, the ancestor edge belongs
-      // to those corpuses too.
-      //
-      // Strategy: build a parent-child map of saved edges, then propagate corpus
-      // associations upward from annotated edges to their ancestors.
-
-      // Build a lookup: for each saved edge, find its "parent saved edge" (the saved edge
-      // that is one step above it in the path). This lets us walk upward.
-      const edgeById = {};
-      allEdges.forEach(e => { edgeById[e.edgeId] = e; });
-
-      // Build a path key -> edgeId lookup for fast parent finding
-      // Key format: "parentId-graphPath" matches how the tree is built
-      const edgeByChildKey = {};
-      allEdges.forEach(e => {
-        // This edge represents: concept e.childId in the context of e.graphPath
-        // Its "parent" in the saved tree would be the edge whose childId = e.parentId
-        // and whose childPath matches e.graphPath (minus the last element)
-        const key = `${e.childId}-${JSON.stringify(e.parentId === null ? [e.childId] : [...e.graphPath, e.childId])}`;
-        edgeByChildKey[key] = e.edgeId;
-      });
-
-      // For each saved edge, compute the full set of corpuses (direct + inherited from descendants)
-      const edgeCorpuses = {}; // edgeId -> Set of corpusIds
-      allEdges.forEach(e => {
-        edgeCorpuses[e.edgeId] = new Set(directAnnotations[e.edgeId] || []);
-      });
-
-      // Propagate upward: for each annotated edge, walk up through ancestors
-      // (which are also saved edges) and add the corpus associations
-      const propagateUp = (edge, corpusIds) => {
-        if (!edge || corpusIds.size === 0) return;
-
-        // Find the parent saved edge
-        // The parent edge is the one whose childId = edge.parentId and whose
-        // path context matches edge.graphPath (the parent's child path = edge's graphPath)
-        if (edge.parentId === null) return; // root edge, no parent to propagate to
-
-        // The parent edge's childId should be edge's parentId,
-        // and its "child path" = edge.graphPath
-        // We need to find a saved edge where childId = edge.parentId
-        // and its own graphPath + childId = edge.graphPath
-        // i.e., edge.graphPath = [...parentEdge.graphPath, parentEdge.childId] (if non-root)
-        //    or edge.graphPath = [parentEdge.childId] (if parent is root)
-
-        for (const e of allEdges) {
-          if (e.childId !== edge.parentId) continue;
-
-          // Check if this edge is the correct parent context
-          let expectedPath;
-          if (e.parentId === null) {
-            expectedPath = [e.childId];
-          } else {
-            expectedPath = [...e.graphPath, e.childId];
-          }
-
-          if (JSON.stringify(expectedPath) === JSON.stringify(edge.graphPath)) {
-            // Found the parent saved edge — add corpus associations
-            let added = false;
-            corpusIds.forEach(cid => {
-              if (!edgeCorpuses[e.edgeId].has(cid)) {
-                edgeCorpuses[e.edgeId].add(cid);
-                added = true;
-              }
-            });
-            // Continue propagating upward if we added new associations
-            if (added) {
-              propagateUp(e, corpusIds);
-            }
-            break;
-          }
-        }
-      };
-
-      // Run propagation from every edge that has direct annotations
-      allEdges.forEach(edge => {
-        const directCorpuses = directAnnotations[edge.edgeId];
-        if (directCorpuses && directCorpuses.size > 0) {
-          propagateUp(edge, directCorpuses);
-        }
-      });
-
-      // Step 3: Group edges by corpus
-      const corpusEdgeMap = {}; // corpusId -> [edge, ...]
-      const uncategorizedEdges = [];
-
-      allEdges.forEach(edge => {
-        const corpuses = edgeCorpuses[edge.edgeId];
-        if (corpuses.size === 0) {
-          uncategorizedEdges.push(edge);
-        } else {
-          corpuses.forEach(corpusId => {
-            if (!corpusEdgeMap[corpusId]) corpusEdgeMap[corpusId] = [];
-            corpusEdgeMap[corpusId].push(edge);
-          });
-        }
-      });
-
-      // Step 4: Get corpus details + subscription status for all referenced corpuses
-      const corpusIds = Object.keys(corpusEdgeMap).map(Number);
-      let corpusTabs = [];
-
-      if (corpusIds.length > 0) {
-        const corpusDetailsResult = await pool.query(`
-          SELECT 
-            c.id, c.name,
-            EXISTS(
-              SELECT 1 FROM corpus_subscriptions cs 
-              WHERE cs.corpus_id = c.id AND cs.user_id = $1
-            ) AS is_subscribed
-          FROM corpuses c
-          WHERE c.id = ANY($2::integer[])
-          ORDER BY c.name
-        `, [userId, corpusIds]);
-
-        corpusTabs = corpusDetailsResult.rows.map(row => ({
-          corpusId: row.id,
-          corpusName: row.name,
-          isSubscribed: row.is_subscribed,
-          edges: corpusEdgeMap[row.id] || [],
-        }));
-      }
-
-      // Step 5: Collect concept names for path display
+      // Step 3: Collect concept names for path display
       const conceptIds = new Set();
       allEdges.forEach(edge => {
         if (edge.graphPath) edge.graphPath.forEach(id => conceptIds.add(id));
@@ -667,7 +541,7 @@ const votesController = {
         namesResult.rows.forEach(row => { conceptNames[row.id] = row.name; });
       }
 
-      res.json({ corpusTabs, uncategorizedEdges, conceptNames });
+      res.json({ saves: allEdges, conceptNames, conceptCorpusBadges });
     } catch (error) {
       console.error('Error fetching saves by corpus:', error);
       res.status(500).json({ error: 'Internal server error' });

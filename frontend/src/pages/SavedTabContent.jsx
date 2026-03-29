@@ -2,30 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { votesAPI } from '../services/api';
 
 /**
- * SavedTabContent — Phase 7c Overhaul
- * 
- * Renders the tree display for a single Saved Page tab (corpus or uncategorized).
- * Now receives edges as props (pre-grouped by SavedPageOverlay) instead of
- * fetching them itself. Uses v2 tree ordering keyed by corpusId.
+ * SavedTabContent — Phase 38d: Flat Graph Votes Page
+ *
+ * Renders all saved concept trees in a single flat list.
+ * Tree cards show corpus badges if any concept in the tree appears
+ * as an annotation in a subscribed corpus.
  *
  * Props:
- *   - edges: array of saved edge objects for this tab
+ *   - edges: array of saved edge objects
  *   - conceptNames: { id: name } lookup for path display
- *   - corpusId: number (corpus tab) or null (uncategorized tab)
+ *   - conceptCorpusBadges: { conceptId: [{corpusId, corpusName}] } lookup
+ *   - corpusId: always null in flat model (kept for tree order compatibility)
  *   - onReload: callback to reload all data from parent after unsave
  *   - onOpenConceptTab: callback to open a concept in a new graph tab
  */
-const SavedTabContent = ({ edges, conceptNames, corpusId, onReload, onOpenConceptTab }) => {
+const SavedTabContent = ({ edges, conceptNames, conceptCorpusBadges, corpusId, onReload, onOpenConceptTab }) => {
   const [collapsedNodes, setCollapsedNodes] = useState(new Set());
   const [treeOrder, setTreeOrder] = useState(null); // null = not loaded yet; [] = loaded, no custom order
 
   useEffect(() => {
     loadTreeOrder();
-  }, [corpusId]);
+  }, []);
 
   const loadTreeOrder = async () => {
     try {
-      const response = await votesAPI.getTreeOrderV2(corpusId);
+      // Always use corpusId = null for flat model ordering
+      const response = await votesAPI.getTreeOrderV2(null);
       setTreeOrder(response.data.treeOrder || []);
     } catch (err) {
       console.error('Failed to load tree order:', err);
@@ -68,19 +70,51 @@ const SavedTabContent = ({ edges, conceptNames, corpusId, onReload, onOpenConcep
         if (hasOrderA && hasOrderB) return orderA - orderB;
         if (hasOrderA && !hasOrderB) return -1;
         if (!hasOrderA && hasOrderB) return 1;
-        return b.voteCount - a.voteCount;
+        // Default: sort by total vote count across tree, descending
+        return getTotalVoteCount(b) - getTotalVoteCount(a);
       });
     } else {
-      trees.sort((a, b) => b.voteCount - a.voteCount);
+      // Default sort: total vote count across tree, descending
+      trees.sort((a, b) => getTotalVoteCount(b) - getTotalVoteCount(a));
     }
 
     return trees;
   };
 
+  // Sum all vote counts across a tree (root + all descendants)
+  const getTotalVoteCount = (node) => {
+    let total = node.voteCount || 0;
+    if (node.children) {
+      node.children.forEach(child => { total += getTotalVoteCount(child); });
+    }
+    return total;
+  };
+
+  // Collect all unique corpus badges for a tree
+  const getTreeCorpusBadges = (tree) => {
+    if (!conceptCorpusBadges) return [];
+    const seen = new Set();
+    const badges = [];
+    const collect = (node) => {
+      const nodeBadges = conceptCorpusBadges[node.childId];
+      if (nodeBadges) {
+        nodeBadges.forEach(b => {
+          if (!seen.has(b.corpusId)) {
+            seen.add(b.corpusId);
+            badges.push(b);
+          }
+        });
+      }
+      if (node.children) node.children.forEach(collect);
+    };
+    collect(tree);
+    return badges;
+  };
+
   const handleUnsave = async (edgeId) => {
     try {
       await votesAPI.removeVote(edgeId);
-      // Reload all data from parent (since unsaving affects corpus grouping)
+      // Reload all data from parent (since unsaving affects trees)
       if (onReload) await onReload();
     } catch (err) {
       console.error('Unsave failed:', err);
@@ -136,9 +170,9 @@ const SavedTabContent = ({ edges, conceptNames, corpusId, onReload, onOpenConcep
       display_order: o.displayOrder,
     })));
 
-    // Persist to backend (v2 endpoint)
+    // Persist to backend — always use corpusId=null for flat model
     try {
-      await votesAPI.updateTreeOrderV2(corpusId, order);
+      await votesAPI.updateTreeOrderV2(null, order);
     } catch (err) {
       console.error('Failed to save tree order:', err);
       loadTreeOrder();
@@ -213,42 +247,54 @@ const SavedTabContent = ({ edges, conceptNames, corpusId, onReload, onOpenConcep
 
         {trees.length === 0 ? (
           <div style={styles.emptyState}>
-            <p style={styles.emptyText}>No graph votes in this tab.</p>
+            <p style={styles.emptyText}>No graph votes yet.</p>
             <p style={styles.emptySubtext}>
               Vote on concepts by clicking the ▲ button on any concept in the graph.
             </p>
           </div>
         ) : (
           <div style={styles.treesContainer}>
-            {trees.map((tree, index) => (
-              <div key={getNodeKey(tree)} style={styles.treeCard}>
-                <div style={styles.treeCardHeader}>
-                  <div style={styles.reorderButtons}>
-                    <button
-                      onClick={() => moveTree(trees, index, -1)}
-                      disabled={index === 0}
-                      style={{
-                        ...styles.arrowButton,
-                        ...(index === 0 ? styles.arrowButtonDisabled : {}),
-                      }}
-                      title="Move up"
-                    >▲</button>
-                    <button
-                      onClick={() => moveTree(trees, index, +1)}
-                      disabled={index === trees.length - 1}
-                      style={{
-                        ...styles.arrowButton,
-                        ...(index === trees.length - 1 ? styles.arrowButtonDisabled : {}),
-                      }}
-                      title="Move down"
-                    >▼</button>
-                  </div>
-                  <div style={styles.treeCardContent}>
-                    {renderNode(tree)}
+            {trees.map((tree, index) => {
+              const badges = getTreeCorpusBadges(tree);
+              return (
+                <div key={getNodeKey(tree)} style={styles.treeCard}>
+                  <div style={styles.treeCardHeader}>
+                    <div style={styles.reorderButtons}>
+                      <button
+                        onClick={() => moveTree(trees, index, -1)}
+                        disabled={index === 0}
+                        style={{
+                          ...styles.arrowButton,
+                          ...(index === 0 ? styles.arrowButtonDisabled : {}),
+                        }}
+                        title="Move up"
+                      >▲</button>
+                      <button
+                        onClick={() => moveTree(trees, index, +1)}
+                        disabled={index === trees.length - 1}
+                        style={{
+                          ...styles.arrowButton,
+                          ...(index === trees.length - 1 ? styles.arrowButtonDisabled : {}),
+                        }}
+                        title="Move down"
+                      >▼</button>
+                    </div>
+                    <div style={styles.treeCardContent}>
+                      {badges.length > 0 && (
+                        <div style={styles.badgeRow}>
+                          {badges.map(b => (
+                            <span key={b.corpusId} style={styles.corpusBadge} title={b.corpusName}>
+                              {b.corpusName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {renderNode(tree)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
@@ -305,6 +351,26 @@ const styles = {
   treeCardContent: {
     flex: 1,
     minWidth: 0,
+  },
+  badgeRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+    marginBottom: '8px',
+  },
+  corpusBadge: {
+    display: 'inline-block',
+    padding: '1px 8px',
+    border: '1px solid #ddd',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#666',
+    background: 'transparent',
+    maxWidth: '180px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   reorderButtons: {
     display: 'flex',
@@ -372,7 +438,6 @@ const styles = {
     lineHeight: 1.4,
   },
   rootConceptName: { fontSize: '18px', fontWeight: '600' },
-  attributeTag: { color: '#999', fontWeight: '400', fontSize: '14px' },
   attributeBadge: {
     display: 'inline-block',
     padding: '1px 7px',
