@@ -529,4 +529,43 @@ export const messagesAPI = {
     api.get(`/messages/annotations/${annotationId}/status`),
 };
 
+// Phase 39a: Combos
+export const combosAPI = {
+  listCombos: (search, sort) =>
+    api.get('/combos', { params: { search, sort } }),
+
+  getCombo: (id) =>
+    api.get(`/combos/${id}`),
+
+  getComboAnnotations: (id, sort, edgeIds) =>
+    api.get(`/combos/${id}/annotations`, { params: { sort, edgeIds } }),
+
+  createCombo: (name, description) =>
+    api.post('/combos/create', { name, description }),
+
+  getMyCombos: () =>
+    api.get('/combos/mine'),
+
+  getSubscriptions: () =>
+    api.get('/combos/subscriptions'),
+
+  subscribe: (comboId) =>
+    api.post('/combos/subscribe', { comboId }),
+
+  unsubscribe: (comboId) =>
+    api.post('/combos/unsubscribe', { comboId }),
+
+  addEdge: (comboId, edgeId) =>
+    api.post(`/combos/${comboId}/edges/add`, { edgeId }),
+
+  removeEdge: (comboId, edgeId) =>
+    api.post(`/combos/${comboId}/edges/remove`, { edgeId }),
+
+  voteAnnotation: (comboId, annotationId) =>
+    api.post(`/combos/${comboId}/annotations/vote`, { annotationId }),
+
+  unvoteAnnotation: (comboId, annotationId) =>
+    api.post(`/combos/${comboId}/annotations/unvote`, { annotationId }),
+};
+
 export default api;

@@ -1968,6 +1968,76 @@ const createTables = async () => {
     `);
     console.log('Phase 38j: Created document_citation_links table');
 
+    // ── Phase 39a: Combo Infrastructure ──
+    // Combos are user-created collections of edges (concepts-in-context)
+    // from across the graph system. A combo groups related concepts and
+    // shows all annotations attached to those edges.
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS combos (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_combos_name_lower ON combos (LOWER(name));
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_combos_created_by ON combos(created_by);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS combo_edges (
+        id SERIAL PRIMARY KEY,
+        combo_id INTEGER REFERENCES combos(id) ON DELETE CASCADE,
+        edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(combo_id, edge_id)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_combo_edges_combo ON combo_edges(combo_id);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_combo_edges_edge ON combo_edges(edge_id);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS combo_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        combo_id INTEGER REFERENCES combos(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, combo_id)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_combo_subscriptions_user ON combo_subscriptions(user_id);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_combo_subscriptions_combo ON combo_subscriptions(combo_id);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS combo_annotation_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        combo_id INTEGER REFERENCES combos(id) ON DELETE CASCADE,
+        annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, combo_id, annotation_id)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_combo_annotation_votes_combo_annotation
+        ON combo_annotation_votes(combo_id, annotation_id);
+    `);
+
+    console.log('Phase 39a: Created combos, combo_edges, combo_subscriptions, combo_annotation_votes tables');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

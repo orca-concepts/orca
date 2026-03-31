@@ -11,6 +11,7 @@ const documentRoutes = require('./routes/documents');
 const pageRoutes = require('./routes/pages');
 const messageRoutes = require('./routes/messages');
 const citationRoutes = require('./routes/citations');
+const comboRoutes = require('./routes/combos');
 
 const pool = require('./config/database');
 
@@ -53,6 +54,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/pages', pageRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/citations', citationRoutes);
+app.use('/api/combos', comboRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
