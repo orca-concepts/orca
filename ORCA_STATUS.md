@@ -1441,6 +1441,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/orphaned-documents` | Required | Get current user's orphaned documents (Phase 9b) |
 | POST | `/rescue-document` | Required | Rescue an orphaned document into a corpus (Phase 9b) |
 | POST | `/dismiss-orphan` | Required | Permanently delete an orphaned document (Phase 9b) |
+| GET | `/:corpusId/documents/:documentId/annotations-for-concept/:conceptId` | Guest OK | Get annotations for a specific concept on a specific document within a corpus. Returns annotations where `edge.child_id = conceptId`, with parent context, creator username, vote counts. Sorted by vote_count DESC. (Phase 38h) |
 | ~~GET~~ | ~~`/:id/children`~~ | ~~Guest OK~~ | ~~Get direct sub-corpuses of a corpus (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
 | ~~GET~~ | ~~`/:id/tree`~~ | ~~Guest OK~~ | ~~Get full recursive tree of sub-corpuses (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
 | ~~POST~~ | ~~`/:parentId/add-subcorpus`~~ | ~~Owner/Allowed~~ | ~~Set an existing corpus as a sub-corpus of a parent (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
@@ -1533,7 +1534,8 @@ orca/
     │   ├── components/
     │   │   ├── AddConceptModal.jsx # Modal for creating concepts (legacy, still available)
     │   │   ├── AcceptInvite.jsx    # Invite acceptance page — /invite/:token route (Phase 7g)
-    │   │   ├── AnnotationPanel.jsx  # Text selection → concept search → annotation creation (Phase 7d, updated 26c — layer prop removed)
+    │   │   ├── AnnotateFromGraphPicker.jsx # Corpus/document picker for "Add as Annotation" from graph view (Phase 38h)
+    │   │   ├── AnnotationPanel.jsx  # Text selection → concept search → annotation creation (Phase 7d, updated 26c, 38h — prefilledConcept/prefilledEdge props)
     │   │   ├── AppShell.jsx         # Unified tab bar shell (header + saved tabs + graph tabs + content area)
     │   │   ├── Breadcrumb.jsx      # Navigation breadcrumb (with names)
     │   │   ├── ConceptGrid.jsx     # Grid display for concepts (Phase 14a: right-click context menu for diff; Phase 16c: flag option)
@@ -1867,6 +1869,7 @@ This only needs to be done once per database. If you drop and recreate the datab
 180. **Phone OTP Login Modal (Phase 32c):** `LoginModal.jsx` rewired from username/password forms to a two-step phone OTP flow. Each tab (Log In / Sign Up) has Step 1 (enter phone + send code) and Step 2 (enter 6-digit code + verify). Phone input shows static "+1" prefix with raw 10-digit input. Resend code link with 30-second countdown timer (`useEffect`/`setInterval`). Tab switching resets to Step 1. `logoutEverywhere` in AppShell header does API call then local cleanup unconditionally — ensures user is always logged out locally even if the server call fails.
 181. **Graceful Shutdown in server.js:** `server.js` registers `SIGINT`/`SIGTERM` handlers that call `server.close()` before exiting. This ensures port 5000 is released cleanly when the process is stopped or when nodemon restarts after a crash. Without this, stale Node processes hold the port and cause `EADDRINUSE` errors on restart.
 182. **Email Column Reactivated for Legal Notifications (Phase 36):** The `email` column on `users` was retired in Phase 32d but is reactivated in Phase 36 for legal notifications (copyright violations, ToS updates). Required for new registrations at application level; DB column stays nullable for backward compatibility. Not used for auth — phone OTP remains the only auth mechanism. No uniqueness constraint on email.
+183. **Add as Annotation from Graph View (Phase 38h):** Users can annotate documents with the current concept directly from the graph view without navigating to the document first. The "Add as Annotation" button (children view only, logged-in users with a context) opens `AnnotateFromGraphPicker.jsx`, a lightweight corpus/document picker that shows subscribed corpuses with their documents and existing annotations for duplicate prevention. Selecting a document triggers the pending-document navigation pattern: `AppShell.handleAnnotateFromGraph` auto-subscribes if needed, sets `pendingCorpusDocumentId` + `pendingAnnotationFromGraph`, switches to the corpus tab. `CorpusTabContent` opens the document and the annotation creation panel with concept/edge pre-filled via `prefilledConcept`/`prefilledEdge` props on `AnnotationPanel.jsx`. The user can then see the document body, add quote text and comments, and confirm.
 
 ### Common Tasks
 
@@ -2481,33 +2484,34 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38h: Add as Annotation from Graph View — ⏳ PLANNED
+#### Phase 38h: Add as Annotation from Graph View — ✅ COMPLETE
 
 **Complexity:** High
 
 **Current behavior:** Annotations can only be created from the document viewer (inside a corpus tab). To annotate a document with a concept, you must first navigate to the document, then create the annotation.
 
-**New behavior:** A new "Add as Annotation" button in the concept view (graph context) lets users annotate documents with the current concept without leaving the graph. Opens a modal listing subscribed corpuses with their documents. Clicking a document card opens the annotation creation panel with the concept pre-filled. Existing annotations for that concept on that document are shown to prevent duplicates.
+**New behavior:** A new "Add as Annotation" button in the concept view (graph context) lets users annotate documents with the current concept without leaving the graph. Opens a picker modal listing subscribed corpuses with their documents. Clicking a document navigates to the corpus tab doc viewer with the annotation creation panel pre-filled with the current concept and edge. Existing annotations for that concept on each document are shown inline in the picker to prevent duplicates.
 
 **Implementation:**
 
-**New modal component (`AnnotateFromGraphModal.jsx`):**
-- Lists user's subscribed corpuses as expandable sections.
-- Each corpus section shows its documents as clickable cards.
-- Clicking a document card:
-  1. Fetches existing annotations for this concept on this document (new backend endpoint).
-  2. Shows the existing annotations (if any) so the user can see what's already there.
-  3. Opens the annotation creation form with: concept pre-filled (current concept + edge), document selected, fields for quote text (optional) and comment (optional), "Create Annotation" confirm button.
-- The corpus + document determines the `corpus_id` and `document_id` for the annotation. The `edge_id` comes from the current concept's context.
-
 **New backend endpoint:**
-- `GET /api/documents/:documentId/annotations-for-concept/:conceptId?corpusId=N` — returns all annotations on this document in this corpus that reference any edge for this concept. Used to show existing annotations and prevent duplicates.
+- `GET /api/corpuses/:corpusId/documents/:documentId/annotations-for-concept/:conceptId` — guest-accessible via `optionalAuth`. Returns all annotations on a document within a corpus that reference any edge where `child_id = conceptId`. Includes parent context info (parent_name, graph_path, attribute_name), creator username, vote_count, user_voted. Uses LEFT JOIN on users and concepts (SET NULL FK safety). Sorted by vote_count DESC, created_at DESC.
+
+**New picker component (`AnnotateFromGraphPicker.jsx`):**
+- Lightweight corpus/document picker modal — no annotation creation form inside.
+- Lists subscribed corpuses as expandable sections with document counts.
+- Expanded corpus shows documents; for each document, fetches existing annotations via the Part 1 endpoint and filters to the current edge for duplicate detection.
+- Existing annotations shown inline below document cards (quote text + comment, truncated).
+- Clicking a document triggers navigation to the corpus tab doc viewer.
+
+**Navigation flow (via existing pending-document pattern):**
+- `Concept.jsx` → `onAnnotateFromGraph` callback → `AppShell.handleAnnotateFromGraph` auto-subscribes to corpus if needed, sets `pendingCorpusDocumentId` + `pendingAnnotationFromGraph`, switches to corpus tab → `CorpusTabContent` opens the document and the annotation creation panel with concept/edge pre-filled via new `prefilledConcept`/`prefilledEdge` props on `AnnotationPanel.jsx`.
 
 **Frontend integration:**
-- "Add as Annotation" button appears in the concept view header (or action row), next to the existing action buttons.
-- Button only visible to logged-in users with at least one corpus subscription.
+- "Add as Annotation" button appears in concept view header, only in children view (not flip view), only for logged-in users with a parent edge context.
+- `AnnotationPanel.jsx` accepts optional `prefilledConcept` and `prefilledEdge` props that skip concept search and context picker steps.
 
-**Files:** New `AnnotateFromGraphModal.jsx`, `Concept.jsx`, `corpusController.js` or `conceptsController.js`, `api.js`
+**Files:** New `AnnotateFromGraphPicker.jsx`, modified `AnnotationPanel.jsx`, `Concept.jsx`, `AppShell.jsx`, `CorpusTabContent.jsx`, `corpusController.js`, `corpuses.js` (route), `api.js`
 
 ---
 
@@ -2600,8 +2604,9 @@ Completed:
 6. ~~**38b** (root swap votes)~~ ✅
 7. ~~**38c** (expanded swap votes)~~ ✅
 
+8. ~~**38h** (annotate from graph)~~ ✅
+
 Remaining:
-8. **38h** (annotate from graph) — high complexity, high value for power users
 9. **38i** (delete any version) — needs investigation first
 10. **38j** (citation links) — highest complexity, biggest differentiator for academic use case
 
