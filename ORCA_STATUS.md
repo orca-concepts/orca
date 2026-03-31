@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** March 29, 2026 (Phase 37 complete — pre-launch bug fixes; Phase 38 post-launch enhancements planned; codebase published under AGPL v3)
+**Last Updated:** March 31, 2026 (Phase 37 complete; Phase 38a/b/c/d/e/f/g complete; 38h/i/j remaining; codebase published under AGPL v3)
 
 ---
 
@@ -233,14 +233,14 @@ CREATE INDEX idx_replace_votes_replacement ON replace_votes(replacement_edge_id)
 ```
 
 **Key Points:**
-- Replacement must be a sibling (another child edge in the same parent context — same `parent_id` and `graph_path`)
-- Backend validates sibling relationship before accepting a swap vote
+- **No sibling restriction (Phase 38c):** Any edge can be proposed as a replacement for any other — the original sibling-only restriction was removed. The `replacement_edge_id` can reference any valid edge in any context.
+- Backend validates that both edges exist and are different (can't swap with self)
 - Multiple users can point to different replacements
 - Visible to all users; purely informational — no automatic removal (append-only model)
 - `edge_id` = the edge being flagged as replaceable
-- `replacement_edge_id` = the sibling edge that should replace it
+- `replacement_edge_id` = the edge that should replace it
 - Indexes on both `edge_id` and `replacement_edge_id` for fast lookups
-- Swap count (distinct users) returned as `swap_count` in children queries
+- Swap count (distinct users) returned as `swap_count` in children queries; `user_swapped` boolean returned for the current user (Phase 38b)
 - **Mutual exclusivity (Phase 20c):** Save and swap are mutually exclusive per user per edge. Saving removes any existing swap; swapping removes any existing save (with cascading unsave to descendants).
 
 ---
@@ -2210,7 +2210,7 @@ Five small fixes across several files. All are cosmetic/text changes.
 - **Symptom:** When a user votes for a swap, the visual indicator on the swap button or card is not shaded/styled the same way that save votes are (dark filled background).
 - **Fix:** Apply the same active/voted styling pattern used for save votes (▲ dark filled background) to swap vote indicators. Check both `ConceptGrid.jsx` (⇄ button on child cards) and `SwapModal.jsx` (vote buttons in the modal).
 - **Files:** `SwapModal.jsx`, `ConceptGrid.jsx`
-- **Status:** Partially complete. `SwapModal.jsx` vote buttons now correctly use active styling (`voteButtonActive`). However, the `ConceptGrid.jsx` ⇄ button cannot show per-user swap status because the backend's `getConceptWithChildren` does not return a `user_swapped` field in the children response (it returns `swap_count` but not whether the current user has swapped). The `swapButtonActive` style is defined and ready in ConceptGrid. **Deferred to Phase 38c** — when the swap vote system is overhauled, the backend will add `user_swapped` (via `BOOL_OR(rv.user_id = $userId)` subquery, same pattern as `user_voted` for saves).
+- **Status:** Partially complete in Phase 37d. `SwapModal.jsx` vote buttons fixed. `ConceptGrid.jsx` ⇄ per-user active styling completed in Phase 38b/38c — backend now returns `user_swapped` field and `swapButtonActive` style is applied.
 
 **Fix 3 — Unicode escape 'u/2026' in diff modal search bar:**
 - **Symptom:** The compare children diff view shows `u/2026` (a Unicode escape for the ellipsis character `…`) after the placeholder text in the search bar.
@@ -2307,13 +2307,16 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-### Phase 38: Post-Launch Enhancements — ⏳ PLANNED
+### Phase 38: Post-Launch Enhancements — 🟡 IN PROGRESS
 
 **Goal:** New features and improvements planned for after public launch. Each sub-phase is independent and can be implemented in any order based on user feedback and priorities. Complexity estimates included for planning.
 
+**Completed:** 38a, 38b, 38c, 38d, 38e, 38f, 38g (7 of 10)
+**Remaining:** 38h (annotate from graph), 38i (delete any version), 38j (citation links)
+
 ---
 
-#### Phase 38a: Flip View Navigation Stays on Current Concept — ⏳ PLANNED
+#### Phase 38a: Flip View Navigation Stays on Current Concept — ✅ COMPLETE
 
 **Complexity:** Medium
 
@@ -2331,7 +2334,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38b: Swap Votes on Root-Level Concepts — ⏳ PLANNED
+#### Phase 38b: Swap Votes on Root-Level Concepts — ✅ COMPLETE
 
 **Complexity:** Medium
 
@@ -2351,7 +2354,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38c: Expanded Swap Votes — Any Concept via Search — ⏳ PLANNED
+#### Phase 38c: Expanded Swap Votes — Any Concept via Search — ✅ COMPLETE
 
 **Complexity:** High
 
@@ -2381,7 +2384,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38d: Graph Votes Page Revamp — Flat with Corpus Badges — ⏳ PLANNED
+#### Phase 38d: Graph Votes Page Revamp — Flat with Corpus Badges — ✅ COMPLETE
 
 **Complexity:** Medium-High
 
@@ -2410,7 +2413,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38e: Color Set Threshold & Count-Based Sorting — ⏳ PLANNED
+#### Phase 38e: Color Set Threshold & Count-Based Sorting — ✅ COMPLETE
 
 **Complexity:** Medium
 
@@ -2440,7 +2443,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38f: Filter Annotations by Attribute — ⏳ PLANNED
+#### Phase 38f: Filter Annotations by Attribute — ✅ COMPLETE
 
 **Complexity:** Low-Medium
 
@@ -2459,7 +2462,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38g: Sort Annotations by Quote Position — ⏳ PLANNED
+#### Phase 38g: Sort Annotations by Quote Position — ✅ COMPLETE
 
 **Complexity:** Medium
 
@@ -2588,14 +2591,16 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 
 #### Phase 38 Implementation Priority (suggested)
 
-Based on impact and dependencies:
-1. **38a** (Flip View navigation) — quick win, improves core navigation
-2. **38f** (attribute filter) — low complexity, useful for researchers
-3. **38g** (position sort) — medium complexity, natural companion to 38f
-4. **38d** (Graph Votes revamp) — fixes a real data visibility bug
-5. **38e** (color set threshold) — should wait until there are real users to calibrate
-6. **38b** (root swap votes) — implement before 38c
-7. **38c** (expanded swap votes) — depends on 38b
+Completed:
+1. ~~**38a** (Flip View navigation)~~ ✅
+2. ~~**38f** (attribute filter)~~ ✅
+3. ~~**38g** (position sort)~~ ✅
+4. ~~**38d** (Graph Votes revamp)~~ ✅
+5. ~~**38e** (color set threshold)~~ ✅
+6. ~~**38b** (root swap votes)~~ ✅
+7. ~~**38c** (expanded swap votes)~~ ✅
+
+Remaining:
 8. **38h** (annotate from graph) — high complexity, high value for power users
 9. **38i** (delete any version) — needs investigation first
 10. **38j** (citation links) — highest complexity, biggest differentiator for academic use case

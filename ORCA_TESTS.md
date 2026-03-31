@@ -77,9 +77,16 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Save count on children updates correctly after adding/removing saves
 
 ### Swap votes
-- [ ] Adding a swap vote validates that the replacement is a sibling (same `parent_id` and `graph_path`)
-- [ ] Adding a swap vote on a non-sibling returns an error
+- [ ] Adding a swap vote between any two different edges succeeds (sibling restriction removed in Phase 38c)
+- [ ] Adding a swap vote where edge_id === replacement_edge_id returns an error (can't swap with self)
 - [ ] Save and swap are mutually exclusive: saving removes any existing swap on that edge; swapping removes any existing save (with cascading unsave to descendants)
+- [ ] `user_swapped` field is returned in children response (true when current user has a swap vote on that edge, false otherwise)
+- [ ] `user_swapped` is false for guest users
+- [ ] Root concepts include `swap_count` and `user_swapped` in the root concepts response
+- [ ] ⇄ button appears on root concept cards with swap count
+- [ ] SwapModal shows enriched suggestions with concept name, attribute, path, vote count
+- [ ] SwapModal search finds concepts across the database (not limited to siblings)
+- [ ] SwapModal suggestion cards have navigation links that open in new tab
 
 ### Link votes (Flip View)
 - [ ] Link votes can only be added in contextual Flip View (with an `originEdgeId`)
