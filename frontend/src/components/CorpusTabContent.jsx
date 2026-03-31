@@ -100,6 +100,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   // Phase 31d: Annotation fingerprints across version chain for version nav buttons
   const [versionAnnMap, setVersionAnnMap] = useState([]);
 
+  // Phase 38i: Delete any version from version history
+  const [deleteVersionTarget, setDeleteVersionTarget] = useState(null); // { id, versionNumber, hasOtherVersions }
+  const [deletingVersion, setDeletingVersion] = useState(false);
+
   // Phase 22a: file input ref for version upload
   const versionFileInputRef = useRef(null);
 
@@ -929,6 +933,52 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     loadCorpus();
   };
 
+  // Phase 38i: Delete any version from version history
+  const handleDeleteVersion = async (versionId) => {
+    try {
+      setDeletingVersion(true);
+      await documentsAPI.deleteDocument(versionId);
+
+      // Determine where to navigate after deletion
+      const remainingVersions = versionChain.filter(v => v.id !== versionId);
+
+      if (remainingVersions.length === 0) {
+        // Last version deleted — close document view, refresh corpus
+        setDocument(null);
+        setSubView({ view: 'list' });
+        setVersionChain([]);
+        setVersionHistory([]);
+        setShowVersionHistory(false);
+        loadCorpus();
+      } else if (document && document.id === versionId) {
+        // User was viewing the deleted version — navigate to nearest surviving version
+        const deletedIdx = versionChain.findIndex(v => v.id === versionId);
+        // Prefer previous version, then next
+        const nextVersion = deletedIdx > 0
+          ? remainingVersions[Math.min(deletedIdx - 1, remainingVersions.length - 1)]
+          : remainingVersions[0];
+        setShowVersionHistory(false);
+        setVersionHistory([]);
+        handleOpenDocument(nextVersion.id);
+        loadCorpus();
+      } else {
+        // User was viewing a different version — just refresh the chain and history
+        const updatedChainRes = await documentsAPI.getVersionChain(document.id).catch(() => ({ data: { versions: [] } }));
+        setVersionChain(updatedChainRes.data.versions || []);
+        if (showVersionHistory) {
+          const histRes = await corpusAPI.getVersionHistory(document.id).catch(() => ({ data: { versions: [] } }));
+          setVersionHistory(histRes.data.versions || []);
+        }
+        loadCorpus();
+      }
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete version');
+    } finally {
+      setDeletingVersion(false);
+      setDeleteVersionTarget(null);
+    }
+  };
+
   const handleDocListToggleFavorite = async (docId) => {
     if (isGuest) return;
     try {
@@ -1373,14 +1423,82 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                   onClick={() => v.id !== document.id && handleOpenVersion(v.id)}
                 >
                   <div style={styles.versionCardTitle}>
-                    v{v.version_number}
-                    {v.id === document.id && <span style={styles.currentBadge}>current</span>}
+                    <span>
+                      v{v.version_number}
+                      {v.id === document.id && <span style={styles.currentBadge}>current</span>}
+                    </span>
+                    {!isGuest && user && v.uploaded_by === user.id && (
+                      <button
+                        style={styles.versionDeleteBtn}
+                        title="Delete this version"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteVersionTarget({
+                            id: v.id,
+                            versionNumber: v.version_number,
+                            hasOtherVersions: versionHistory.length > 1,
+                            hasDownstream: versionHistory.some(other => other.source_document_id === v.id),
+                          });
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                   <div style={styles.versionCardMeta}>
-                    by {v.uploader_username} · {new Date(v.created_at).toLocaleDateString()}
+                    by {v.uploader_username || 'deleted user'} · {new Date(v.created_at).toLocaleDateString()}
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 38i: Delete version confirmation modal */}
+        {deleteVersionTarget && (
+          <div style={styles.deleteVersionOverlay} onClick={() => { if (!deletingVersion) setDeleteVersionTarget(null); }}>
+            <div style={styles.deleteVersionModal} onClick={e => e.stopPropagation()}>
+              <div style={styles.deleteVersionHeader}>
+                <span style={styles.deleteVersionTitle}>Delete Version</span>
+                <span
+                  style={styles.deleteVersionClose}
+                  onClick={() => { if (!deletingVersion) setDeleteVersionTarget(null); }}
+                >✕</span>
+              </div>
+              <div style={styles.deleteVersionBody}>
+                <p style={styles.deleteVersionText}>
+                  Delete v{deleteVersionTarget.versionNumber} of "{document?.title}"?
+                </p>
+                <p style={styles.deleteVersionText}>
+                  This will permanently remove this version and its annotations, messages, and favorites. This cannot be undone.
+                </p>
+                {deleteVersionTarget.hasOtherVersions && (
+                  <p style={styles.deleteVersionNote}>
+                    Other versions will not be affected.
+                  </p>
+                )}
+                {deleteVersionTarget.hasDownstream && (
+                  <p style={styles.deleteVersionNote}>
+                    Versions created from this one will become standalone documents.
+                  </p>
+                )}
+              </div>
+              <div style={styles.deleteVersionActions}>
+                <button
+                  style={styles.deleteVersionCancelBtn}
+                  onClick={() => { if (!deletingVersion) setDeleteVersionTarget(null); }}
+                  disabled={deletingVersion}
+                >
+                  Cancel
+                </button>
+                <button
+                  style={styles.deleteVersionConfirmBtn}
+                  disabled={deletingVersion}
+                  onClick={() => handleDeleteVersion(deleteVersionTarget.id)}
+                >
+                  {deletingVersion ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2991,6 +3109,7 @@ const styles = {
     color: '#333',
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: '6px',
   },
   versionCardMeta: {
@@ -2998,6 +3117,98 @@ const styles = {
     fontFamily: '"EB Garamond", Georgia, serif',
     color: '#999',
     marginTop: '2px',
+  },
+  // Phase 38i: Version delete button and confirmation modal
+  versionDeleteBtn: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#999',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '0 4px',
+    fontWeight: 'normal',
+  },
+  deleteVersionOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2000,
+  },
+  deleteVersionModal: {
+    backgroundColor: '#fafaf8',
+    border: '1px solid #d0d0d0',
+    borderRadius: '8px',
+    padding: '24px',
+    maxWidth: '420px',
+    width: '90%',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  deleteVersionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px',
+  },
+  deleteVersionTitle: {
+    fontSize: '17px',
+    fontWeight: '600',
+    color: '#333',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  deleteVersionClose: {
+    cursor: 'pointer',
+    fontSize: '16px',
+    color: '#999',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  deleteVersionBody: {
+    marginBottom: '20px',
+  },
+  deleteVersionText: {
+    fontSize: '14px',
+    color: '#333',
+    lineHeight: '1.5',
+    margin: '0 0 8px 0',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  deleteVersionNote: {
+    fontSize: '13px',
+    color: '#8a7a5a',
+    lineHeight: '1.4',
+    margin: '0 0 6px 0',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  deleteVersionActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '10px',
+  },
+  deleteVersionCancelBtn: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '14px',
+    padding: '6px 16px',
+    border: '1px solid #d0d0d0',
+    borderRadius: '4px',
+    background: 'transparent',
+    color: '#333',
+    cursor: 'pointer',
+  },
+  deleteVersionConfirmBtn: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '14px',
+    padding: '6px 16px',
+    border: '1px solid #333',
+    borderRadius: '4px',
+    background: '#333',
+    color: '#fafaf8',
+    cursor: 'pointer',
   },
   // Annotation sidebar
   annotationSidebar: {
