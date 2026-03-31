@@ -3788,6 +3788,7 @@ const styles = {
     fontWeight: 'bold',
     color: '#555',
     marginBottom: '8px',
+    paddingLeft: '4px',
   },
   citedCard: {
     padding: '8px 12px',
