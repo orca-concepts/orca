@@ -486,21 +486,27 @@ const conceptsController = {
       if (req.user && result.rows.length > 0) {
         const conceptIds = result.rows.map(r => r.id);
         const corpusAnnotationQuery = `
-          SELECT DISTINCT e.child_id AS concept_id, co.id AS corpus_id, co.name AS corpus_name
+          SELECT e.child_id AS concept_id, co.id AS corpus_id, co.name AS corpus_name, d.title AS document_title
           FROM document_annotations da
           JOIN edges e ON da.edge_id = e.id
           JOIN corpuses co ON da.corpus_id = co.id
           JOIN corpus_subscriptions cs ON cs.corpus_id = co.id AND cs.user_id = $1
+          LEFT JOIN documents d ON da.document_id = d.id
           WHERE e.child_id = ANY($2::integer[])
-          ORDER BY e.child_id, co.name
+          ORDER BY e.child_id, co.name, d.title
         `;
         const corpusResult = await pool.query(corpusAnnotationQuery, [req.user.userId, conceptIds]);
         for (const row of corpusResult.rows) {
           if (!corpusAnnotationInfo[row.concept_id]) {
             corpusAnnotationInfo[row.concept_id] = [];
           }
-          if (!corpusAnnotationInfo[row.concept_id].some(c => c.corpusId === row.corpus_id)) {
-            corpusAnnotationInfo[row.concept_id].push({ corpusId: row.corpus_id, corpusName: row.corpus_name });
+          let corpusEntry = corpusAnnotationInfo[row.concept_id].find(c => c.corpusId === row.corpus_id);
+          if (!corpusEntry) {
+            corpusEntry = { corpusId: row.corpus_id, corpusName: row.corpus_name, documentTitles: [] };
+            corpusAnnotationInfo[row.concept_id].push(corpusEntry);
+          }
+          if (row.document_title && !corpusEntry.documentTitles.includes(row.document_title)) {
+            corpusEntry.documentTitles.push(row.document_title);
           }
         }
       }

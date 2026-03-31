@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { conceptsAPI } from '../services/api';
 
@@ -15,6 +16,9 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
   const [showAttributePicker, setShowAttributePicker] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // { type: 'child' | 'root', name: string }
   const [exactMatchRootAttributes, setExactMatchRootAttributes] = useState([]);
+
+  // Tooltip state for corpus badges
+  const [tooltip, setTooltip] = useState(null); // { text, x, y }
 
   const navigate = useNavigate();
   const inputRef = useRef(null);
@@ -298,15 +302,29 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
                   </div>
                   <div style={styles.resultBadges}>
                     {result.savedTabs && result.savedTabs.length > 0 && (
-                      <span style={styles.savedTabBadge}>
-                        {result.savedTabs.map(t => t.tabName).join(', ')}
-                      </span>
+                      <span style={styles.savedTabBadge}>Voted</span>
                     )}
                     {result.corpusAnnotations && result.corpusAnnotations.length > 0 && (
                       <div style={styles.corpusBadgeColumn}>
-                        {result.corpusAnnotations.map((c, i) => (
-                          <span key={i} style={styles.corpusBadge}>{c.corpusName}</span>
-                        ))}
+                        {result.corpusAnnotations.map((c, i) => {
+                          const titles = c.documentTitles || [];
+                          const tooltipText = titles.length > 0
+                            ? (titles.length > 4
+                              ? `Annotated in: ${titles.slice(0, 4).join(', ')} and ${titles.length - 4} more`
+                              : `Annotated in: ${titles.join(', ')}`)
+                            : null;
+                          return (
+                            <span
+                              key={i}
+                              style={styles.corpusBadge}
+                              onMouseEnter={tooltipText ? (e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setTooltip({ text: tooltipText, x: rect.left + rect.width / 2, y: rect.top });
+                              } : undefined}
+                              onMouseLeave={tooltipText ? () => setTooltip(null) : undefined}
+                            >{c.corpusName}</span>
+                          );
+                        })}
                       </div>
                     )}
                     {result.isChild && (
@@ -339,6 +357,34 @@ const SearchField = ({ parentId, path, viewMode, onConceptAdded, isRootPage, gra
         maxLength={255}
         style={styles.input}
       />
+
+      {/* Corpus badge tooltip — rendered via portal to avoid affecting dropdown layout */}
+      {tooltip && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed',
+          left: tooltip.x,
+          top: tooltip.y,
+          transform: 'translate(-50%, -100%)',
+          marginTop: -4,
+          padding: '4px 8px',
+          fontSize: '11px',
+          fontFamily: '"EB Garamond", Georgia, serif',
+          color: '#333',
+          backgroundColor: '#fff',
+          border: '1px solid #ccc',
+          borderRadius: '4px',
+          whiteSpace: 'nowrap',
+          maxWidth: '300px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          zIndex: 10001,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+          pointerEvents: 'none',
+        }}>
+          {tooltip.text}
+        </div>,
+        window.document.body
+      )}
     </div>
   );
 };
