@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import AppShell from './components/AppShell';
 import AcceptInvite from './components/AcceptInvite';
 import DocInviteAccept from './components/DocInviteAccept';
+import CitationRedirect from './components/CitationRedirect';
 
 function App() {
   return (
@@ -20,6 +21,8 @@ function App() {
           {/* Phase 26a: Document co-author invite acceptance */}
           <Route path="/doc-invite/:token" element={<DocInviteAccept />} />
 
+          {/* Phase 38j: Citation URL handling */}
+          <Route path="/cite/a/:annotationId" element={<CitationRedirect />} />
 
           {/* AppShell handles both authenticated and guest users */}
           <Route

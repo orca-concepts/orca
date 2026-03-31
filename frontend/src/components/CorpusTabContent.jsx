@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI } from '../services/api';
+import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI, citationsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import AnnotationPanel from './AnnotationPanel';
 import CorpusDocumentList from './CorpusDocumentList';
@@ -78,6 +78,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   // Phase 38h: Pre-filled concept/edge from graph annotation flow
   const [prefilledConcept, setPrefilledConcept] = useState(null);
   const [prefilledEdge, setPrefilledEdge] = useState(null);
+
+  // Phase 38j: Citation links state
+  const [citations, setCitations] = useState([]);
+  const [copiedAnnotationId, setCopiedAnnotationId] = useState(null);
 
   const bodyRef = useRef(null);
   const highlightMarkRef = useRef(null);
@@ -280,6 +284,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       }
       // Phase 26a: Load co-author info
       loadDocumentAuthors(docId);
+      // Phase 38j: Load citations for this document
+      documentsAPI.getCitations(docId)
+        .then(res => setCitations(res.data.citations || []))
+        .catch(() => setCitations([]));
     } catch (err) {
       console.error('Failed to load document:', err);
     } finally {
@@ -425,6 +433,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     setVersionCopyrightConfirmed(false);
     // Phase 7i: Clear concept links
     setConceptLinks([]);
+    // Phase 38j: Clear citations
+    setCitations([]);
   };
 
   // Phase 7i-5: Load concept links using cached endpoint (for finalized documents)
@@ -740,6 +750,40 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       }
     } catch (err) {
       console.error('Failed to remove annotation vote:', err);
+    }
+  };
+
+  // ─── Phase 38j: Citation helpers ────────────────────
+  const handleCiteAnnotation = (annotationId) => {
+    const citationUrl = `${window.location.origin}/cite/a/${annotationId}`;
+    navigator.clipboard.writeText(citationUrl).then(() => {
+      setCopiedAnnotationId(annotationId);
+      setTimeout(() => setCopiedAnnotationId(null), 2000);
+    }).catch(() => {
+      // Fallback for insecure contexts
+      const textArea = window.document.createElement('textarea');
+      textArea.value = citationUrl;
+      window.document.body.appendChild(textArea);
+      textArea.select();
+      window.document.execCommand('copy');
+      window.document.body.removeChild(textArea);
+      setCopiedAnnotationId(annotationId);
+      setTimeout(() => setCopiedAnnotationId(null), 2000);
+    });
+  };
+
+  const handleNavigateToCitation = async (citation) => {
+    if (!citation.available || !citation.annotationId) return;
+    try {
+      const res = await citationsAPI.resolveCitation(citation.annotationId);
+      const data = res.data;
+      if (!data.found) return;
+      // Navigate to the cited annotation's document in the correct corpus tab
+      if (onOpenCorpusTab) {
+        onOpenCorpusTab(data.corpusId, data.corpusName, data.documentId, data.annotationId);
+      }
+    } catch (err) {
+      console.error('Failed to resolve citation:', err);
     }
   };
 
@@ -1513,7 +1557,34 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               ref={bodyRef}
               style={document.format === 'markdown' ? styles.bodyTextPre : styles.bodyText}
             >
-              {document.body}
+              {(() => {
+                // Phase 38j: Render citation URLs as clickable links in the document body
+                const body = document.body;
+                if (!body) return null;
+                const citRegex = /((?:https?:\/\/[^\s/]+)?\/cite\/a\/\d+)/g;
+                const parts = body.split(citRegex);
+                if (parts.length <= 1) return body;
+                return parts.map((part, idx) => {
+                  const idMatch = part.match(/\/cite\/a\/(\d+)/);
+                  if (idMatch) {
+                    const annId = parseInt(idMatch[1], 10);
+                    return (
+                      <span
+                        key={idx}
+                        style={styles.citationBodyLink}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleNavigateToCitation({ available: true, annotationId: annId });
+                        }}
+                        title={'Citation: annotation #' + annId}
+                      >
+                        {part}
+                      </span>
+                    );
+                  }
+                  return part;
+                });
+              })()}
             </div>
           </div>
 
@@ -1811,6 +1882,17 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
 
                           {/* Phase 26c-2: Color set preference UI removed */}
 
+                          {/* Phase 38j: Cite button */}
+                          {!isGuest && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCiteAnnotation(ann.id); }}
+                              style={styles.citeBtn}
+                              title="Copy citation URL to clipboard"
+                            >
+                              {copiedAnnotationId === ann.id ? 'Copied!' : 'Cite'}
+                            </button>
+                          )}
+
                           {/* Navigate to concept */}
                           {onOpenConceptTab && (
                             <button
@@ -1919,6 +2001,36 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               </div>
             );
             })()}
+
+            {/* Phase 38j: Cited Annotations section */}
+            {citations.length > 0 && (
+              <div style={styles.citedSection}>
+                <div style={styles.citedSectionHeader}>Cited Annotations</div>
+                {citations.map(cit => (
+                  <div key={cit.id} style={styles.citedCard}>
+                    <div style={styles.citedCardHeader}>
+                      <span style={styles.citedConceptName}>{cit.conceptName || 'Unknown concept'}</span>
+                    </div>
+                    {cit.quoteText && (
+                      <div style={styles.citedQuote}>
+                        "{cit.quoteText.length > 100 ? cit.quoteText.substring(0, 100) + '...' : cit.quoteText}"
+                      </div>
+                    )}
+                    <div style={styles.citedSource}>
+                      From: {cit.documentTitle || 'Unknown document'} · {cit.corpusName || 'Unknown corpus'}
+                    </div>
+                    {cit.available ? (
+                      <button
+                        onClick={() => handleNavigateToCitation(cit)}
+                        style={styles.citedNavigateBtn}
+                      >Navigate →</button>
+                    ) : (
+                      <span style={styles.citedUnavailable}>(no longer available)</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Concepts in this document */}
             {!conceptLinksLoading && conceptLinks.length > 0 && (() => {
@@ -3652,6 +3764,84 @@ const styles = {
     fontFamily: '"EB Garamond", Georgia, serif',
     fontSize: '12px',
     color: '#888',
+  },
+  // Phase 38j: Citation styles
+  citeBtn: {
+    padding: '2px 8px',
+    border: '1px solid #ccc',
+    borderRadius: '3px',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#666',
+    marginTop: '4px',
+  },
+  citedSection: {
+    marginTop: '16px',
+    borderTop: '1px solid #ddd',
+    paddingTop: '10px',
+  },
+  citedSectionHeader: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: '8px',
+  },
+  citedCard: {
+    padding: '8px 12px',
+    marginBottom: '6px',
+    border: '1px solid #eee',
+    borderRadius: '4px',
+    backgroundColor: '#faf9f7',
+  },
+  citedCardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  citedConceptName: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  citedQuote: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '13px',
+    color: '#555',
+    marginTop: '4px',
+  },
+  citedSource: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#888',
+    marginTop: '4px',
+  },
+  citedNavigateBtn: {
+    padding: '2px 8px',
+    border: '1px solid #ccc',
+    borderRadius: '3px',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#555',
+    marginTop: '6px',
+  },
+  citedUnavailable: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#aaa',
+    marginTop: '4px',
+    display: 'inline-block',
+  },
+  citationBodyLink: {
+    color: '#555',
+    textDecoration: 'underline',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
 };
 

@@ -261,6 +261,18 @@ const AppShell = () => {
     }
   }, [contextMenu]);
 
+  // Phase 38j: Handle pending citation from CitationRedirect route
+  useEffect(() => {
+    const state = location.state;
+    if (state?.pendingCitation && !isGuest) {
+      const { corpusId, corpusName, documentId, annotationId } = state.pendingCitation;
+      // Clear the state to prevent re-triggering
+      navigate(location.pathname, { replace: true, state: {} });
+      // Use the existing subscribe-and-navigate pattern
+      handleSubscribeToCorpus(corpusId, corpusName || '', documentId, annotationId);
+    }
+  }, [location.state, isGuest]);
+
   // Close account menu on click outside
   useEffect(() => {
     if (!showAccountMenu) return;
