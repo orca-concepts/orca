@@ -629,6 +629,9 @@ const uploadDocument = async (req, res) => {
       );
     }
 
+    // Phase 38j: Detect and store citation links
+    await detectAndStoreCitations(document.id, body, client);
+
     await client.query('COMMIT');
 
     res.status(201).json({ document });
@@ -1007,6 +1010,9 @@ const createVersion = async (req, res) => {
         );
       }
     }
+
+    // Phase 38j: Detect and store citation links in new version
+    await detectAndStoreCitations(newDocId, body, client);
 
     await client.query('COMMIT');
 
@@ -3144,6 +3150,173 @@ const getAnnotationsForConceptOnDocument = async (req, res) => {
   }
 };
 
+// ── Phase 38j: Citation detection helper ──
+async function detectAndStoreCitations(citingDocumentId, body, dbClient) {
+  try {
+    const citationRegex = /(?:https?:\/\/[^/\s]+)?\/cite\/a\/(\d+)/g;
+    const seen = new Set();
+    const annotationIds = [];
+    let match;
+    while ((match = citationRegex.exec(body)) !== null) {
+      const id = parseInt(match[1], 10);
+      if (!isNaN(id) && !seen.has(id)) {
+        seen.add(id);
+        annotationIds.push(id);
+      }
+    }
+    if (annotationIds.length === 0) return;
+
+    // Batch-fetch snapshot data for all cited annotations
+    const snapshotResult = await dbClient.query(`
+      SELECT
+        da.id as annotation_id,
+        c.name as concept_name,
+        da.quote_text,
+        d.title as document_title,
+        cor.name as corpus_name
+      FROM document_annotations da
+      JOIN edges e ON da.edge_id = e.id
+      JOIN concepts c ON e.child_id = c.id
+      JOIN documents d ON da.document_id = d.id
+      JOIN corpuses cor ON da.corpus_id = cor.id
+      WHERE da.id = ANY($1)
+    `, [annotationIds]);
+
+    const snapshotMap = {};
+    snapshotResult.rows.forEach(row => {
+      snapshotMap[row.annotation_id] = row;
+    });
+
+    // Insert citation links
+    for (const annotationId of annotationIds) {
+      const snapshot = snapshotMap[annotationId];
+      await dbClient.query(`
+        INSERT INTO document_citation_links
+          (citing_document_id, cited_annotation_id, citation_url,
+           snapshot_concept_name, snapshot_quote_text, snapshot_document_title, snapshot_corpus_name)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        citingDocumentId,
+        snapshot ? annotationId : null,
+        `/cite/a/${annotationId}`,
+        snapshot?.concept_name || null,
+        snapshot?.quote_text || null,
+        snapshot?.document_title || null,
+        snapshot?.corpus_name || null,
+      ]);
+    }
+  } catch (err) {
+    // Citation detection failure should NOT block the upload
+    console.error('Citation detection error (non-fatal):', err.message);
+  }
+}
+
+// Phase 38j: Get citations for a document
+const getDocumentCitations = async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.id);
+    if (isNaN(documentId)) return res.status(400).json({ error: 'Invalid document ID' });
+
+    const result = await pool.query(`
+      SELECT
+        dcl.id,
+        dcl.cited_annotation_id,
+        dcl.citation_url,
+        dcl.snapshot_concept_name,
+        dcl.snapshot_quote_text,
+        dcl.snapshot_document_title,
+        dcl.snapshot_corpus_name,
+        dcl.created_at,
+        da.id as live_annotation_id,
+        da.quote_text as live_quote_text,
+        da.comment as live_comment,
+        da.document_id as live_document_id,
+        da.corpus_id as live_corpus_id,
+        c.name as live_concept_name,
+        d.title as live_document_title,
+        cor.name as live_corpus_name,
+        e.child_id as live_concept_id,
+        e.graph_path as live_graph_path
+      FROM document_citation_links dcl
+      LEFT JOIN document_annotations da ON dcl.cited_annotation_id = da.id
+      LEFT JOIN edges e ON da.edge_id = e.id
+      LEFT JOIN concepts c ON e.child_id = c.id
+      LEFT JOIN documents d ON da.document_id = d.id
+      LEFT JOIN corpuses cor ON da.corpus_id = cor.id
+      WHERE dcl.citing_document_id = $1
+      ORDER BY dcl.created_at ASC
+    `, [documentId]);
+
+    const citations = result.rows.map(row => {
+      const available = row.live_annotation_id != null;
+      return {
+        id: row.id,
+        citationUrl: row.citation_url,
+        available,
+        conceptName: available ? row.live_concept_name : row.snapshot_concept_name,
+        quoteText: available ? row.live_quote_text : row.snapshot_quote_text,
+        documentTitle: available ? row.live_document_title : row.snapshot_document_title,
+        corpusName: available ? row.live_corpus_name : row.snapshot_corpus_name,
+        documentId: available ? row.live_document_id : null,
+        corpusId: available ? row.live_corpus_id : null,
+        conceptId: available ? row.live_concept_id : null,
+        graphPath: available ? row.live_graph_path : null,
+        annotationId: available ? row.live_annotation_id : null,
+      };
+    });
+
+    res.json({ citations });
+  } catch (error) {
+    console.error('Error getting document citations:', error);
+    res.status(500).json({ error: 'Failed to get citations' });
+  }
+};
+
+// Phase 38j: Resolve a citation URL to corpus/document for navigation
+const resolveCitation = async (req, res) => {
+  try {
+    const annotationId = parseInt(req.params.annotationId);
+    if (isNaN(annotationId)) return res.status(400).json({ found: false });
+
+    const result = await pool.query(`
+      SELECT
+        da.id as annotation_id,
+        da.corpus_id,
+        da.document_id,
+        da.quote_text,
+        e.child_id as concept_id,
+        c.name as concept_name,
+        d.title as document_title,
+        cor.name as corpus_name
+      FROM document_annotations da
+      JOIN edges e ON da.edge_id = e.id
+      JOIN concepts c ON e.child_id = c.id
+      JOIN documents d ON da.document_id = d.id
+      JOIN corpuses cor ON da.corpus_id = cor.id
+      WHERE da.id = $1
+    `, [annotationId]);
+
+    if (result.rows.length === 0) {
+      return res.json({ found: false });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      found: true,
+      corpusId: row.corpus_id,
+      documentId: row.document_id,
+      annotationId: row.annotation_id,
+      conceptName: row.concept_name,
+      quoteText: row.quote_text,
+      documentTitle: row.document_title,
+      corpusName: row.corpus_name,
+    });
+  } catch (error) {
+    console.error('Error resolving citation:', error);
+    res.status(500).json({ error: 'Failed to resolve citation' });
+  }
+};
+
 module.exports = {
   createCorpus,
   listCorpuses,
@@ -3210,5 +3383,8 @@ module.exports = {
   // Phase 35b: Corpus ownership transfer
   transferOwnership,
   // Phase 38h: Annotate from graph view
-  getAnnotationsForConceptOnDocument
+  getAnnotationsForConceptOnDocument,
+  // Phase 38j: Citation links
+  getDocumentCitations,
+  resolveCitation
 };

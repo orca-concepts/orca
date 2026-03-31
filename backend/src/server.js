@@ -10,6 +10,7 @@ const moderationRoutes = require('./routes/moderation');
 const documentRoutes = require('./routes/documents');
 const pageRoutes = require('./routes/pages');
 const messageRoutes = require('./routes/messages');
+const citationRoutes = require('./routes/citations');
 
 const pool = require('./config/database');
 
@@ -51,6 +52,7 @@ app.use('/api/moderation', moderationRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/pages', pageRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/citations', citationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

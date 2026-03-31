@@ -446,6 +446,16 @@ export const documentsAPI = {
   // Phase 35a: Delete a single document version (uploader only)
   deleteDocument: (documentId) =>
     api.post(`/documents/${documentId}/delete`),
+
+  // Phase 38j: Get citations for a document (guest OK)
+  getCitations: (documentId) =>
+    api.get(`/documents/${documentId}/citations`),
+};
+
+// Phase 38j: Citation resolution
+export const citationsAPI = {
+  resolveCitation: (annotationId) =>
+    api.get(`/citations/resolve/${annotationId}`),
 };
 
 // Moderation endpoints (Phase 16a)

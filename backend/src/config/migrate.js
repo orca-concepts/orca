@@ -1950,6 +1950,24 @@ const createTables = async () => {
 
     console.log('Phase 36a: Added age_verified_at, copyright_confirmed_at, backfilled test users');
 
+    // ── Phase 38j: Citation Links ──
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_citation_links (
+        id SERIAL PRIMARY KEY,
+        citing_document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        cited_annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE SET NULL,
+        citation_url TEXT NOT NULL,
+        snapshot_concept_name VARCHAR(255),
+        snapshot_quote_text TEXT,
+        snapshot_document_title VARCHAR(500),
+        snapshot_corpus_name VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_citation_links_citing_doc ON document_citation_links(citing_document_id);
+      CREATE INDEX IF NOT EXISTS idx_citation_links_cited_annotation ON document_citation_links(cited_annotation_id);
+    `);
+    console.log('Phase 38j: Created document_citation_links table');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

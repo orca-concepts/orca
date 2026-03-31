@@ -33,6 +33,9 @@ router.get('/:id/version-annotation-map', optionalAuth, corpusController.getVers
 // Phase 35a: Delete a single document version (auth required, uploader only)
 router.post('/:id/delete', authenticateToken, corpusController.deleteDocument);
 
+// Phase 38j: Get citations for a document (guest OK)
+router.get('/:id/citations', optionalAuth, corpusController.getDocumentCitations);
+
 // Get a single document with full body text + corpus list (guest OK)
 // NOTE: This was previously a standalone route in server.js — moved here for organization
 router.get('/:id', optionalAuth, corpusController.getDocument);
