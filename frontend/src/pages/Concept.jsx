@@ -12,6 +12,7 @@ import VoteSetBar from '../components/VoteSetBar';
 import ConceptAnnotationPanel from '../components/ConceptAnnotationPanel';
 import DiffModal from '../components/DiffModal';
 import HiddenConceptsView from '../components/HiddenConceptsView';
+import AnnotateFromGraphPicker from '../components/AnnotateFromGraphPicker';
 
 const Concept = ({
   // Props when running inside AppShell (graph tab mode)
@@ -24,6 +25,7 @@ const Concept = ({
   onOpenCorpusTab,
   onOpenConceptTab,
   onRequestLogin,
+  onAnnotateFromGraph,
 }) => {
   // Determine if we're in "tab mode" (inside AppShell) or "standalone mode" (URL-routed)
   const isTabMode = !!graphTabId;
@@ -87,6 +89,9 @@ const Concept = ({
   const [hiddenCount, setHiddenCount] = useState(0);
   const [showHiddenPanel, setShowHiddenPanel] = useState(false);
   
+  // Phase 38h: Annotate from graph picker
+  const [showAnnotatePicker, setShowAnnotatePicker] = useState(false);
+
   // Phase 27d: Responsive layout
   const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900);
 
@@ -583,6 +588,15 @@ const Concept = ({
                 {shareLinkCopied ? 'Copied!' : 'Share'}
               </button>
             </div>
+            {user && !isGuest && effectiveViewMode === 'children' && parentEdgeId && onAnnotateFromGraph && (
+              <button
+                onClick={() => setShowAnnotatePicker(true)}
+                style={styles.annotateButton}
+                title="Add this concept as an annotation on a document"
+              >
+                Add as Annotation
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -755,6 +769,26 @@ const Concept = ({
           onClose={() => { setShowHiddenPanel(false); loadHiddenCount(); loadConcept(); }}
         />
       )}
+
+      {/* Phase 38h: Annotate from graph picker */}
+      <AnnotateFromGraphPicker
+        isOpen={showAnnotatePicker}
+        onClose={() => setShowAnnotatePicker(false)}
+        onSelectDocument={(corpusId, documentId) => {
+          setShowAnnotatePicker(false);
+          if (onAnnotateFromGraph) {
+            onAnnotateFromGraph(corpusId, documentId, {
+              conceptId: Number(effectiveConceptId),
+              conceptName: concept?.name,
+              edgeId: parentEdgeId,
+              attributeName: currentAttribute?.name,
+            });
+          }
+        }}
+        conceptId={Number(effectiveConceptId)}
+        conceptName={concept?.name || ''}
+        edgeId={parentEdgeId}
+      />
     </div>
   );
 };
@@ -823,6 +857,18 @@ const styles = {
     fontSize: '14px',
     fontFamily: '"EB Garamond", Georgia, serif',
     transition: 'all 0.15s',
+    whiteSpace: 'nowrap',
+  },
+  annotateButton: {
+    padding: '8px 16px',
+    backgroundColor: 'transparent',
+    color: '#333',
+    border: '1px solid #333',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontWeight: '500',
     whiteSpace: 'nowrap',
   },
   main: {

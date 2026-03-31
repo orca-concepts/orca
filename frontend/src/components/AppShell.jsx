@@ -39,6 +39,9 @@ const AppShell = () => {
   // Phase 27c: Pending annotation to highlight after navigating to a document
   const [pendingAnnotationId, setPendingAnnotationId] = useState(null);
 
+  // Phase 38h: Pending annotation from graph — pre-fill annotation creation panel
+  const [pendingAnnotationFromGraph, setPendingAnnotationFromGraph] = useState(null);
+
   // Tab groups (Phase 5d)
   const [tabGroups, setTabGroups] = useState([]);
 
@@ -658,6 +661,43 @@ const AppShell = () => {
     }
   }, [isGuest, handleRequestLogin]);
 
+  // Phase 38h: Navigate to a corpus tab doc viewer with annotation creation pre-filled
+  const handleAnnotateFromGraph = useCallback(async (corpusId, documentId, annotationInfo) => {
+    if (isGuest) {
+      handleRequestLogin();
+      return;
+    }
+    // Subscribe if needed (handles 409 for already-subscribed)
+    try {
+      await corpusAPI.subscribe(corpusId);
+      setCorpusTabs(prev => {
+        if (prev.some(t => t.id === corpusId)) return prev;
+        return [...prev, { id: corpusId, corpus_id: corpusId, name: '', group_id: null }];
+      });
+      await refreshSidebarItems();
+    } catch (err) {
+      if (err.response?.status === 409) {
+        // Already subscribed — ensure tab exists
+        setCorpusTabs(prev => {
+          if (prev.some(t => t.id === corpusId)) return prev;
+          return [...prev, { id: corpusId, corpus_id: corpusId, name: '', group_id: null }];
+        });
+      } else if (err.response?.status === 401) {
+        handleRequestLogin();
+        return;
+      } else {
+        alert(err.response?.data?.error || 'Failed to subscribe');
+        return;
+      }
+    }
+    // Set pending states and switch to corpus tab
+    setPendingCorpusDocumentId(documentId);
+    setPendingAnnotationFromGraph(annotationInfo);
+    setActiveTab({ type: 'corpus', id: corpusId });
+    setSavedPageOpen(false);
+    setCorpusView(null);
+    setMessagesPageOpen(false);
+  }, [isGuest, handleRequestLogin]);
 
   const handleUnsubscribeFromCorpus = useCallback(async (corpusId) => {
     try {
@@ -1328,6 +1368,8 @@ const AppShell = () => {
                       onPendingDocumentConsumed={() => setPendingCorpusDocumentId(null)}
                       pendingAnnotationId={activeTab?.type === 'corpus' && activeTab?.id === ct.id ? pendingAnnotationId : null}
                       onPendingAnnotationConsumed={() => setPendingAnnotationId(null)}
+                      pendingAnnotationFromGraph={activeTab?.type === 'corpus' && activeTab?.id === ct.id ? pendingAnnotationFromGraph : null}
+                      onPendingAnnotationFromGraphConsumed={() => setPendingAnnotationFromGraph(null)}
                     />
                   </div>
                 );
@@ -1357,6 +1399,7 @@ const AppShell = () => {
                         onOpenCorpusTab={handleSubscribeToCorpus}
                         onOpenConceptTab={handleOpenConceptTab}
                         onRequestLogin={handleRequestLogin}
+                        onAnnotateFromGraph={handleAnnotateFromGraph}
                       />
                     )}
                   </div>

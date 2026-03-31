@@ -39,7 +39,7 @@ const buildOccurrenceItems = (text, body) => {
  *   - isGuest: boolean
  *   - onUnsubscribe: callback when user unsubscribes (AppShell removes the tab)
  */
-const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, onOpenCorpusTab, onViewThreads, pendingDocumentId, onPendingDocumentConsumed, pendingAnnotationId, onPendingAnnotationConsumed }) => {
+const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, onOpenCorpusTab, onViewThreads, pendingDocumentId, onPendingDocumentConsumed, pendingAnnotationId, onPendingAnnotationConsumed, pendingAnnotationFromGraph, onPendingAnnotationFromGraphConsumed }) => {
   const { user } = useAuth();
 
   // Sub-view: 'list' (document list) or { view: 'document', documentId }
@@ -75,6 +75,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   const [annMsgComposing, setAnnMsgComposing] = useState(null); // { annotationId, threadType } when composing first message
   const [annMsgBody, setAnnMsgBody] = useState('');
   const [annMsgSending, setAnnMsgSending] = useState(false);
+  // Phase 38h: Pre-filled concept/edge from graph annotation flow
+  const [prefilledConcept, setPrefilledConcept] = useState(null);
+  const [prefilledEdge, setPrefilledEdge] = useState(null);
+
   const bodyRef = useRef(null);
   const highlightMarkRef = useRef(null);
 
@@ -175,6 +179,26 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     }
     if (onPendingAnnotationConsumed) onPendingAnnotationConsumed();
   }, [pendingAnnotationId, annotations]);
+
+  // Phase 38h: After document loads, open annotation panel with pre-filled concept from graph
+  useEffect(() => {
+    if (!pendingAnnotationFromGraph) return;
+    // Wait for the document to be loaded (subView has a documentId)
+    if (!subView?.documentId) return;
+    const info = pendingAnnotationFromGraph;
+    // Set pre-filled concept and edge for the annotation panel
+    setPrefilledConcept({ id: info.conceptId, name: info.conceptName });
+    setPrefilledEdge({
+      edge_id: info.edgeId,
+      attribute_name: info.attributeName,
+      isPrefilledFromGraph: true,
+    });
+    // Open the annotation creation panel
+    setShowAnnotationPanel(true);
+    setSelectedAnnotation(null);
+    setSelectionQuoteText(null);
+    if (onPendingAnnotationFromGraphConsumed) onPendingAnnotationFromGraphConsumed();
+  }, [pendingAnnotationFromGraph, subView]);
 
   const loadCorpus = async () => {
     try {
@@ -1881,11 +1905,19 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               documentId={subView.documentId}
               documentBody={document?.body || ''}
               initialQuoteText={selectionQuoteText || ''}
-              onAnnotationCreated={handleAnnotationCreated}
+              prefilledConcept={prefilledConcept}
+              prefilledEdge={prefilledEdge}
+              onAnnotationCreated={() => {
+                setPrefilledConcept(null);
+                setPrefilledEdge(null);
+                handleAnnotationCreated();
+              }}
               onClose={() => {
                 setShowAnnotationPanel(false);
                 setSelectionQuoteText(null);
                 setSelectionBtnPos(null);
+                setPrefilledConcept(null);
+                setPrefilledEdge(null);
                 window.getSelection()?.removeAllRanges();
               }}
             />

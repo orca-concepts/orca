@@ -28,7 +28,7 @@ const buildOccurrenceItems = (text, body) => {
  * All fields (quote, comment, concept, context) are visible on one panel.
  * "Create Annotation" button is grayed out until a concept+context is selected.
  */
-const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText, onAnnotationCreated, onClose }) => {
+const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText, prefilledConcept, prefilledEdge, onAnnotationCreated, onClose }) => {
   const [quoteText, setQuoteText] = useState(initialQuoteText || '');
   const [comment, setComment] = useState('');
   const [quoteOccurrenceItems, setQuoteOccurrenceItems] = useState([]);
@@ -36,10 +36,10 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [selectedConcept, setSelectedConcept] = useState(null);
+  const [selectedConcept, setSelectedConcept] = useState(prefilledConcept || null);
   const [parentContexts, setParentContexts] = useState([]);
   const [loadingContexts, setLoadingContexts] = useState(false);
-  const [selectedEdge, setSelectedEdge] = useState(null);
+  const [selectedEdge, setSelectedEdge] = useState(prefilledEdge || null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
 
@@ -47,7 +47,8 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
   const debounceRef = useRef(null);
 
   useEffect(() => {
-    if (searchInputRef.current) searchInputRef.current.focus();
+    // Don't auto-focus search if concept is pre-filled
+    if (!prefilledConcept && searchInputRef.current) searchInputRef.current.focus();
   }, []);
 
   // Check how many times the quoted text appears in the document body
