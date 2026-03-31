@@ -143,16 +143,9 @@ const SwapModal = ({ edgeId, conceptName, onClose, onSwapVoteChanged }) => {
     }
   };
 
-  const handleOpenConcept = (conceptId, graphPath) => {
+  const getConceptUrl = (conceptId, graphPath) => {
     const pathParam = graphPath && graphPath.length > 0 ? `?path=${graphPath.join(',')}` : '';
-    window.open(`/concept/${conceptId}${pathParam}`, '_blank');
-  };
-
-  const buildPathLabel = (parentName, graphPath) => {
-    if (!parentName) return 'Root';
-    // graphPath includes root-to-parent. The parentName is the last element.
-    // We just show parentName for brevity; full path in Open link.
-    return parentName;
+    return `/concept/${conceptId}${pathParam}`;
   };
 
   // Existing suggestion edge IDs for dedup in search
@@ -201,12 +194,15 @@ const SwapModal = ({ edgeId, conceptName, onClose, onSwapVoteChanged }) => {
                     </div>
                     <div style={styles.cardMeta}>
                       {s.voteCount} {s.voteCount === 1 ? 'vote' : 'votes'}
-                      <span
+                      <a
+                        href={getConceptUrl(s.replacementChildId, s.graphPath)}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         style={styles.openLink}
-                        onClick={(e) => { e.stopPropagation(); handleOpenConcept(s.replacementChildId, s.graphPath); }}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         Open
-                      </span>
+                      </a>
                     </div>
                   </div>
                   <button
@@ -286,12 +282,15 @@ const SwapModal = ({ edgeId, conceptName, onClose, onSwapVoteChanged }) => {
                                     {ctx.name ? `${ctx.name} →` : 'Root →'}
                                   </div>
                                   <div style={styles.contextName}>{r.name}</div>
-                                  <span
+                                  <a
+                                    href={getConceptUrl(r.id, ctx.graph_path)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     style={styles.openLink}
-                                    onClick={(e) => { e.stopPropagation(); handleOpenConcept(r.id, ctx.graph_path); }}
+                                    onClick={(e) => e.stopPropagation()}
                                   >
                                     Open
-                                  </span>
+                                  </a>
                                 </div>
                                 {alreadySuggested ? (
                                   <span style={styles.alreadyVotedHint}>Already suggested</span>
