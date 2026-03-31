@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** March 31, 2026 (Phase 37 complete; Phase 38a/b/c/d/e/f/g complete; 38h/i/j remaining; codebase published under AGPL v3)
+**Last Updated:** March 31, 2026 (Phase 37 complete; Phase 38 complete; Phase 38k search polish; codebase published under AGPL v3)
 
 ---
 
@@ -1139,6 +1139,33 @@ CREATE TABLE page_comment_votes (
 CREATE INDEX idx_page_comment_votes_comment ON page_comment_votes(comment_id);
 ```
 
+#### `document_citation_links` — ✅ IMPLEMENTED (Phase 38j)
+Stores detected annotation citation URLs found in uploaded documents. When a document body contains an Orca citation URL (`cite/a/{annotationId}`), a row is created linking the citing document to the cited annotation with snapshot metadata for dead-link resilience.
+
+```sql
+CREATE TABLE document_citation_links (
+  id SERIAL PRIMARY KEY,
+  citing_document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+  cited_annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE SET NULL,
+  citation_url TEXT NOT NULL,
+  snapshot_concept_name VARCHAR(255),
+  snapshot_quote_text TEXT,
+  snapshot_document_title VARCHAR(500),
+  snapshot_corpus_name VARCHAR(255),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_citation_links_citing_doc ON document_citation_links(citing_document_id);
+CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cited_annotation_id);
+```
+
+**Key Points:**
+- `cited_annotation_id` uses `ON DELETE SET NULL` — when the cited annotation is deleted (e.g., via document deletion cascade), the citation row survives with snapshot fields intact
+- Detection happens at upload time (`uploadDocument`) and version upload time (`createVersion`) only — no re-scanning
+- Citation URLs are plain format: `{origin}/cite/a/{annotationId}`
+- Snapshot metadata (`snapshot_concept_name`, `snapshot_quote_text`, `snapshot_document_title`, `snapshot_corpus_name`) stored at detection time for dead-link resilience
+- `ON DELETE CASCADE` from `citing_document_id` ensures cleanup when the citing document is deleted
+
 ---
 
 ## API Endpoints
@@ -1447,7 +1474,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | ~~POST~~ | ~~`/:parentId/add-subcorpus`~~ | ~~Owner/Allowed~~ | ~~Set an existing corpus as a sub-corpus of a parent (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
 | ~~POST~~ | ~~`/:parentId/remove-subcorpus`~~ | ~~Owner/Allowed~~ | ~~Remove a sub-corpus link — corpus becomes top-level (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
 
-### Documents (`/api/documents`) — ✅ IMPLEMENTED (Phase 7a, extended Phase 17a, 21c, 31d)
+### Documents (`/api/documents`) — ✅ IMPLEMENTED (Phase 7a, extended Phase 17a, 21c, 31d, 38j)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -1460,6 +1487,13 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/:id/version-chain` | Guest OK | Get all documents in the same version lineage — lightweight (no body text). Returns `id, title, version_number, uploaded_by, created_at` ordered by `version_number`. (Phase 21c) |
 | GET | `/:id/version-annotation-map` | Guest OK | Get annotation fingerprints across all versions in a document's lineage. Returns `{annotations: [{document_id, version_number, edge_id, quote_text}, ...]}`. Uses bidirectional recursive CTE (chain_up + chain_down). Powers version navigation buttons on annotation cards. (Phase 31d) |
 | POST | `/:id/delete` | Uploader only | Permanently delete a single document version. Cascades to annotations, messages, favorites, cache, corpus_documents. Downstream versions referencing this one get `source_document_id = NULL`. Returns `{ deletedDocumentId }`. (Phase 35a) |
+| GET | `/:id/citations` | Guest OK | Get all citation links for a document. Returns live annotation data when `cited_annotation_id` is not null, snapshot data with `unavailable: true` when it is. (Phase 38j) |
+
+### Citations (`/api/citations`) — ✅ IMPLEMENTED (Phase 38j)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/resolve/:annotationId` | Required | Resolve a citation annotation ID to its corpus and document context for navigation. Returns `corpusId`, `documentId`, `annotationId`. (Phase 38j) |
 
 ### Moderation (`/api/moderation`) — ✅ IMPLEMENTED (Phase 16)
 
@@ -1521,7 +1555,8 @@ orca/
 │   │   │   ├── concepts.js       # Concept routes
 │   │   │   ├── corpuses.js       # Corpus & document routes (Phase 7a)
 │   │   │   ├── moderation.js     # Moderation routes (Phase 16, updated 30k — added /unflag)
-│   │   │   ├── documents.js     # Document routes — standalone doc + tags (Phase 7a, 17a)
+│   │   │   ├── citations.js     # Citation resolution routes (Phase 38j)
+│   │   │   ├── documents.js     # Document routes — standalone doc + tags + citations (Phase 7a, 17a, 38j)
 │   │   │   ├── pages.js          # Informational page comment routes (Phase 30g)
 │   │   │   └── votes.js          # Vote routes
 │   │   └── server.js             # Express app setup
@@ -1538,6 +1573,7 @@ orca/
     │   │   ├── AnnotationPanel.jsx  # Text selection → concept search → annotation creation (Phase 7d, updated 26c, 38h — prefilledConcept/prefilledEdge props)
     │   │   ├── AppShell.jsx         # Unified tab bar shell (header + saved tabs + graph tabs + content area)
     │   │   ├── Breadcrumb.jsx      # Navigation breadcrumb (with names)
+    │   │   ├── CitationRedirect.jsx # Citation URL redirect — /cite/a/:annotationId route (Phase 38j)
     │   │   ├── ConceptGrid.jsx     # Grid display for concepts (Phase 14a: right-click context menu for diff; Phase 16c: flag option)
     │   │   ├── ConceptAnnotationPanel.jsx # Cross-context annotation + web links panel for concept page right column (Phase 27a-c)
     │   │   ├── CorpusDetailView.jsx # Corpus detail page — Browse overlay with corpus header + shared sub-components (Phase 7a, updated 35a)
@@ -1870,6 +1906,8 @@ This only needs to be done once per database. If you drop and recreate the datab
 181. **Graceful Shutdown in server.js:** `server.js` registers `SIGINT`/`SIGTERM` handlers that call `server.close()` before exiting. This ensures port 5000 is released cleanly when the process is stopped or when nodemon restarts after a crash. Without this, stale Node processes hold the port and cause `EADDRINUSE` errors on restart.
 182. **Email Column Reactivated for Legal Notifications (Phase 36):** The `email` column on `users` was retired in Phase 32d but is reactivated in Phase 36 for legal notifications (copyright violations, ToS updates). Required for new registrations at application level; DB column stays nullable for backward compatibility. Not used for auth — phone OTP remains the only auth mechanism. No uniqueness constraint on email.
 183. **Add as Annotation from Graph View (Phase 38h):** Users can annotate documents with the current concept directly from the graph view without navigating to the document first. The "Add as Annotation" button (children view only, logged-in users with a context) opens `AnnotateFromGraphPicker.jsx`, a lightweight corpus/document picker that shows subscribed corpuses with their documents and existing annotations for duplicate prevention. Selecting a document triggers the pending-document navigation pattern: `AppShell.handleAnnotateFromGraph` auto-subscribes if needed, sets `pendingCorpusDocumentId` + `pendingAnnotationFromGraph`, switches to the corpus tab. `CorpusTabContent` opens the document and the annotation creation panel with concept/edge pre-filled via `prefilledConcept`/`prefilledEdge` props on `AnnotationPanel.jsx`. The user can then see the document body, add quote text and comments, and confirm.
+184. **Annotation Citation Links (Phase 38j):** Users can copy a citation URL for any annotation via a "Cite" button on annotation cards. Citation URLs use the format `/cite/a/{annotationId}`. When a document containing citation URLs is uploaded, the backend scans the body text via regex, resolves each annotation ID, and stores rows in `document_citation_links` with snapshot metadata (concept name, quote text, document title, corpus name). The "Cited Annotations" section in `CorpusTabContent` shows detected citations with live data when available or snapshot data with "(no longer available)" when the cited annotation has been deleted. Clicking a citation card navigates to the source document in the correct corpus. The `/cite/a/:annotationId` route is handled by `CitationRedirect.jsx` which resolves the annotation to its corpus/document context.
+185. **Search Corpus Badge Tooltips Include Document Titles (Phase 38k):** The corpus annotation badges on search results now include hover tooltips showing the specific document title(s) where the concept is annotated. The tooltip is rendered via `ReactDOM.createPortal` into `document.body` with `position: fixed` to avoid affecting the search dropdown layout. The backend `searchConcepts` endpoint's corpus annotation surfacing query JOINs `documents` to collect titles per corpus.
 
 ### Common Tasks
 
@@ -2310,12 +2348,11 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-### Phase 38: Post-Launch Enhancements — 🟡 IN PROGRESS
+### Phase 38: Post-Launch Enhancements — ✅ COMPLETE
 
 **Goal:** New features and improvements planned for after public launch. Each sub-phase is independent and can be implemented in any order based on user feedback and priorities. Complexity estimates included for planning.
 
-**Completed:** 38a, 38b, 38c, 38d, 38e, 38f, 38g (7 of 10)
-**Remaining:** 38h (annotate from graph), 38i (delete any version), 38j (citation links)
+**Completed:** 38a, 38b, 38c, 38d, 38e, 38f, 38g, 38h, 38i, 38j, 38k (all 11)
 
 ---
 
@@ -2515,24 +2552,21 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38i: Delete Any Document Version — ⏳ PLANNED
+#### Phase 38i: Delete Any Document Version — ✅ COMPLETE
 
-**Complexity:** Unknown (requires investigation)
+**Complexity:** Low (frontend-only fix)
 
-**Current behavior:** Per bug report, only the latest version can be deleted. It's unclear whether this is a frontend limitation (UI only shows delete button on latest version) or a backend restriction.
+**Problem:** Only the latest version could be deleted — the delete button was restricted to the most recent version in the version navigator.
 
-**Investigation needed:**
-1. Check `corpusController.js` `deleteDocument` endpoint — does it restrict deletion to the latest version, or can it accept any version ID?
-2. Check `CorpusTabContent.jsx` — does the delete button only render for the latest version in the version navigator?
-3. Check the version chain integrity logic — deleting a mid-chain version sets `source_document_id = NULL` on downstream versions (via `ON DELETE SET NULL`). Is this handled gracefully in the UI?
+**Investigation result:** The backend `deleteDocument` endpoint already accepted any version ID. The restriction was frontend-only — `CorpusTabContent.jsx` only rendered the delete button for the latest version in the version chain.
 
-**After investigation:** If it's frontend-only, add delete buttons to all versions in the version navigator (with appropriate confirmation dialogs noting that the version chain will be broken). If it's backend, update the endpoint to accept any version ID and handle chain integrity.
+**Fix:** Extended the delete button to appear on all versions in the version history panel, with confirmation dialogs. Deleting a mid-chain version sets `source_document_id = NULL` on downstream versions (via `ON DELETE SET NULL`), which the UI handles gracefully.
 
-**Files:** `CorpusTabContent.jsx`, possibly `corpusController.js`
+**Files:** `CorpusTabContent.jsx`
 
 ---
 
-#### Phase 38j: Annotation Citation Links — ⏳ PLANNED
+#### Phase 38j: Annotation Citation Links — ✅ COMPLETE
 
 **Complexity:** High
 
@@ -2589,13 +2623,28 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 
 **Architecture Decision #219 — Citation Links with Dead-Link Resilience (Phase 38j):** Annotation citations store snapshot metadata at detection time (concept name, quote text, document title, corpus name) in addition to the annotation FK. When the cited annotation's document is deleted (cascading to the annotation row), the `cited_annotation_id` becomes NULL via `ON DELETE SET NULL`, but the snapshot fields preserve enough information to display a meaningful "this annotation is no longer available" card. This is consistent with Orca's philosophy of preserving provenance information even when source entities are removed.
 
-**Files:** `migrate.js`, `corpusController.js` (upload pipeline), new `citationController.js` or additions to `corpusController.js`, `routes/documents.js` or new `routes/citations.js`, `api.js`, `CorpusTabContent.jsx` (annotation panel + body renderer), `App.jsx` or `AppShell.jsx` (citation URL route)
+**Files:** `migrate.js`, `corpusController.js` (upload pipeline + citation resolution), `routes/citations.js`, `routes/documents.js`, `api.js`, `CorpusTabContent.jsx` (annotation panel + body renderer + cite button + cited annotations section), `CitationRedirect.jsx`, `App.jsx` (citation URL route)
 
 ---
 
-#### Phase 38 Implementation Priority (suggested)
+#### Phase 38k: Search Result Corpus Badge Tooltip + "Saved" → "Voted" Rename — ✅ COMPLETE
 
-Completed:
+**Complexity:** Low
+
+**Changes:**
+1. **Corpus badge tooltip:** When search results show corpus annotation badges, hovering shows the specific document title(s) where the concept is annotated in that corpus. Tooltip rendered via `ReactDOM.createPortal` into `document.body` with fixed positioning above the badge — avoids affecting dropdown layout.
+2. **"Saved" → "Voted" rename:** The green badge on search results for concepts the user has voted on now says "Voted" instead of showing the saved tab name (which was "Saved").
+
+**Backend:** Extended the corpus annotation surfacing query in `searchConcepts` to JOIN `documents` and return `documentTitles` array per corpus (via `array_agg`-style grouping in JS).
+
+**Frontend:** Portal-based tooltip on corpus badges showing "Annotated in: Doc1, Doc2, ..." on hover (truncated at 4 titles with "and N more"). Badge text changed from `result.savedTabs.map(t => t.tabName)` to static "Voted".
+
+**Files:** `conceptsController.js`, `SearchField.jsx`
+
+---
+
+#### Phase 38 Implementation Priority (completed)
+
 1. ~~**38a** (Flip View navigation)~~ ✅
 2. ~~**38f** (attribute filter)~~ ✅
 3. ~~**38g** (position sort)~~ ✅
@@ -2603,12 +2652,10 @@ Completed:
 5. ~~**38e** (color set threshold)~~ ✅
 6. ~~**38b** (root swap votes)~~ ✅
 7. ~~**38c** (expanded swap votes)~~ ✅
-
 8. ~~**38h** (annotate from graph)~~ ✅
-
-Remaining:
-9. **38i** (delete any version) — needs investigation first
-10. **38j** (citation links) — highest complexity, biggest differentiator for academic use case
+9. ~~**38i** (delete any version)~~ ✅
+10. ~~**38j** (citation links)~~ ✅
+11. ~~**38k** (search corpus badge tooltip + "Saved" → "Voted" rename)~~ ✅
 
 ---
 
