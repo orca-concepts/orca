@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** March 31, 2026 (Phase 37 complete; Phase 38 complete; Phase 38k search polish; codebase published under AGPL v3)
+**Last Updated:** March 31, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos planned; codebase published under AGPL v3)
 
 ---
 
@@ -1166,6 +1166,97 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 - Snapshot metadata (`snapshot_concept_name`, `snapshot_quote_text`, `snapshot_document_title`, `snapshot_corpus_name`) stored at detection time for dead-link resilience
 - `ON DELETE CASCADE` from `citing_document_id` ensures cleanup when the citing document is deleted
 
+#### `combos` — Phase 39a (planned)
+User-created collections of edges (concepts-in-context) from across the graph system. Combos group related concepts from different graphs and attributes, presenting a unified view of all annotations attached to those edges.
+
+```sql
+CREATE TABLE combos (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_combos_name_lower ON combos (LOWER(name));
+CREATE INDEX idx_combos_created_by ON combos(created_by);
+```
+
+**Key Points:**
+- Combo names are unique (case-insensitive), enforced by the unique index on `LOWER(name)` — same pattern as corpuses
+- `description` is optional free-text explaining the combo's purpose
+- Only the owner (`created_by`) can add/remove edges from the combo
+- **Combos cannot be deleted** — consistent with Orca's append-only philosophy
+- `created_by` uses default FK behavior (not `ON DELETE SET NULL`) — if the owner deletes their account, the combo persists but becomes ownerless. Future consideration: ownership transfer similar to corpus transfer (Phase 35b).
+
+#### `combo_edges` — Phase 39a (planned)
+Junction table linking combos to edges (concepts-in-context). A combo contains one or more edges; the same edge can appear in multiple combos.
+
+```sql
+CREATE TABLE combo_edges (
+  id SERIAL PRIMARY KEY,
+  combo_id INTEGER REFERENCES combos(id) ON DELETE CASCADE,
+  edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+  added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(combo_id, edge_id)
+);
+
+CREATE INDEX idx_combo_edges_combo ON combo_edges(combo_id);
+CREATE INDEX idx_combo_edges_edge ON combo_edges(edge_id);
+```
+
+**Key Points:**
+- `UNIQUE(combo_id, edge_id)` prevents duplicate edge entries in the same combo
+- `ON DELETE CASCADE` from both FKs ensures cleanup
+- Only the combo owner can INSERT/DELETE rows — enforced at the application level
+- **Hidden edges stay:** If an edge's `is_hidden` becomes true via moderation, its annotations still appear on the combo page. The owner adding it implies trust.
+- No `added_by` column needed since only the owner can add edges
+
+#### `combo_subscriptions` — Phase 39a (planned)
+Tracks which users are subscribed to which combos. Subscribing creates a persistent combo tab in the sidebar.
+
+```sql
+CREATE TABLE combo_subscriptions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  combo_id INTEGER REFERENCES combos(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, combo_id)
+);
+
+CREATE INDEX idx_combo_subscriptions_user ON combo_subscriptions(user_id);
+CREATE INDEX idx_combo_subscriptions_combo ON combo_subscriptions(combo_id);
+```
+
+**Key Points:**
+- `UNIQUE(user_id, combo_id)` prevents duplicate subscriptions
+- `ON DELETE CASCADE` from both `users` and `combos` ensures cleanup
+- Subscribing creates a row in `sidebar_items` (item_type: `'combo'`); unsubscribing removes both
+- Subscriber count displayed on combo listings and combo detail views
+- Same pattern as `corpus_subscriptions`
+
+#### `combo_annotation_votes` — Phase 39a (planned)
+Votes on annotations within the context of a specific combo. These are separate from the corpus-level `annotation_votes` — a user can vote for an annotation in a combo without affecting its corpus vote count, and vice versa.
+
+```sql
+CREATE TABLE combo_annotation_votes (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  combo_id INTEGER REFERENCES combos(id) ON DELETE CASCADE,
+  annotation_id INTEGER REFERENCES document_annotations(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, combo_id, annotation_id)
+);
+
+CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_votes(combo_id, annotation_id);
+```
+
+**Key Points:**
+- `UNIQUE(user_id, combo_id, annotation_id)` — one vote per user per annotation per combo
+- Combo votes are independent from corpus-level `annotation_votes` — both counts displayed on combo page annotation cards
+- `ON DELETE CASCADE` from all three FKs ensures cleanup
+- No auto-vote on annotation creation (unlike corpus annotations) — combo votes are always deliberate
+
 ---
 
 ## API Endpoints
@@ -2111,6 +2202,9 @@ Phase 6: Complete. All four sub-phases implemented:
   - **Phase 27d:** Responsive Layout ✅ (vertical stacking below 900px via `matchMedia`, collapsible "Annotations & Links" header defaulting collapsed on narrow, top border replaces left border)
   - **Phase 27e:** Admin-Controlled Document Tags ✅ (`POST /tags/create` → 410 Gone, `ENABLED_DOCUMENT_TAGS` env var filtering on `GET /tags`, 9 initial tags seeded in migrate.js, "Create new tag" UI removed from CorpusTabContent)
 - **Phase 28:** Visual Polish, UI Cleanup & Bug Fixes ✅ COMPLETE
+- **Phase 37:** Pre-Launch Bug Fixes ✅ COMPLETE (37a–37f: backend controller fixes, auth registration, corpus/document UX, text/style fixes, root page/tab groups, flip view/annotation creation)
+- **Phase 38:** Post-Launch Enhancements ✅ COMPLETE (38a–38k: flip view nav, root swap votes, expanded swap votes, graph votes revamp, color set threshold, attribute filter, position sort, annotate from graph, delete any version, citation links, search badge tooltip)
+- **Phase 39:** Combos (39a: backend infrastructure, 39b: Browse Combos overlay, 39c: combo persistent tab, 39d: add to combo from graph, 39e: polish)
   - **Phase 28a:** Visual Cleanup — Icons, Fonts, Colors ✅ (all emoji icons removed from UI chrome, EB Garamond applied everywhere via Google Fonts import + explicit fontFamily, all colored buttons converted to black-on-off-white Zen aesthetic, all italics removed, × close buttons kept)
   - **Phase 28b:** UI Removals — Ranking & Supergroups ✅ (child rankings UI removed, Layer 3 super-groups removed, ranking cleanup queries cleaned up in removeVote/removeVoteFromTab/addSwapVote)
   - **Phase 28c:** Rename & Title Changes ✅ ("Saved" → "Graph Votes" across all user-facing text in AppShell/SavedPageOverlay/Saved/SavedTabContent, sort dropdown "↓ Saves" → "↓ Votes", SwapModal/VoteSetBar/ConceptGrid/AnnotationPanel "saves" → "votes", FlipView badge "Saved" → "Voted", browser tab title "Concept Hierarchy" → "orca")
@@ -2656,6 +2750,188 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 9. ~~**38i** (delete any version)~~ ✅
 10. ~~**38j** (citation links)~~ ✅
 11. ~~**38k** (search corpus badge tooltip + "Saved" → "Voted" rename)~~ ✅
+
+---
+
+### Phase 39: Combos — PLANNED
+
+**Goal:** Let users group concepts-in-context (edges) from across different graphs and attributes into named collections called "combos." A combo page shows all annotations attached to its member edges, with filtering, sorting, and combo-specific voting. Users subscribe to combos for persistent sidebar tabs.
+
+**UI terminology:** "Combo" everywhere (database tables, API, frontend). The Browse page is "Browse Combos." Sidebar tabs show the combo name.
+
+---
+
+#### Phase 39a: Backend Infrastructure — Tables, CRUD, Subscriptions
+
+**Complexity:** High
+
+**New database tables:** `combos`, `combo_edges`, `combo_subscriptions`, `combo_annotation_votes` (see Database Schema section for full schemas).
+
+**New API endpoints (`/api/combos`):**
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/` | Guest OK | List all combos (with creator username, edge count, annotation count, subscriber count). Supports `?search=` for name search and `?sort=new|subscribers` (default: subscribers). |
+| GET | `/:id` | Guest OK | Get combo details + list of member edges with concept names, paths, attributes |
+| GET | `/:id/annotations` | Required | Get all annotations across all edges in the combo. Supports `?sort=combo_votes|new|annotation_votes` (default: combo_votes), `?edgeIds=1,2,3` for subconcept filtering. Returns annotation data with concept badges, both combo vote count and corpus-level vote count, user vote status for both. |
+| POST | `/create` | Required | Create a new combo (name, description). Creator auto-subscribes. |
+| GET | `/mine` | Required | List combos owned by the current user (for the "Add to Combo" picker) |
+| GET | `/subscriptions` | Required | Get current user's combo subscriptions with details |
+| POST | `/subscribe` | Required | Subscribe to a combo (creates sidebar item) |
+| POST | `/unsubscribe` | Required | Unsubscribe from a combo (removes sidebar item) |
+| POST | `/:id/edges/add` | Owner only | Add an edge to the combo. Body: `{ edgeId }`. Returns 409 if already in combo. |
+| POST | `/:id/edges/remove` | Owner only | Remove an edge from the combo. Body: `{ edgeId }`. |
+| POST | `/:id/annotations/vote` | Required | Vote on an annotation within this combo context |
+| POST | `/:id/annotations/unvote` | Required | Remove combo vote on an annotation |
+
+**Sidebar integration:**
+- New `item_type: 'combo'` in `sidebar_items` table
+- Subscribe/unsubscribe auto-manage `sidebar_items` rows (same pattern as corpuses)
+
+**Files:** `migrate.js`, new `comboController.js`, new `routes/combos.js`, `server.js`, `api.js`, `votesController.js` (sidebar items update)
+
+**Suggested git commit:** `feat: 39a — combo backend infrastructure, CRUD, subscriptions, combo annotation votes`
+
+---
+
+#### Phase 39b: Browse Combos Overlay
+
+**Complexity:** Medium
+
+**New sidebar button:** "Browse Combos" alongside existing "Browse Corpuses" button (rename current "Browse" to "Browse Corpuses").
+
+**Browse Combos overlay** (same pattern as corpus browse — full-page overlay via AppShell state):
+- Lists all combos in the system as cards
+- Each card shows: combo name, description (truncated), creator username, subconcept count, annotation count, subscriber count
+- Search bar for filtering by name (frontend filter on loaded data, or backend `?search=` param for scalability)
+- Sort toggle: New (created_at desc) | Subscribers (count desc)
+- Subscribe/Unsubscribe button on each card
+- Clicking a combo name subscribes (if not already) and switches to the combo's persistent tab
+
+**Files:** New `ComboListView.jsx`, `AppShell.jsx` (sidebar button + overlay state), `api.js`
+
+**Suggested git commit:** `feat: 39b — Browse Combos overlay with search, sort, subscribe`
+
+---
+
+#### Phase 39c: Combo Page (Persistent Tab)
+
+**Complexity:** High
+
+**New component:** `ComboTabContent.jsx` — rendered in main content area when a combo tab is active (same pattern as `CorpusTabContent.jsx`).
+
+**Layout:**
+- Header: combo name, description, creator username, subscriber count, unsubscribe button
+- Owner controls (visible to owner only): "Add Subconcept" button opening a search/picker, list of current subconcepts with remove buttons
+- Subconcept filter bar: clickable concept badges (multi-select toggle) to filter annotations to specific subconcepts
+- Sort toggle: Combo Votes | New | Annotation Votes
+- Annotation card list: flat list of annotation cards, each showing:
+  - Document title (clickable — navigates to document in corpus context)
+  - Quote text (if present)
+  - Comment (if present)
+  - Concept badge(s) indicating which subconcept edge this annotation belongs to
+  - Combo vote count + vote button (combo-specific)
+  - Corpus-level vote count (read-only display)
+  - Creator username
+- Empty states: no subconcepts yet (owner prompt to add), subconcepts but no annotations
+
+**Add subconcept picker (owner only):**
+- Search field using existing concept search (`/api/concepts/search`)
+- Results show concept name + attribute + parent context path
+- Selecting a result shows available edges (contexts) for that concept
+- Owner picks a specific edge to add to the combo
+- Confirmation feedback + badge appears in filter bar
+
+**Click-through navigation:**
+- Clicking a document title on an annotation card navigates to the document in its corpus context (same pending-document pattern as ConceptAnnotationPanel click-through: auto-subscribe to corpus if needed, set pendingCorpusDocumentId + pendingAnnotationId, switch to corpus tab)
+
+**Files:** New `ComboTabContent.jsx`, `AppShell.jsx` (combo tab rendering, pending navigation), `api.js`
+
+**Suggested git commit:** `feat: 39c — combo persistent tab with annotation list, filtering, sorting, combo votes, owner subconcept management`
+
+---
+
+#### Phase 39d: Add to Combo from Graph View
+
+**Complexity:** Medium
+
+**New UI:** "Add to Combo" button on concept cards in children view. Only visible to logged-in users who own at least one combo.
+
+**Flow:**
+1. User clicks "Add to Combo" on a concept card in children view
+2. Picker modal shows the user's owned combos (fetched via `GET /api/combos/mine`)
+3. User selects a combo
+4. Backend adds the edge to the combo (or shows "already in combo" if duplicate)
+5. Brief confirmation feedback
+
+**Implementation:**
+- Button appears in `ConceptGrid.jsx` alongside ▲ vote and ⇄ swap buttons
+- Picker component similar to the saved tab picker pattern — lightweight modal/dropdown
+- Uses existing `POST /api/combos/:id/edges/add` endpoint
+
+**Files:** `ConceptGrid.jsx`, new picker component (or inline in ConceptGrid), `api.js`
+
+**Suggested git commit:** `feat: 39d — add to combo from graph view with combo picker`
+
+---
+
+#### Phase 39e: Polish & Edge Cases
+
+**Complexity:** Low-Medium
+
+**Tasks:**
+- Sidebar drag-and-drop integration for combo tabs (update `SidebarDndContext.jsx` to handle `item_type: 'combo'`)
+- Combo tabs rendered with `display: none` when inactive (same hide-not-unmount pattern as corpus/graph tabs)
+- Tab groups: combo tabs can be placed in tab groups alongside corpus and graph tabs
+- Graph tab placement: graph tabs can be placed inside combo sidebar items (update `user_corpus_tab_placements` or create parallel table)
+- Frontend build verification (`npm run build`)
+- Test Level 1 regression sweep
+
+**Files:** `SidebarDndContext.jsx`, `AppShell.jsx`, `votesController.js` (tab group handling)
+
+**Suggested git commit:** `feat: 39e — combo sidebar polish, drag-and-drop, tab groups, build verification`
+
+---
+
+#### Phase 39 Architecture Decisions
+
+- **Architecture Decision #220 — Combos Are Permanent (Phase 39):** Combos cannot be deleted, matching Orca's append-only philosophy. There is no archive or retire mechanism. A combo with zero subscribers still appears in Browse Combos. If the owner deletes their account, the combo persists but becomes ownerless (no one can add/remove edges). Future: ownership transfer could be added following the corpus transfer pattern (Phase 35b).
+
+- **Architecture Decision #221 — Combo Votes Are Independent from Corpus Votes (Phase 39):** The `combo_annotation_votes` table is separate from `annotation_votes`. An annotation's combo vote count and corpus vote count are completely independent numbers. Both are displayed on combo page annotation cards. This reflects that an annotation's value in a combo context may differ from its value in its original corpus context — different communities may weight the same annotation differently.
+
+- **Architecture Decision #222 — Hidden Edges Remain Visible in Combos (Phase 39):** When an edge is hidden via moderation (`is_hidden = true`), its annotations still appear on combo pages that include that edge. The combo owner's deliberate act of adding the edge implies a level of trust. This differs from graph views where hidden edges are filtered out.
+
+- **Architecture Decision #223 — Browse Combos Renamed from Browse Button (Phase 39):** The existing "Browse" sidebar button is renamed to "Browse Corpuses" and a new "Browse Combos" button is added alongside it. Both open full-page overlays with the same interaction pattern.
+
+#### Phase 39 Implementation Priority
+
+1. **39a** (backend infrastructure) — must be first
+2. **39b** (Browse Combos overlay) — enables discovery
+3. **39c** (combo persistent tab) — the core experience
+4. **39d** (add to combo from graph) — convenience feature
+5. **39e** (polish) — final cleanup
+
+#### Phase 39 Verification Checklist
+1. Create a combo with name and description — succeeds
+2. Duplicate combo name (case-insensitive) — returns 409
+3. Subscribe/unsubscribe — sidebar item appears/disappears
+4. Owner adds edge to combo — edge appears in subconcept list
+5. Owner removes edge from combo — edge removed
+6. Non-owner cannot add/remove edges — returns 403
+7. Combo page shows annotations from all member edges
+8. Subconcept filter toggles work (multi-select)
+9. Sort by combo votes / new / annotation votes all work correctly
+10. Combo vote button works — independent from corpus vote count
+11. Both vote counts displayed on annotation cards
+12. Click annotation card → navigates to document in corpus context
+13. Browse Combos shows all combos with search and sort
+14. Add to Combo from graph view works for combo owners
+15. Non-owners don't see "Add to Combo" button (unless they own other combos)
+16. Sidebar drag-and-drop works with combo tabs
+17. Combo tabs persist across refresh/logout
+18. Clean build: `cd frontend && npm run build` succeeds
+19. Hidden edge annotations still appear on combo page
+20. Combo with no edges shows appropriate empty state
 
 ---
 
