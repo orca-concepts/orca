@@ -3104,6 +3104,46 @@ const transferOwnership = async (req, res) => {
   }
 };
 
+// Phase 38h: Get annotations for a specific concept on a specific document within a specific corpus
+const getAnnotationsForConceptOnDocument = async (req, res) => {
+  try {
+    const corpusId = parseInt(req.params.corpusId);
+    const documentId = parseInt(req.params.documentId);
+    const conceptId = parseInt(req.params.conceptId);
+
+    if (isNaN(corpusId) || isNaN(documentId) || isNaN(conceptId)) {
+      return res.status(400).json({ error: 'Invalid corpus ID, document ID, or concept ID' });
+    }
+
+    const userId = req.user?.userId || -1;
+
+    const result = await pool.query(
+      `SELECT da.id, da.edge_id, da.quote_text, da.comment, da.created_at,
+              e.parent_id, e.graph_path, e.attribute_id,
+              a.name AS attribute_name,
+              c_parent.name AS parent_name,
+              u.username AS created_by_username,
+              (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count,
+              EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $4) AS user_voted
+       FROM document_annotations da
+       JOIN edges e ON da.edge_id = e.id
+       JOIN attributes a ON e.attribute_id = a.id
+       LEFT JOIN concepts c_parent ON e.parent_id = c_parent.id
+       LEFT JOIN users u ON da.created_by = u.id
+       WHERE da.corpus_id = $1
+         AND da.document_id = $2
+         AND e.child_id = $3
+       ORDER BY vote_count DESC, da.created_at DESC`,
+      [corpusId, documentId, conceptId, userId]
+    );
+
+    res.json({ annotations: result.rows });
+  } catch (error) {
+    console.error('Error getting annotations for concept on document:', error);
+    res.status(500).json({ error: 'Failed to get annotations' });
+  }
+};
+
 module.exports = {
   createCorpus,
   listCorpuses,
@@ -3168,5 +3208,7 @@ module.exports = {
   // Phase 35a: Document deletion
   deleteDocument,
   // Phase 35b: Corpus ownership transfer
-  transferOwnership
+  transferOwnership,
+  // Phase 38h: Annotate from graph view
+  getAnnotationsForConceptOnDocument
 };

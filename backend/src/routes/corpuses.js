@@ -150,6 +150,9 @@ router.post('/:id/documents/remove', authenticateToken, corpusController.removeD
 // because it has 3 segments — won't conflict with /:id
 router.get('/:corpusId/documents/:documentId/annotations', optionalAuth, corpusController.getDocumentAnnotations);
 
+// Phase 38h: Get annotations for a specific concept on a specific document within a corpus (guest OK)
+router.get('/:corpusId/documents/:documentId/annotations-for-concept/:conceptId', optionalAuth, corpusController.getAnnotationsForConceptOnDocument);
+
 // ---- Phase 7g: Parameterized allowed user routes ----
 
 // List allowed users for a corpus (owner or allowed users only)

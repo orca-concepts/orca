@@ -407,6 +407,10 @@ export const corpusAPI = {
   // Phase 35b: Corpus ownership transfer
   transferOwnership: (corpusId, newOwnerId) =>
     api.post(`/corpuses/${corpusId}/transfer-ownership`, { newOwnerId }),
+
+  // Phase 38h: Get annotations for a specific concept on a document in a corpus
+  getAnnotationsForConceptOnDocument: (corpusId, documentId, conceptId) =>
+    api.get(`/corpuses/${corpusId}/documents/${documentId}/annotations-for-concept/${conceptId}`),
 };
 
 // Document endpoints (Phase 7a, extended Phase 17a)
