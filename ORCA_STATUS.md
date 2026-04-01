@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 1, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; codebase published under AGPL v3)
+**Last Updated:** April 1, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; codebase published under AGPL v3)
 
 ---
 
@@ -1314,7 +1314,7 @@ All concept endpoints require authentication (JWT token in Authorization header)
 | POST | `/find-in-text` | Find all concept names appearing as whole words in provided text (Phase 7i). Guest-accessible. |
 | GET | `/document-links/:documentId` | Get cached concept links for a finalized document. Recomputes if stale (Phase 7i-5). Guest-accessible. |
 | POST | `/batch-children-for-diff` | Get children (with grandchildren for Jaccard) for multiple concepts in batch. Max 10 panes. Guest-accessible. (Phase 14a) |
-| GET | `/:id/annotations` | Get all annotations across all edges where this concept is the child. Supports `?sort=votes\|newest`, `?edgeId=N` (single-context filter for children view), `?corpusIds=1,2,3`, `?tagId=N`. Returns flat array with context provenance, document info, vote counts. **Deduplicated across version chains** — when the same annotation (same edge + quote_text + creator) exists on multiple versions of a document, only the most recent version's annotation is returned. Guest-accessible. (Phase 27b, dedup Phase 31d) |
+| GET | `/:id/annotations` | Get all annotations across all edges where this concept is the child. Supports `?sort=votes\|subscribed\|newest`, `?edgeId=N` (single-context filter for children view), `?corpusIds=1,2,3`, `?tagId=N`. Returns flat array with context provenance, document info, vote counts, `subscribed_vote_count`. **Deduplicated across version chains** — when the same annotation (same edge + quote_text + creator) exists on multiple versions of a document, only the most recent version's annotation is returned. `subscribed` sort requires auth (ranks by votes from members of user's subscribed corpuses). Guest-accessible for other sorts. (Phase 27b, dedup Phase 31d, subscribed sort Phase 40) |
 
 **Key Implementation Details:**
 
@@ -1528,10 +1528,10 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | POST | `/annotations/create` | Required | Create an annotation (auto-votes for creator); layer param ignored, always defaults to 'public' (Phase 7d, updated 26c) |
 | POST | `/annotations/delete` | — | ⛔ Returns 410 Gone (Phase 26c) — annotations are permanent |
 | GET | `/annotations/edge/:edgeId` | Guest OK | Get all annotations for an edge across all corpuses, grouped by corpus → document (Phase 7d). ⚠️ Phase 27b replaces primary usage with new concept-scoped endpoint |
-| GET | `/annotations/concept/:conceptId` | Guest OK | Get all annotations for a concept across ALL edges and corpuses; `?sort=votes\|new` (default: votes), `?tagId=N`, `?corpusIds=1,2,3`. Returns flat list with vote counts, parent context paths, corpus names. **Deduplicated across version chains** — only most recent version's annotation per lineage + corpus + creator + quote_text (Phase 27b, dedup Phase 31d) |
+| GET | `/annotations/concept/:conceptId` | Guest OK | Get all annotations for a concept across ALL edges and corpuses; `?sort=votes\|subscribed\|new` (default: votes), `?tagId=N`, `?corpusIds=1,2,3`. Returns flat list with vote counts, `subscribed_vote_count`, parent context paths, corpus names. **Deduplicated across version chains** — only most recent version's annotation per lineage + corpus + creator + quote_text. `subscribed` sort requires auth. (Phase 27b, dedup Phase 31d, subscribed sort Phase 40) |
 | GET | `/annotations/document/:documentId` | Guest OK | Get ALL annotations for a document across ALL corpuses, with duplicate merging (Phase 7e) |
 | GET | `/documents/search` | Required | Search documents by title (ILIKE), with optional `excludeCorpusId` filter (Phase 7e) |
-| GET | `/:corpusId/documents/:documentId/annotations` | Guest OK | Get annotations for a document within a corpus; `?filter=all|corpus_members|author` (default: all); returns provenance badges, isAuthor, isCorpusMember (Phase 7d, rewritten Phase 26d) |
+| GET | `/:corpusId/documents/:documentId/annotations` | Guest OK | Get annotations for a document within a corpus; `?filter=all|corpus_members|author` (default: all); `?sort=votes\|subscribed\|position` (default: votes). Returns provenance badges, isAuthor, isCorpusMember, `subscribed_vote_count`. `subscribed` sort requires auth. (Phase 7d, rewritten Phase 26d, subscribed sort Phase 40) |
 | POST | `/annotations/vote` | Required | Vote (endorse) an annotation (Phase 7f) |
 | POST | `/annotations/unvote` | Required | Remove endorsement from an annotation (Phase 7f) |
 | POST | `/annotations/color-set/vote` | — | ⛔ Returns 410 Gone (Phase 26c) — color set voting removed |
@@ -1588,7 +1588,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 |--------|----------|------|-------------|
 | GET | `/` | Guest OK | List all combos (with creator username, edge count, annotation count, subscriber count). Supports `?search=` and `?sort=new\|subscribers` (default: subscribers). |
 | GET | `/:id` | Guest OK | Get combo details + list of member edges with concept names, paths, attributes |
-| GET | `/:id/annotations` | Required | Get all annotations across all edges in the combo. Supports `?sort=combo_votes\|new\|annotation_votes`, `?edgeIds=1,2,3`. Returns both combo and corpus vote counts. |
+| GET | `/:id/annotations` | Required | Get all annotations across all edges in the combo. Supports `?sort=combo_votes\|subscribed\|new\|annotation_votes`, `?edgeIds=1,2,3`. Returns both combo and corpus vote counts, plus `subscribed_vote_count`. |
 | POST | `/create` | Required | Create a new combo (name, description). Creator auto-subscribes. Returns 409 for duplicate name. |
 | GET | `/mine` | Required | List combos owned by the current user |
 | GET | `/subscriptions` | Required | Get current user's combo subscriptions with details and group_id |
@@ -1997,7 +1997,7 @@ This only needs to be done once per database. If you drop and recreate the datab
 158. **Remove process.exit from pg Pool Error Handler (Phase 22a):** The `database.js` pg pool `error` event handler had `process.exit(-1)` which killed the backend on any transient PostgreSQL client error (network hiccup, idle timeout). The pg pool handles reconnection automatically — the process should log errors, not exit. This caused all API calls (including login) to return 500 after any transient DB error.
 159. **window.document Shadowed by React State Variable (Phase 22b):** In `CorpusTabContent.jsx`, the React state variable `document` (holding `{ id, title, body, ... }`) shadows the global `window.document` DOM API. All DOM API calls (`createTreeWalker`, `createRange`, `createElement`) must use `window.document.*` explicitly. This caused a `createTreeWalker is not a function` crash in the quote navigation feature.
 160. **Two-Column Concept Layout with Context-Scoped Annotations (Phase 27a):** The concept page now splits into a 65/35 flex layout when viewing a specific concept (not root). Left column: children or flip view. Right column: `ConceptAnnotationPanel.jsx` with Annotations and Web Links tabs. The header (breadcrumb, attribute badge, save button) stays full-width above both columns. Both columns scroll independently. The right panel only renders when `effectiveConceptId` is set — root page stays full-width. The panel accepts a `viewMode` prop: in children view, annotations are scoped to the current edge only (`?edgeId=N`); in flip view, annotations from all contexts are shown.
-161. **Cross-Context Annotation Aggregation (Phase 27b):** `GET /api/concepts/:id/annotations` finds all `document_annotations` joined through edges where `child_id = :conceptId` and `is_hidden = false`. Each annotation includes a `context` object (`edgeId`, `parentId`, `parentName`, `pathNames`, `attributeName`) so the user can see which parent context each annotation came from. The endpoint supports composable filters: `?edgeId=N` (single context), `?corpusIds=1,2,3`, `?tagId=N`, `?sort=votes|newest`. Path names are resolved via batch concept name lookup. The context path displayed in the panel includes the leaf concept name (appended in frontend `renderContextPath`).
+161. **Cross-Context Annotation Aggregation (Phase 27b, updated Phase 40):** `GET /api/concepts/:id/annotations` finds all `document_annotations` joined through edges where `child_id = :conceptId` and `is_hidden = false`. Each annotation includes a `context` object (`edgeId`, `parentId`, `parentName`, `pathNames`, `attributeName`) so the user can see which parent context each annotation came from. The endpoint supports composable filters: `?edgeId=N` (single context), `?corpusIds=1,2,3`, `?tagId=N`, `?sort=votes|subscribed|newest`. The `subscribed` sort ranks annotations by votes from members of the user's subscribed corpuses (requires auth). Path names are resolved via batch concept name lookup. The context path displayed in the panel includes the leaf concept name (appended in frontend `renderContextPath`).
 162. **Annotation Panel Shows Read-Only Vote Counts (Phase 27b):** The ConceptAnnotationPanel shows annotation endorsement counts and web link vote counts as plain text, not interactive buttons. Users must navigate to the document in a corpus tab to vote. This keeps the panel focused on discovery/navigation rather than duplicating the voting UI.
 163. **Auto-Subscribe on Annotation Click-Through (Phase 27c, updated Phase 28):** When a logged-in user clicks an annotation card in ConceptAnnotationPanel, AppShell calls `handleSubscribeToCorpus` which subscribes to the corpus (or handles 409 if already subscribed), creates/finds a corpus tab in the sidebar, sets `pendingCorpusDocumentId` and `pendingAnnotationId`, and switches to the tab. CorpusTabContent watches for the pending annotation in its loaded annotations array, selects it, and triggers `navigateToOccurrence` on the quote text (with 300ms delay for DOM render). Guests see a login modal with "Log in to view documents and annotations" (updated Phase 28 — previously opened DecontextualizedDocView overlay).
 164. **Pending Annotation Must Not Trigger Creation UI (Phase 27c bugfix):** When consuming `pendingAnnotationId` in CorpusTabContent, the effect must set `showAnnotationPanel(false)` — not `true`. Setting it to `true` opens the AnnotationPanel creation form (QUOTE/COMMENT/CONCEPT fields) instead of just selecting the annotation in the sidebar list. The pending flow should: open the document → scroll to quote → select the annotation in the sidebar → NOT open creation UI.
@@ -2027,6 +2027,7 @@ This only needs to be done once per database. If you drop and recreate the datab
 188. **ComboTabContent Uses refreshKey for Cross-Component Reload (Phase 39e):** When an edge is added to a combo from the graph view ("Add to Combo" button in Concept.jsx), AppShell increments a `comboRefreshKey` counter passed to all `ComboTabContent` instances. The effect dependency on `refreshKey` triggers a data reload, so the combo tab shows the new subconcept immediately without a manual refresh.
 189. **Add to Combo from Graph View (Phase 39d):** The "Add to Combo" button in the concept header appears when the user is logged in, owns at least one combo, and has a valid `parentEdgeId`. Single-combo shortcut: if the user owns exactly one combo, clicking adds directly without a picker. Multi-combo picker: a small floating dropdown anchored below the button. Feedback states: "Added ✓" (1.5s), "Already in combo" (2s), or error message. The picker closes on outside click or Escape.
 190. **Invite Link Generation Supports Optional Limits (Phase 39e):** The "+ New Invite Link" button in `CorpusMembersPanel` now toggles an inline form with optional "Max uses" and "Expires in days" fields. Both fields are optional — leaving them blank creates an unlimited, non-expiring link (backwards compatible). The backend already supported `maxUses` and `expiresInDays` parameters since Phase 7g; only the frontend form was missing.
+191. **Subscribed Sort Option for Annotations (Phase 40):** A "Subscribed" sort option ranks annotations by votes from members of corpuses the user subscribes to. "Members" = corpus owners (`corpuses.created_by`) UNION allowed users (`corpus_allowed_users.user_id`) for all corpuses in `corpus_subscriptions` for the current user. Each backend controller (`corpusController`, `conceptsController`, `comboController`) builds a `subscribed_members` CTE via this chain, then computes `subscribed_vote_count` per annotation by counting matching `annotation_votes`. The sort toggle appears in three views: CorpusTabContent (Votes | Subscribed | Position), ConceptAnnotationPanel (Top | Subscribed | New), and ComboTabContent (Combo Votes | Subscribed | New | Annotation Votes). Hidden for guest users (requires auth to resolve subscriptions). Secondary sort is always total `vote_count` descending.
 
 ### Common Tasks
 
@@ -2233,6 +2234,7 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 37:** Pre-Launch Bug Fixes ✅ COMPLETE (37a–37f: backend controller fixes, auth registration, corpus/document UX, text/style fixes, root page/tab groups, flip view/annotation creation)
 - **Phase 38:** Post-Launch Enhancements ✅ COMPLETE (38a–38k: flip view nav, root swap votes, expanded swap votes, graph votes revamp, color set threshold, attribute filter, position sort, annotate from graph, delete any version, citation links, search badge tooltip)
 - **Phase 39:** Combos ✅ COMPLETE (39a: backend infrastructure, 39b: Browse Combos overlay, 39c: combo persistent tab, 39d: add to combo from graph, 39e: polish + DnD + tab groups + invite link options)
+- **Phase 40:** Subscribed Sort Option ✅ COMPLETE — "Subscribed" sort ranks annotations by votes from members of the user's subscribed corpuses. Added to CorpusTabContent, ConceptAnnotationPanel, and ComboTabContent. Backend CTE computes subscribed_vote_count per annotation. Hidden for guests.
   - **Phase 28a:** Visual Cleanup — Icons, Fonts, Colors ✅ (all emoji icons removed from UI chrome, EB Garamond applied everywhere via Google Fonts import + explicit fontFamily, all colored buttons converted to black-on-off-white Zen aesthetic, all italics removed, × close buttons kept)
   - **Phase 28b:** UI Removals — Ranking & Supergroups ✅ (child rankings UI removed, Layer 3 super-groups removed, ranking cleanup queries cleaned up in removeVote/removeVoteFromTab/addSwapVote)
   - **Phase 28c:** Rename & Title Changes ✅ ("Saved" → "Graph Votes" across all user-facing text in AppShell/SavedPageOverlay/Saved/SavedTabContent, sort dropdown "↓ Saves" → "↓ Votes", SwapModal/VoteSetBar/ConceptGrid/AnnotationPanel "saves" → "votes", FlipView badge "Saved" → "Voted", browser tab title "Concept Hierarchy" → "orca")
@@ -2801,7 +2803,7 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 |--------|----------|------|-------------|
 | GET | `/` | Guest OK | List all combos (with creator username, edge count, annotation count, subscriber count). Supports `?search=` for name search and `?sort=new|subscribers` (default: subscribers). |
 | GET | `/:id` | Guest OK | Get combo details + list of member edges with concept names, paths, attributes |
-| GET | `/:id/annotations` | Required | Get all annotations across all edges in the combo. Supports `?sort=combo_votes|new|annotation_votes` (default: combo_votes), `?edgeIds=1,2,3` for subconcept filtering. Returns annotation data with concept badges, both combo vote count and corpus-level vote count, user vote status for both. |
+| GET | `/:id/annotations` | Required | Get all annotations across all edges in the combo. Supports `?sort=combo_votes|subscribed|new|annotation_votes` (default: combo_votes), `?edgeIds=1,2,3` for subconcept filtering. Returns annotation data with concept badges, both combo vote count and corpus-level vote count, `subscribed_vote_count`, user vote status for both. |
 | POST | `/create` | Required | Create a new combo (name, description). Creator auto-subscribes. |
 | GET | `/mine` | Required | List combos owned by the current user (for the "Add to Combo" picker) |
 | GET | `/subscriptions` | Required | Get current user's combo subscriptions with details |
@@ -2852,7 +2854,7 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 - Header: combo name, description, creator username, subscriber count, unsubscribe button
 - Owner controls (visible to owner only): "Add Subconcept" button opening a search/picker, list of current subconcepts with remove buttons
 - Subconcept filter bar: clickable concept badges (multi-select toggle) to filter annotations to specific subconcepts
-- Sort toggle: Combo Votes | New | Annotation Votes
+- Sort toggle: Combo Votes | Subscribed | New | Annotation Votes (Subscribed hidden for guests)
 - Annotation card list: flat list of annotation cards, each showing:
   - Document title (clickable — navigates to document in corpus context)
   - Quote text (if present)
@@ -2966,6 +2968,56 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 18. Clean build: `cd frontend && npm run build` succeeds
 19. Hidden edge annotations still appear on combo page
 20. Combo with no edges shows appropriate empty state
+
+---
+
+### Phase 40: Subscribed Sort Option for Annotations — ✅ COMPLETE
+
+**Goal:** Add a "Subscribed" sort option that ranks annotations by votes from members of corpuses the user subscribes to. This surfaces annotations endorsed by people in the user's trusted communities.
+
+**Definition of "subscribed members":** For a given user, subscribed members = the set of all corpus owners (`corpuses.created_by`) and allowed users (`corpus_allowed_users.user_id`) across all corpuses the user is subscribed to (`corpus_subscriptions`).
+
+**Implementation:**
+
+**Backend — CTE pattern (used in all three controllers):**
+Each controller builds a `subscribed_members` CTE:
+```sql
+WITH subscribed_members AS (
+  SELECT DISTINCT member_id FROM (
+    SELECT c.created_by AS member_id
+    FROM corpus_subscriptions cs
+    JOIN corpuses c ON c.id = cs.corpus_id
+    WHERE cs.user_id = $userId AND c.created_by IS NOT NULL
+    UNION
+    SELECT cau.user_id AS member_id
+    FROM corpus_subscriptions cs
+    JOIN corpus_allowed_users cau ON cau.corpus_id = cs.corpus_id
+    WHERE cs.user_id = $userId
+  ) sub
+)
+```
+Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery counting `annotation_votes` where `user_id IN (SELECT member_id FROM subscribed_members)`.
+
+**Backend files modified:**
+- `corpusController.js` — `getDocumentAnnotations`: added `?sort=subscribed` option, returns `subscribed_vote_count`
+- `conceptsController.js` — `getConceptAnnotations`: added `?sort=subscribed` option, returns `subscribed_vote_count`
+- `comboController.js` — `getComboAnnotations`: added `?sort=subscribed` option, returns `subscribed_vote_count`
+
+**Frontend files modified:**
+- `CorpusTabContent.jsx` — sort bar: Votes | Subscribed | Position (Subscribed hidden for guests)
+- `ConceptAnnotationPanel.jsx` — sort toggle: Top | Subscribed | New (Subscribed hidden for guests)
+- `ComboTabContent.jsx` — sort toggle: Combo Votes | Subscribed | New | Annotation Votes (Subscribed hidden for guests)
+- `api.js` — updated API methods to pass `sort=subscribed` parameter
+
+**Key design decisions:**
+- **Guest-hidden:** The Subscribed sort toggle is not rendered for guest users since they have no subscriptions.
+- **Secondary sort:** When sorting by subscribed votes, ties are broken by total `vote_count` descending.
+- **No new database tables:** The feature composes existing tables (`corpus_subscriptions`, `corpuses`, `corpus_allowed_users`, `annotation_votes`) via CTEs.
+- **Independent of combo votes:** In ComboTabContent, `subscribed_vote_count` is computed from corpus-level `annotation_votes`, not `combo_annotation_votes`.
+
+**Architecture Decision #227 — Subscribed Sort Uses Corpus Membership as Trust Signal (Phase 40):** The "Subscribed" sort option uses corpus membership (owners + allowed users of subscribed corpuses) as a proxy for trusted community. This surfaces annotations endorsed by people the user has chosen to follow via corpus subscriptions, without requiring an explicit "follow user" feature. The CTE is computed per-request — no denormalization or caching needed at current scale.
+
+**Suggested git commit:** `feat: add Subscribed sort option for annotations across corpus, concept, and combo views`
 
 ---
 
