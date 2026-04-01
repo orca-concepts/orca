@@ -18,6 +18,7 @@ import SidebarDndContext, { SortableItem, SortableGroupWrapper, GroupMemberConte
 import InfoPage from '../components/InfoPage';
 import MessagesPage from '../components/MessagesPage';
 import ComboListView from '../components/ComboListView';
+import ComboTabContent from '../components/ComboTabContent';
 
 const AppShell = () => {
   const { logout, logoutEverywhere, user, isGuest, loading: authLoading } = useAuth();
@@ -1505,7 +1506,7 @@ const AppShell = () => {
           {/* Normal tab content — hidden when overlays are active */}
           {!savedPageOpen && !messagesPageOpen && !corpusView && !comboView && (
             <>
-              {/* Combo tab content — placeholder until Phase 39c */}
+              {/* Combo tab content — render all, hide inactive to preserve state */}
               {!isGuest && comboSubscriptions.map(combo => {
                 const isActive = activeTab?.type === 'combo' && activeTab?.id === combo.id;
                 return (
@@ -1513,10 +1514,17 @@ const AppShell = () => {
                     key={`combo-${combo.id}`}
                     style={isActive ? styles.tabPane : styles.tabPaneHidden}
                   >
-                    <div style={{ padding: '2rem', fontFamily: "'EB Garamond', serif" }}>
-                      <h2 style={{ fontFamily: "'EB Garamond', serif", fontWeight: '600', color: '#333', margin: '0 0 8px 0' }}>{combo.name}</h2>
-                      <p style={{ fontFamily: "'EB Garamond', serif", color: '#888', margin: 0 }}>Combo content coming soon.</p>
-                    </div>
+                    <ComboTabContent
+                      comboId={combo.id}
+                      user={user}
+                      isGuest={isGuest}
+                      onUnsubscribe={handleUnsubscribeFromCombo}
+                      onNavigateToDocument={(corpusId, corpusName, documentId, annotationId) => {
+                        handleSubscribeToCorpus(corpusId, corpusName, documentId, annotationId);
+                        setComboView(null);
+                      }}
+                      onRequestLogin={handleRequestLogin}
+                    />
                   </div>
                 );
               })}
