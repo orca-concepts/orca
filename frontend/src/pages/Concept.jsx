@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { conceptsAPI, votesAPI, moderationAPI } from '../services/api';
+import { conceptsAPI, votesAPI, moderationAPI, combosAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import ConceptGrid from '../components/ConceptGrid';
 import AddConceptModal from '../components/AddConceptModal';
@@ -26,6 +26,7 @@ const Concept = ({
   onOpenConceptTab,
   onRequestLogin,
   onAnnotateFromGraph,
+  ownedCombos = [],
 }) => {
   // Determine if we're in "tab mode" (inside AppShell) or "standalone mode" (URL-routed)
   const isTabMode = !!graphTabId;
@@ -91,6 +92,11 @@ const Concept = ({
   
   // Phase 38h: Annotate from graph picker
   const [showAnnotatePicker, setShowAnnotatePicker] = useState(false);
+
+  // Phase 39d: Add to Combo picker
+  const [showComboPicker, setShowComboPicker] = useState(false);
+  const [comboFeedback, setComboFeedback] = useState(null); // null, 'added', 'duplicate', or error string
+  const comboPickerRef = useRef(null);
 
   // Phase 27d: Responsive layout
   const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900);
@@ -361,6 +367,50 @@ const Concept = ({
     }
   };
 
+  // Phase 39d: Add to Combo handler
+  const handleAddToCombo = async (comboId) => {
+    try {
+      await combosAPI.addEdge(comboId, parentEdgeId);
+      setShowComboPicker(false);
+      setComboFeedback('added');
+      setTimeout(() => setComboFeedback(null), 1500);
+    } catch (err) {
+      setShowComboPicker(false);
+      if (err.response?.status === 409) {
+        setComboFeedback('duplicate');
+        setTimeout(() => setComboFeedback(null), 2000);
+      } else {
+        setComboFeedback(err.response?.data?.error || 'Failed to add');
+        setTimeout(() => setComboFeedback(null), 2000);
+      }
+    }
+  };
+
+  // Phase 39d: Close combo picker on outside click / Escape
+  useEffect(() => {
+    if (!showComboPicker) return;
+    const handleClick = (e) => {
+      if (comboPickerRef.current && !comboPickerRef.current.contains(e.target)) {
+        setShowComboPicker(false);
+      }
+    };
+    const handleKey = (e) => {
+      if (e.key === 'Escape') setShowComboPicker(false);
+    };
+    window.document.addEventListener('mousedown', handleClick);
+    window.document.addEventListener('keydown', handleKey);
+    return () => {
+      window.document.removeEventListener('mousedown', handleClick);
+      window.document.removeEventListener('keydown', handleKey);
+    };
+  }, [showComboPicker]);
+
+  // Phase 39d: Reset combo picker/feedback on concept change
+  useEffect(() => {
+    setShowComboPicker(false);
+    setComboFeedback(null);
+  }, [effectiveConceptId, effectivePath?.join(',')]);
+
   // When user clicks an alt parent card in Flip View, stay on the current concept
   // but switch to the clicked parent's context (Phase 38a)
   const handleFlipViewParentClick = (parent) => {
@@ -596,6 +646,43 @@ const Concept = ({
               >
                 Add as Annotation
               </button>
+            )}
+            {user && !isGuest && parentEdgeId && ownedCombos.length > 0 && (
+              <div style={{ position: 'relative' }} ref={comboPickerRef}>
+                <button
+                  onClick={() => {
+                    if (comboFeedback) return;
+                    if (ownedCombos.length === 1) {
+                      handleAddToCombo(ownedCombos[0].id);
+                    } else {
+                      setShowComboPicker(prev => !prev);
+                    }
+                  }}
+                  style={styles.annotateButton}
+                  title="Add this concept to a combo"
+                >
+                  {comboFeedback === 'added' ? 'Added \u2713'
+                    : comboFeedback === 'duplicate' ? 'Already in combo'
+                    : comboFeedback ? comboFeedback
+                    : 'Add to Combo'}
+                </button>
+                {showComboPicker && (
+                  <div style={styles.comboPickerDropdown}>
+                    {ownedCombos.map(combo => (
+                      <div
+                        key={combo.id}
+                        style={styles.comboPickerItem}
+                        onClick={() => handleAddToCombo(combo.id)}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f5f4f0'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                      >
+                        <span style={styles.comboPickerName}>{combo.name}</span>
+                        <span style={styles.comboPickerMeta}>{combo.edge_count || 0} concept{combo.edge_count != 1 ? 's' : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -869,6 +956,42 @@ const styles = {
     fontSize: '14px',
     fontFamily: '"EB Garamond", Georgia, serif',
     fontWeight: '500',
+    whiteSpace: 'nowrap',
+  },
+  comboPickerDropdown: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    marginTop: '4px',
+    minWidth: '220px',
+    maxWidth: '320px',
+    backgroundColor: 'white',
+    border: '1px solid #ddd',
+    borderRadius: '6px',
+    zIndex: 100,
+    overflow: 'hidden',
+  },
+  comboPickerItem: {
+    padding: '8px 12px',
+    cursor: 'pointer',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '8px',
+    borderBottom: '1px solid #f0f0f0',
+    backgroundColor: 'white',
+    transition: 'background-color 0.1s',
+  },
+  comboPickerName: {
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#333',
+    fontWeight: '500',
+  },
+  comboPickerMeta: {
+    fontSize: '11px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
     whiteSpace: 'nowrap',
   },
   main: {

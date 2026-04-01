@@ -96,6 +96,9 @@ const AppShell = () => {
   // Phase 39b: Combo subscriptions (persistent combo tabs)
   const [comboSubscriptions, setComboSubscriptions] = useState([]);
 
+  // Phase 39d: User's owned combos (for "Add to Combo" button in Concept)
+  const [ownedCombos, setOwnedCombos] = useState([]);
+
   // Phase 31b: Messages page state
   const [messagesPageOpen, setMessagesPageOpen] = useState(false);
   const [messagesUnreadCount, setMessagesUnreadCount] = useState(0);
@@ -296,7 +299,7 @@ const AppShell = () => {
   const loadAllTabs = async () => {
     try {
       setLoading(true);
-      const [graphRes, groupsRes, subsRes, sidebarRes, comboSubsRes] = await Promise.all([
+      const [graphRes, groupsRes, subsRes, sidebarRes, comboSubsRes, myCombosRes] = await Promise.all([
         votesAPI.getGraphTabs().catch(() => ({ data: { graphTabs: [] } })),
         votesAPI.getTabGroups().catch(() => ({ data: { tabGroups: [] } })),
         corpusAPI.getMySubscriptions().catch(() => ({ data: { subscriptions: [] } })),
@@ -305,6 +308,7 @@ const AppShell = () => {
           return { data: { items: [] } };
         }),
         combosAPI.getSubscriptions().catch(() => ({ data: { subscriptions: [] } })),
+        combosAPI.getMyCombos().catch(() => ({ data: { combos: [] } })),
       ]);
       const loadedGraph = graphRes.data.graphTabs;
       const loadedGroups = groupsRes.data.tabGroups;
@@ -325,6 +329,7 @@ const AppShell = () => {
       setTabGroups(loadedGroups);
       setCorpusTabs(loadedCorpusTabs);
       setComboSubscriptions(loadedComboSubs);
+      setOwnedCombos(myCombosRes.data.combos || []);
       setSidebarItems(sidebarRes.data.items || []);
 
       // Set active tab: prefer first graph tab, then first corpus tab
@@ -755,13 +760,17 @@ const AppShell = () => {
 
   const reloadComboSubscriptions = useCallback(async () => {
     try {
-      const res = await combosAPI.getSubscriptions();
-      setComboSubscriptions((res.data.subscriptions || []).map(sub => ({
+      const [subsRes, myCombosRes] = await Promise.all([
+        combosAPI.getSubscriptions().catch(() => ({ data: { subscriptions: [] } })),
+        combosAPI.getMyCombos().catch(() => ({ data: { combos: [] } })),
+      ]);
+      setComboSubscriptions((subsRes.data.subscriptions || []).map(sub => ({
         id: sub.id,
         combo_id: sub.id,
         name: sub.name,
         subscriber_count: sub.subscriber_count,
       })));
+      setOwnedCombos(myCombosRes.data.combos || []);
       await refreshSidebarItems();
     } catch (err) {
       // non-critical
@@ -1588,6 +1597,7 @@ const AppShell = () => {
                         onOpenConceptTab={handleOpenConceptTab}
                         onRequestLogin={handleRequestLogin}
                         onAnnotateFromGraph={handleAnnotateFromGraph}
+                        ownedCombos={ownedCombos}
                       />
                     )}
                   </div>
