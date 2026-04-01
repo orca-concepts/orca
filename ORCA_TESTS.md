@@ -16,7 +16,7 @@ There are three run levels. The prompt you receive will tell you which level to 
 Run these:
 - **Section 0 (Build & Startup)** — always, no exceptions
 - **Every section directly touched by your changes** — use your judgment
-- **Core regression sweep (Sections 2, 5, 6, 7, 12)** — Concepts, Corpuses, Documents, Annotations, and Account Deletion. These are the areas where cross-cutting bugs most often hide. Run them even if you don't think your changes affect them.
+- **Core regression sweep (Sections 2, 5, 6, 7, 12, 25)** — Concepts, Corpuses, Documents, Annotations, Sidebar, and Combos. These are the areas where cross-cutting bugs most often hide. Run them even if you don't think your changes affect them.
 
 ### Level 2 — Full Regression (run when prompted, or before major commits)
 Run **every section, every test, no skipping.** Report all results organized by section number. This is the comprehensive sweep. Miles will prompt this with: "Run the full ORCA_TESTS.md checklist."
@@ -224,20 +224,31 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 
 ## 12. Sidebar & Navigation
 
-- [ ] Sidebar items (corpuses, groups, graph tabs) appear in the correct `display_order`
+- [ ] Sidebar items (corpuses, combos, groups, graph tabs) appear in the correct `display_order`
 - [ ] Drag-and-drop reordering updates `sidebar_items` display_order
 - [ ] Creating a new graph tab adds a sidebar item at the bottom
 - [ ] Closing a graph tab removes the sidebar item
 - [ ] Graph tabs can be placed inside a corpus (removes from flat group)
 - [ ] Tab groups: create, rename, delete, toggle expand/collapse all work
 - [ ] Browser back/forward buttons navigate correctly through concept navigation history
+- [ ] Combo tabs appear in the sidebar when subscribed and disappear when unsubscribed
+- [ ] Combo tabs can be dragged to new positions in the sidebar — order persists after refresh
+- [ ] Combo tabs can be dragged onto a group to join it, and dragged out to leave it
+- [ ] Right-click on a combo tab shows "Add to group" / "Remove from group" and "Unsubscribe"
+- [ ] Sidebar action buttons (Graph Votes, Browse Corpuses, Browse Combos, Messages) display in a 2x2 grid without overflow
 
 ---
 
 ## 13. Corpus Membership & Invites
 
 - [ ] Generating an invite token works for corpus owners
-- [ ] Accepting an invite token adds the user to `corpus_allowed_users`
+- [ ] Clicking "+ New Invite Link" shows a form with optional "Max uses" and "Expires in days" fields
+- [ ] Generating a link with no limits creates an unlimited, non-expiring token
+- [ ] Generating a link with max uses set to 3 shows "0 / 3 uses" on the token card
+- [ ] Generating a link with expiry set to 7 days shows "expires {date}" on the token card
+- [ ] An expired invite token cannot be accepted — returns an error
+- [ ] A token that has reached its max uses cannot be accepted — returns an error
+- [ ] Accepting a valid invite token adds the user to `corpus_allowed_users`
 - [ ] Allowed users can upload documents and create annotations
 - [ ] Removing an allowed user works (owner only)
 - [ ] Self-leave from a corpus works and also removes subscription
@@ -265,6 +276,10 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] SET NULL: concepts, edges, annotations, web links, documents `created_by`/`uploaded_by` become NULL
 - [ ] Documents uploaded by the deleted user still appear in corpus views (LEFT JOIN with null username)
 - [ ] The deleted user's JWT no longer works for any endpoint
+- [ ] Combos owned by the deleted user become ownerless (`created_by = NULL`) via ON DELETE SET NULL
+- [ ] Ownerless combos still appear in Browse Combos and are viewable by subscribers
+- [ ] Ownerless combos show "Created by [deleted user]" in the header
+- [ ] No one can add or remove edges from an ownerless combo
 
 ---
 
@@ -314,7 +329,10 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Guest users can view corpus listings and corpus details
 - [ ] Guest users can view documents and annotations
 - [ ] Guest users can view Flip View and web links
-- [ ] Guest users CANNOT: create concepts, vote, annotate, message, upload, or flag
+- [ ] Guest users can browse combos in the Browse Combos overlay (see names, descriptions, metadata)
+- [ ] Guest users do NOT see Subscribe/Unsubscribe buttons on combo cards
+- [ ] Guest users clicking a combo name in Browse Combos see the login modal
+- [ ] Guest users CANNOT: create concepts, vote, annotate, message, upload, flag, or subscribe to combos
 - [ ] Login prompt appears when guest attempts a restricted action
 
 ---
@@ -404,6 +422,88 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Annotation creation shows all fields (quote text, comment, concept, context) before confirming
 - [ ] "Create Annotation" button must be clicked to finalize the annotation
 - [ ] Text selection shortcut pre-fills quote text but does not auto-create
+
+---
+
+## 25. Combos (Phase 39)
+
+### Browse Combos
+- [ ] "Browse Combos" button appears in the sidebar alongside "Browse Corpuses"
+- [ ] Clicking "Browse Combos" opens the overlay; clicking "Browse Corpuses" closes it (and vice versa)
+- [ ] The combo list loads with combo name, description, creator username, concept count, and subscriber count
+- [ ] Search bar filters combos by name with 300ms debounce
+- [ ] Sort toggle switches between "Subscribers" (default) and "New"
+- [ ] "Create Combo" button is visible for logged-in users, hidden for guests
+- [ ] Creating a combo with a unique name succeeds and the combo appears in the list
+- [ ] Creating a combo with a duplicate name (case-insensitive) shows a "name already exists" error
+- [ ] Creator is auto-subscribed — the new combo appears as a sidebar tab immediately
+- [ ] Subscribe button on a combo card adds the combo to the sidebar
+- [ ] Unsubscribe button removes the combo from the sidebar
+
+### Combo Tab Content
+- [ ] Clicking a combo tab in the sidebar shows the combo page with header, subconcepts, and annotations
+- [ ] Header shows combo name, description, "Created by {username}", concept count, subscriber count
+- [ ] Unsubscribe button in the combo header removes the tab and switches to another tab
+
+### Owner — Subconcept Management
+- [ ] Only the combo owner sees the "Subconcepts" section with the "+ Add Concept" button
+- [ ] Non-owners do not see add/remove controls
+- [ ] Clicking "+ Add Concept" opens an inline search form
+- [ ] Searching finds concepts by name using trigram matching
+- [ ] Clicking a search result shows available contexts (edges) for that concept, including root edges
+- [ ] Clicking a context adds the edge to the combo — it appears in the subconcept list and filter bar
+- [ ] Adding an edge that is already in the combo shows "already in combo" error
+- [ ] Clicking the remove button on a subconcept removes it from the combo
+
+### Subconcept Filter Bar
+- [ ] Filter bar shows one badge per member edge with concept name and attribute
+- [ ] All badges are active by default — all annotations shown
+- [ ] Clicking a badge toggles it off — annotations from that edge disappear
+- [ ] Clicking again toggles it back on
+- [ ] "Show All" link appears when any badge is toggled off and reactivates all badges
+
+### Annotation Sorting
+- [ ] Default sort is "Combo Votes" — annotations ordered by combo vote count
+- [ ] Switching to "New" reorders annotations by creation date
+- [ ] Switching to "Annotation Votes" reorders by corpus-level vote count
+
+### Combo Voting
+- [ ] Clicking the vote button on an annotation card increments the combo vote count and shows active state
+- [ ] Clicking again removes the vote and decrements the count
+- [ ] Combo votes are separate from corpus votes — changing one does not affect the other
+- [ ] Both combo vote count and corpus vote count are displayed on each annotation card
+
+### Click-Through Navigation
+- [ ] Clicking a document title on an annotation card navigates to that document in the correct corpus tab
+- [ ] If not subscribed to the corpus, auto-subscribes before navigating
+- [ ] The annotation is scrolled to and highlighted in the corpus tab document viewer
+
+### Combo Data Freshness
+- [ ] After adding a concept to a combo via "Add to Combo" in the graph view, switching to the combo tab shows the new concept immediately (no manual refresh needed)
+
+### Empty States
+- [ ] A new combo with no edges shows "This combo has no concepts yet" (owner also sees "Add concepts using the controls above")
+- [ ] A combo with edges but no annotations shows "The concepts in this combo don't have any annotations yet"
+- [ ] Filtering out all annotations shows "No annotations match the selected filters"
+
+---
+
+## 26. Add to Combo from Graph View (Phase 39d)
+
+- [ ] The "Add to Combo" button appears in the concept header when the user is logged in and owns at least one combo
+- [ ] The button does NOT appear for guest users
+- [ ] The button does NOT appear when the user owns zero combos
+- [ ] The button does NOT appear on the root page (no parent edge)
+- [ ] With exactly one owned combo: clicking the button adds the current edge directly and shows "Added" feedback
+- [ ] With multiple owned combos: clicking the button opens a dropdown picker listing all owned combos
+- [ ] Each combo in the picker shows name and concept count
+- [ ] Clicking a combo in the picker adds the edge and shows "Added" feedback
+- [ ] Adding the same edge again shows "Already in combo" feedback
+- [ ] The picker closes when clicking outside it
+- [ ] The picker closes when pressing Escape
+- [ ] The feedback text reverts to "Add to Combo" after a short delay
+- [ ] The picker resets when navigating to a different concept
+- [ ] Existing header buttons (Share, Flip View, Add as Annotation, save, swap) still work correctly
 
 ---
 
