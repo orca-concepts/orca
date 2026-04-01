@@ -1070,8 +1070,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   };
 
   // Callbacks for CorpusMembersPanel
-  const handleMembersGenerateInvite = async () => {
-    const res = await corpusAPI.generateInviteToken(corpusId);
+  const handleMembersGenerateInvite = async (maxUses, expiresInDays) => {
+    const res = await corpusAPI.generateInviteToken(corpusId, maxUses, expiresInDays);
     loadInviteTokens();
     return res;
   };

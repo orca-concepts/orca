@@ -27,6 +27,7 @@ const Concept = ({
   onRequestLogin,
   onAnnotateFromGraph,
   ownedCombos = [],
+  onComboEdgeAdded,
 }) => {
   // Determine if we're in "tab mode" (inside AppShell) or "standalone mode" (URL-routed)
   const isTabMode = !!graphTabId;
@@ -374,6 +375,7 @@ const Concept = ({
       setShowComboPicker(false);
       setComboFeedback('added');
       setTimeout(() => setComboFeedback(null), 1500);
+      if (onComboEdgeAdded) onComboEdgeAdded();
     } catch (err) {
       setShowComboPicker(false);
       if (err.response?.status === 409) {

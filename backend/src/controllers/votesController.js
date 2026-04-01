@@ -1357,9 +1357,16 @@ const votesController = {
       if (tabType === 'corpus') {
         return res.status(400).json({ error: 'Corpus tabs cannot be added to groups' });
       }
-      const table = tabType === 'saved' ? 'saved_tabs' : 'graph_tabs';
+      let table;
+      let idColumn = 'id';
+      if (tabType === 'saved') { table = 'saved_tabs'; }
+      else if (tabType === 'combo') { table = 'combo_subscriptions'; idColumn = 'combo_id'; }
+      else { table = 'graph_tabs'; }
+      const whereClause = tabType === 'combo'
+        ? `WHERE combo_id = $2 AND user_id = $3`
+        : `WHERE id = $2 AND user_id = $3`;
       const result = await pool.query(
-        `UPDATE ${table} SET group_id = $1 WHERE id = $2 AND user_id = $3 RETURNING id, group_id`,
+        `UPDATE ${table} SET group_id = $1 ${whereClause} RETURNING ${idColumn} as id, group_id`,
         [groupId, tabId, userId]
       );
       if (result.rows.length === 0) {
@@ -1384,9 +1391,16 @@ const votesController = {
       if (tabType === 'corpus') {
         return res.status(400).json({ error: 'Corpus tabs cannot be in groups' });
       }
-      const table = tabType === 'saved' ? 'saved_tabs' : 'graph_tabs';
+      let table;
+      let idColumn = 'id';
+      if (tabType === 'saved') { table = 'saved_tabs'; }
+      else if (tabType === 'combo') { table = 'combo_subscriptions'; idColumn = 'combo_id'; }
+      else { table = 'graph_tabs'; }
+      const whereClause = tabType === 'combo'
+        ? `WHERE combo_id = $1 AND user_id = $2`
+        : `WHERE id = $1 AND user_id = $2`;
       const result = await pool.query(
-        `UPDATE ${table} SET group_id = NULL WHERE id = $1 AND user_id = $2 RETURNING id, group_id`,
+        `UPDATE ${table} SET group_id = NULL ${whereClause} RETURNING ${idColumn} as id, group_id`,
         [tabId, userId]
       );
       if (result.rows.length === 0) {

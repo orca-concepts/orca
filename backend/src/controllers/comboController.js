@@ -290,7 +290,7 @@ const getComboSubscriptions = async (req, res) => {
     const userId = req.user.userId;
 
     const result = await pool.query(
-      `SELECT cs.id AS subscription_id, cs.created_at AS subscribed_at,
+      `SELECT cs.id AS subscription_id, cs.created_at AS subscribed_at, cs.group_id,
               c.id, c.name, c.description,
               (SELECT COUNT(*) FROM combo_edges ce WHERE ce.combo_id = c.id) AS edge_count,
               (SELECT COUNT(*) FROM combo_subscriptions cs2 WHERE cs2.combo_id = c.id) AS subscriber_count

@@ -1978,7 +1978,7 @@ const createTables = async () => {
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         description TEXT,
-        created_by INTEGER REFERENCES users(id),
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -2034,6 +2034,30 @@ const createTables = async () => {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_combo_annotation_votes_combo_annotation
         ON combo_annotation_votes(combo_id, annotation_id);
+    `);
+
+    // Phase 39e: Add group_id to combo_subscriptions for tab group support
+    await client.query(`
+      ALTER TABLE combo_subscriptions ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES tab_groups(id) ON DELETE SET NULL;
+    `);
+
+    // Phase 39e: Change combos.created_by to ON DELETE SET NULL for existing databases
+    // (The CREATE TABLE above handles fresh databases; this ALTER handles existing ones)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'combos' AND constraint_type = 'FOREIGN KEY'
+          AND constraint_name = (
+            SELECT constraint_name FROM information_schema.key_column_usage
+            WHERE table_name = 'combos' AND column_name = 'created_by'
+          )
+        ) THEN
+          ALTER TABLE combos DROP CONSTRAINT IF EXISTS combos_created_by_fkey;
+          ALTER TABLE combos ADD CONSTRAINT combos_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
     `);
 
     console.log('Phase 39a: Created combos, combo_edges, combo_subscriptions, combo_annotation_votes tables');

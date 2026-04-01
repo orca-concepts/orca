@@ -99,6 +99,9 @@ const AppShell = () => {
   // Phase 39d: User's owned combos (for "Add to Combo" button in Concept)
   const [ownedCombos, setOwnedCombos] = useState([]);
 
+  // Phase 39e: Refresh key to signal ComboTabContent to reload after edge added from graph
+  const [comboRefreshKey, setComboRefreshKey] = useState(0);
+
   // Phase 31b: Messages page state
   const [messagesPageOpen, setMessagesPageOpen] = useState(false);
   const [messagesUnreadCount, setMessagesUnreadCount] = useState(0);
@@ -324,6 +327,7 @@ const AppShell = () => {
         combo_id: sub.id,
         name: sub.name,
         subscriber_count: sub.subscriber_count,
+        group_id: sub.group_id || null,
       }));
       setGraphTabs(loadedGraph);
       setTabGroups(loadedGroups);
@@ -367,8 +371,8 @@ const AppShell = () => {
     if (!over) { setOverGroupItemId(null); return; }
     const activeItem = sidebarItems.find(i => i.id === active.id);
     const overItem = sidebarItems.find(i => i.id === over.id);
-    // Highlight a group when dragging any graph_tab over it
-    if (activeItem?.item_type === 'graph_tab' && overItem?.item_type === 'group') {
+    // Highlight a group when dragging a graph_tab or combo over it
+    if ((activeItem?.item_type === 'graph_tab' || activeItem?.item_type === 'combo') && overItem?.item_type === 'group') {
       setOverGroupItemId(over.id);
     } else {
       setOverGroupItemId(null);
@@ -384,38 +388,58 @@ const AppShell = () => {
     const overItem = sidebarItems.find(i => i.id === over.id);
     if (!activeItem || !overItem) return;
 
-    const activeTab = activeItem.item_type === 'graph_tab'
+    const activeGraphTab = activeItem.item_type === 'graph_tab'
       ? graphTabs.find(t => t.id === activeItem.item_id) : null;
-    const activeIsGrouped = !!activeTab?.group_id;
+    const activeComboTab = activeItem.item_type === 'combo'
+      ? comboSubscriptions.find(c => c.id === activeItem.item_id) : null;
+    const activeIsGrouped = !!(activeGraphTab?.group_id || activeComboTab?.group_id);
+    const activeDragType = activeItem.item_type === 'graph_tab' ? 'graph'
+      : activeItem.item_type === 'combo' ? 'combo' : null;
 
-    // Case 1: Drop any graph_tab onto a group → move to that group
-    if (activeItem.item_type === 'graph_tab' && overItem.item_type === 'group') {
+    // Case 1: Drop a graph_tab or combo onto a group → move to that group
+    if ((activeItem.item_type === 'graph_tab' || activeItem.item_type === 'combo') && overItem.item_type === 'group') {
       const tabId = activeItem.item_id;
       const newGroupId = overItem.item_id;
-      const oldGroupId = activeTab?.group_id || null;
+      const oldGroupId = (activeGraphTab || activeComboTab)?.group_id || null;
       if (oldGroupId === newGroupId) return;
-      setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: newGroupId } : t));
+      if (activeDragType === 'graph') {
+        setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: newGroupId } : t));
+      } else {
+        setComboSubscriptions(prev => prev.map(c => c.id === tabId ? { ...c, group_id: newGroupId } : c));
+      }
       try {
-        if (oldGroupId) await votesAPI.removeTabFromGroup('graph', tabId);
-        await votesAPI.addTabToGroup('graph', tabId, newGroupId);
+        if (oldGroupId) await votesAPI.removeTabFromGroup(activeDragType, tabId);
+        await votesAPI.addTabToGroup(activeDragType, tabId, newGroupId);
         await refreshSidebarItems();
       } catch (err) {
-        setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: oldGroupId } : t));
+        if (activeDragType === 'graph') {
+          setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: oldGroupId } : t));
+        } else {
+          setComboSubscriptions(prev => prev.map(c => c.id === tabId ? { ...c, group_id: oldGroupId } : c));
+        }
         console.error('Failed to move tab into group:', err);
       }
       return;
     }
 
-    // Case 2: Grouped graph_tab dropped on a non-group top-level item → pull out of group
+    // Case 2: Grouped tab dropped on a non-group top-level item → pull out of group
     if (activeIsGrouped && overItem.item_type !== 'group') {
       const tabId = activeItem.item_id;
-      const oldGroupId = activeTab.group_id;
-      setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: null } : t));
+      const oldGroupId = (activeGraphTab || activeComboTab)?.group_id;
+      if (activeDragType === 'graph') {
+        setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: null } : t));
+      } else if (activeDragType === 'combo') {
+        setComboSubscriptions(prev => prev.map(c => c.id === tabId ? { ...c, group_id: null } : c));
+      }
       try {
-        await votesAPI.removeTabFromGroup('graph', tabId);
+        await votesAPI.removeTabFromGroup(activeDragType, tabId);
         await refreshSidebarItems();
       } catch (err) {
-        setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: oldGroupId } : t));
+        if (activeDragType === 'graph') {
+          setGraphTabs(prev => prev.map(t => t.id === tabId ? { ...t, group_id: oldGroupId } : t));
+        } else if (activeDragType === 'combo') {
+          setComboSubscriptions(prev => prev.map(c => c.id === tabId ? { ...c, group_id: oldGroupId } : c));
+        }
         console.error('Failed to pull tab out of group:', err);
       }
       return;
@@ -425,6 +449,9 @@ const AppShell = () => {
     const topLevelItems = sidebarItems.filter(item => {
       if (item.item_type === 'graph_tab') {
         return !graphTabs.find(t => t.id === item.item_id)?.group_id;
+      }
+      if (item.item_type === 'combo') {
+        return !comboSubscriptions.find(c => c.id === item.item_id)?.group_id;
       }
       return true;
     });
@@ -438,8 +465,8 @@ const AppShell = () => {
     // Optimistic update
     setSidebarItems(prev => {
       const grouped = prev.filter(item =>
-        item.item_type === 'graph_tab' &&
-        !!graphTabs.find(t => t.id === item.item_id)?.group_id
+        (item.item_type === 'graph_tab' && !!graphTabs.find(t => t.id === item.item_id)?.group_id) ||
+        (item.item_type === 'combo' && !!comboSubscriptions.find(c => c.id === item.item_id)?.group_id)
       );
       return [...reorderedTop, ...grouped];
     });
@@ -769,6 +796,7 @@ const AppShell = () => {
         combo_id: sub.id,
         name: sub.name,
         subscriber_count: sub.subscriber_count,
+        group_id: sub.group_id || null,
       })));
       setOwnedCombos(myCombosRes.data.combos || []);
       await refreshSidebarItems();
@@ -909,6 +937,10 @@ const AppShell = () => {
         setCorpusTabs(prev => prev.map(t =>
           t.id === tabId ? { ...t, group_id: groupId } : t
         ));
+      } else if (tabType === 'combo') {
+        setComboSubscriptions(prev => prev.map(c =>
+          c.id === tabId ? { ...c, group_id: groupId } : c
+        ));
       } else {
         setGraphTabs(prev => prev.map(t =>
           t.id === tabId ? { ...t, group_id: groupId } : t
@@ -925,6 +957,10 @@ const AppShell = () => {
       if (tabType === 'corpus') {
         setCorpusTabs(prev => prev.map(t =>
           t.id === tabId ? { ...t, group_id: null } : t
+        ));
+      } else if (tabType === 'combo') {
+        setComboSubscriptions(prev => prev.map(c =>
+          c.id === tabId ? { ...c, group_id: null } : c
         ));
       } else {
         setGraphTabs(prev => prev.map(t =>
@@ -1026,6 +1062,9 @@ const AppShell = () => {
     if (activeTab.type === 'corpus') {
       return corpusTabs.some(t => t.id === activeTab.id && t.group_id === group.id);
     }
+    if (activeTab.type === 'combo') {
+      return comboSubscriptions.some(c => c.id === activeTab.id && c.group_id === group.id);
+    }
     return false;
   };
 
@@ -1049,6 +1088,9 @@ const AppShell = () => {
   const topLevelSidebarItems = sidebarItems.filter(item => {
     if (item.item_type === 'graph_tab') {
       return !graphTabs.find(t => t.id === item.item_id)?.group_id;
+    }
+    if (item.item_type === 'combo') {
+      return !comboSubscriptions.find(c => c.id === item.item_id)?.group_id;
     }
     return true;
   });
@@ -1153,12 +1195,13 @@ const AppShell = () => {
   const renderSidebarGroup = (group, sidebarItemId = null) => {
     const isExpanded = group.is_expanded;
     const memberGraph = graphTabs.filter(t => t.group_id === group.id);
+    const memberCombos = comboSubscriptions.filter(c => c.group_id === group.id);
     // Sidebar item IDs for member graph tabs (for the inner SortableContext)
     const memberGraphSidebarIds = memberGraph
       .map(tab => sidebarItems.find(si => si.item_type === 'graph_tab' && si.item_id === tab.id)?.id)
       .filter(Boolean);
     const hasActiveInside = groupContainsActiveTab(group);
-    const memberCount = memberGraph.length;
+    const memberCount = memberGraph.length + memberCombos.length;
     // Amber highlight when a graph_tab is dragged over this group
     const isDropTarget = overGroupItemId != null && overGroupItemId === sidebarItemId;
 
@@ -1202,6 +1245,13 @@ const AppShell = () => {
 
     const renderMembers = (withDnd) => (
       <>
+        {/* Combo members in group (not DnD-sortable within group) */}
+        {memberCombos.map(combo => (
+          <div key={`combo-g-${combo.id}`} style={{ paddingLeft: '16px' }}>
+            {renderSidebarComboItem(combo)}
+          </div>
+        ))}
+        {/* Graph tab members in group */}
         {withDnd && memberGraphSidebarIds.length > 0 ? (
           <GroupMemberContext ids={memberGraphSidebarIds}>
             {memberGraph.map(tab => {
@@ -1533,6 +1583,7 @@ const AppShell = () => {
                         setComboView(null);
                       }}
                       onRequestLogin={handleRequestLogin}
+                      refreshKey={comboRefreshKey}
                     />
                   </div>
                 );
@@ -1598,6 +1649,7 @@ const AppShell = () => {
                         onRequestLogin={handleRequestLogin}
                         onAnnotateFromGraph={handleAnnotateFromGraph}
                         ownedCombos={ownedCombos}
+                        onComboEdgeAdded={() => setComboRefreshKey(k => k + 1)}
                       />
                     )}
                   </div>
@@ -1660,9 +1712,21 @@ const AppShell = () => {
             </>
           )}
 
-          {/* Combo tab context menu — unsubscribe only */}
+          {/* Combo tab context menu — unsubscribe + group management */}
           {contextMenu.tabType === 'combo' && (
             <>
+              {comboSubscriptions.find(c => c.id === contextMenu.tabId)?.group_id ? (
+                <button
+                  style={styles.contextMenuItem}
+                  onClick={() => handleContextMenuAction('removeFromGroup')}
+                >Remove from group</button>
+              ) : (
+                <button
+                  style={styles.contextMenuItem}
+                  onClick={() => handleContextMenuAction(tabGroups.length > 0 ? 'addToGroup' : 'createGroup')}
+                >{tabGroups.length > 0 ? 'Add to group...' : 'Create group with this tab...'}</button>
+              )}
+              <div style={styles.contextMenuDivider} />
               <button
                 style={{ ...styles.contextMenuItem, color: '#555' }}
                 onClick={() => { handleUnsubscribeFromCombo(contextMenu.tabId); setContextMenu(null); }}
@@ -1844,7 +1908,8 @@ const styles = {
     overflow: 'hidden',
   },
   sidebarActions: {
-    display: 'flex',
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: '6px',
     padding: '10px 10px 6px 10px',
   },

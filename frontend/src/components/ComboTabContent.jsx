@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { combosAPI, conceptsAPI } from '../services/api';
 
-const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDocument, onRequestLogin }) => {
+const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDocument, onRequestLogin, refreshKey }) => {
   const [combo, setCombo] = useState(null);
   const [edges, setEdges] = useState([]);
   const [annotations, setAnnotations] = useState([]);
@@ -68,7 +68,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
     }
   }, [comboId, sortOption, activeEdgeIds]);
 
-  // Initial load
+  // Initial load (and reload when refreshKey changes — e.g., after edge added from graph view)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -77,7 +77,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [comboId, loadCombo]);
+  }, [comboId, loadCombo, refreshKey]);
 
   // Load annotations when sort or filter changes
   useEffect(() => {

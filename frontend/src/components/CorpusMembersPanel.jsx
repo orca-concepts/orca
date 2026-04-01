@@ -16,6 +16,9 @@ export default function CorpusMembersPanel({
   onTransferOwnership,
 }) {
   const [generatingInvite, setGeneratingInvite] = useState(false);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteMaxUses, setInviteMaxUses] = useState('');
+  const [inviteExpiresInDays, setInviteExpiresInDays] = useState('');
   const [copiedTokenId, setCopiedTokenId] = useState(null);
   const [leavingCorpus, setLeavingCorpus] = useState(false);
   const [showTransferUI, setShowTransferUI] = useState(false);
@@ -26,7 +29,12 @@ export default function CorpusMembersPanel({
   const handleGenerateInvite = async () => {
     setGeneratingInvite(true);
     try {
-      await onGenerateInvite();
+      const maxUses = inviteMaxUses ? parseInt(inviteMaxUses, 10) : undefined;
+      const expiresInDays = inviteExpiresInDays ? parseInt(inviteExpiresInDays, 10) : undefined;
+      await onGenerateInvite(maxUses, expiresInDays);
+      setShowInviteForm(false);
+      setInviteMaxUses('');
+      setInviteExpiresInDays('');
     } finally {
       setGeneratingInvite(false);
     }
@@ -103,12 +111,44 @@ export default function CorpusMembersPanel({
                 <span style={styles.membersInviteLabel}>Invite Links</span>
                 <button
                   style={styles.membersGenerateBtn}
-                  onClick={handleGenerateInvite}
-                  disabled={generatingInvite}
+                  onClick={() => setShowInviteForm(!showInviteForm)}
                 >
-                  {generatingInvite ? 'Generating...' : '+ New Invite Link'}
+                  {showInviteForm ? 'Cancel' : '+ New Invite Link'}
                 </button>
               </div>
+              {showInviteForm && (
+                <div style={styles.inviteForm}>
+                  <div style={styles.inviteFormRow}>
+                    <label style={styles.inviteFormLabel}>Max uses (optional)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Unlimited"
+                      value={inviteMaxUses}
+                      onChange={(e) => setInviteMaxUses(e.target.value)}
+                      style={styles.inviteFormInput}
+                    />
+                  </div>
+                  <div style={styles.inviteFormRow}>
+                    <label style={styles.inviteFormLabel}>Expires in days (optional)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Never"
+                      value={inviteExpiresInDays}
+                      onChange={(e) => setInviteExpiresInDays(e.target.value)}
+                      style={styles.inviteFormInput}
+                    />
+                  </div>
+                  <button
+                    style={styles.inviteFormSubmit}
+                    onClick={handleGenerateInvite}
+                    disabled={generatingInvite}
+                  >
+                    {generatingInvite ? 'Generating...' : 'Generate Link'}
+                  </button>
+                </div>
+              )}
               {inviteTokensLoading ? (
                 <div style={styles.membersPanelHint}>Loading...</div>
               ) : inviteTokens.length === 0 ? (
@@ -329,6 +369,48 @@ const styles = {
     borderRadius: '4px',
     padding: '4px 10px',
     cursor: 'pointer',
+  },
+  inviteForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    padding: '10px',
+    border: '1px solid #f0ebe0',
+    borderRadius: '4px',
+    backgroundColor: '#fff',
+    marginBottom: '10px',
+  },
+  inviteFormRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  inviteFormLabel: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#555',
+    minWidth: '140px',
+    flexShrink: 0,
+  },
+  inviteFormInput: {
+    padding: '4px 8px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    outline: 'none',
+    width: '100px',
+  },
+  inviteFormSubmit: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: 'white',
+    backgroundColor: '#333',
+    border: '1px solid #333',
+    borderRadius: '4px',
+    padding: '5px 12px',
+    cursor: 'pointer',
+    alignSelf: 'flex-start',
   },
   membersTokenList: {
     display: 'flex',
