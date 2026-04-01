@@ -237,13 +237,13 @@ const createCombo = async (req, res) => {
       [userId, combo.id]
     );
 
-    // Add sidebar item
+    // Add sidebar item (item_id = combo_id, matching corpus pattern)
     await client.query(
       `INSERT INTO sidebar_items (user_id, item_type, item_id, display_order)
        VALUES ($1, 'combo', $2,
          COALESCE((SELECT MAX(display_order) FROM sidebar_items WHERE user_id = $1), 0) + 10)
        ON CONFLICT (user_id, item_type, item_id) DO NOTHING`,
-      [userId, subResult.rows[0].id]
+      [userId, combo.id]
     );
 
     await client.query('COMMIT');
@@ -342,13 +342,13 @@ const subscribeToCombo = async (req, res) => {
       return res.status(409).json({ error: 'Already subscribed to this combo' });
     }
 
-    // Add to sidebar_items
+    // Add to sidebar_items (item_id = combo_id, matching corpus pattern)
     await pool.query(
       `INSERT INTO sidebar_items (user_id, item_type, item_id, display_order)
        VALUES ($1, 'combo', $2,
          COALESCE((SELECT MAX(display_order) FROM sidebar_items WHERE user_id = $1), 0) + 10)
        ON CONFLICT (user_id, item_type, item_id) DO NOTHING`,
-      [userId, result.rows[0].id]
+      [userId, comboId]
     );
 
     res.status(201).json({ subscription: result.rows[0], combo: comboCheck.rows[0] });
@@ -368,29 +368,21 @@ const unsubscribeFromCombo = async (req, res) => {
       return res.status(400).json({ error: 'comboId is required' });
     }
 
-    // Find the subscription to get its ID for sidebar_items cleanup
-    const subResult = await pool.query(
-      'SELECT id FROM combo_subscriptions WHERE user_id = $1 AND combo_id = $2',
+    // Remove from sidebar_items (item_id = combo_id, matching corpus pattern)
+    await pool.query(
+      `DELETE FROM sidebar_items WHERE user_id = $1 AND item_type = 'combo' AND item_id = $2`,
       [userId, comboId]
     );
 
-    if (subResult.rows.length === 0) {
+    // Delete subscription
+    const delResult = await pool.query(
+      'DELETE FROM combo_subscriptions WHERE user_id = $1 AND combo_id = $2',
+      [userId, comboId]
+    );
+
+    if (delResult.rowCount === 0) {
       return res.status(404).json({ error: 'Not subscribed to this combo' });
     }
-
-    const subscriptionId = subResult.rows[0].id;
-
-    // Remove from sidebar_items
-    await pool.query(
-      `DELETE FROM sidebar_items WHERE user_id = $1 AND item_type = 'combo' AND item_id = $2`,
-      [userId, subscriptionId]
-    );
-
-    // Delete subscription
-    await pool.query(
-      'DELETE FROM combo_subscriptions WHERE id = $1',
-      [subscriptionId]
-    );
 
     res.json({ message: 'Unsubscribed from combo' });
   } catch (error) {

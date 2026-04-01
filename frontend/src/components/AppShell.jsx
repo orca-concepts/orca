@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { votesAPI, corpusAPI, messagesAPI } from '../services/api';
+import { votesAPI, corpusAPI, messagesAPI, combosAPI } from '../services/api';
 import { arrayMove } from '@dnd-kit/sortable';
 import Root from '../pages/Root';
 import Concept from '../pages/Concept';
@@ -17,6 +17,7 @@ import DeleteAccountFlow from '../components/DeleteAccountFlow';
 import SidebarDndContext, { SortableItem, SortableGroupWrapper, GroupMemberContext } from '../components/SidebarDndContext';
 import InfoPage from '../components/InfoPage';
 import MessagesPage from '../components/MessagesPage';
+import ComboListView from '../components/ComboListView';
 
 const AppShell = () => {
   const { logout, logoutEverywhere, user, isGuest, loading: authLoading } = useAuth();
@@ -87,6 +88,12 @@ const AppShell = () => {
 
   // Saved Page overlay state (Phase 7c-3)
   const [savedPageOpen, setSavedPageOpen] = useState(false);
+
+  // Phase 39b: Combo browse overlay state
+  const [comboView, setComboView] = useState(null); // null | { view: 'list' }
+
+  // Phase 39b: Combo subscriptions (persistent combo tabs)
+  const [comboSubscriptions, setComboSubscriptions] = useState([]);
 
   // Phase 31b: Messages page state
   const [messagesPageOpen, setMessagesPageOpen] = useState(false);
@@ -288,7 +295,7 @@ const AppShell = () => {
   const loadAllTabs = async () => {
     try {
       setLoading(true);
-      const [graphRes, groupsRes, subsRes, sidebarRes] = await Promise.all([
+      const [graphRes, groupsRes, subsRes, sidebarRes, comboSubsRes] = await Promise.all([
         votesAPI.getGraphTabs().catch(() => ({ data: { graphTabs: [] } })),
         votesAPI.getTabGroups().catch(() => ({ data: { tabGroups: [] } })),
         corpusAPI.getMySubscriptions().catch(() => ({ data: { subscriptions: [] } })),
@@ -296,6 +303,7 @@ const AppShell = () => {
           console.warn('getSidebarItems failed, sidebar order will be default:', err);
           return { data: { items: [] } };
         }),
+        combosAPI.getSubscriptions().catch(() => ({ data: { subscriptions: [] } })),
       ]);
       const loadedGraph = graphRes.data.graphTabs;
       const loadedGroups = groupsRes.data.tabGroups;
@@ -306,9 +314,16 @@ const AppShell = () => {
         subscriber_count: sub.subscriber_count,
         group_id: null,
       }));
+      const loadedComboSubs = (comboSubsRes.data.subscriptions || []).map(sub => ({
+        id: sub.id, // combo ID
+        combo_id: sub.id,
+        name: sub.name,
+        subscriber_count: sub.subscriber_count,
+      }));
       setGraphTabs(loadedGraph);
       setTabGroups(loadedGroups);
       setCorpusTabs(loadedCorpusTabs);
+      setComboSubscriptions(loadedComboSubs);
       setSidebarItems(sidebarRes.data.items || []);
 
       // Set active tab: prefer first graph tab, then first corpus tab
@@ -708,6 +723,7 @@ const AppShell = () => {
     setActiveTab({ type: 'corpus', id: corpusId });
     setSavedPageOpen(false);
     setCorpusView(null);
+    setComboView(null);
     setMessagesPageOpen(false);
   }, [isGuest, handleRequestLogin]);
 
@@ -733,6 +749,78 @@ const AppShell = () => {
       alert(err.response?.data?.error || 'Failed to unsubscribe');
     }
   }, [activeTab, graphTabs]);
+
+  // ─── Combo Subscribe/Unsubscribe (Phase 39b) ──────────────
+
+  const reloadComboSubscriptions = useCallback(async () => {
+    try {
+      const res = await combosAPI.getSubscriptions();
+      setComboSubscriptions((res.data.subscriptions || []).map(sub => ({
+        id: sub.id,
+        combo_id: sub.id,
+        name: sub.name,
+        subscriber_count: sub.subscriber_count,
+      })));
+      await refreshSidebarItems();
+    } catch (err) {
+      // non-critical
+    }
+  }, []);
+
+  const handleSubscribeToCombo = useCallback(async (comboId, comboName) => {
+    if (isGuest) {
+      handleRequestLogin();
+      return;
+    }
+    try {
+      await combosAPI.subscribe(comboId);
+      const newSub = { id: comboId, combo_id: comboId, name: comboName, subscriber_count: 0 };
+      setComboSubscriptions(prev => [...prev, newSub]);
+      setActiveTab({ type: 'combo', id: comboId });
+      setComboView(null);
+      setCorpusView(null);
+      setSavedPageOpen(false);
+      setMessagesPageOpen(false);
+      await refreshSidebarItems();
+    } catch (err) {
+      if (err.response?.status === 409) {
+        // Already subscribed — just switch to the tab
+        setActiveTab({ type: 'combo', id: comboId });
+        setComboView(null);
+        setCorpusView(null);
+        setSavedPageOpen(false);
+        setMessagesPageOpen(false);
+      } else if (err.response?.status === 401) {
+        handleRequestLogin();
+      } else {
+        alert(err.response?.data?.error || 'Failed to subscribe');
+      }
+    }
+  }, [isGuest, handleRequestLogin]);
+
+  const handleUnsubscribeFromCombo = useCallback(async (comboId) => {
+    try {
+      await combosAPI.unsubscribe(comboId);
+      setComboSubscriptions(prev => {
+        const remaining = prev.filter(s => s.id !== comboId);
+        if (activeTab?.type === 'combo' && activeTab?.id === comboId) {
+          if (graphTabs.length > 0) {
+            setActiveTab({ type: 'graph', id: graphTabs[0].id });
+          } else if (corpusTabs.length > 0) {
+            setActiveTab({ type: 'corpus', id: corpusTabs[0].id });
+          } else if (remaining.length > 0) {
+            setActiveTab({ type: 'combo', id: remaining[0].id });
+          } else {
+            createDefaultGraphTab();
+          }
+        }
+        return remaining;
+      });
+      await refreshSidebarItems();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to unsubscribe');
+    }
+  }, [activeTab, graphTabs, corpusTabs]);
 
   // ─── Tab Group Actions (Phase 5d) ─────────────────────────
 
@@ -960,6 +1048,7 @@ const AppShell = () => {
   const activeDragItem = activeDragId != null ? sidebarItems.find(i => i.id === activeDragId) : null;
   const activeDragLabel = activeDragItem
     ? activeDragItem.item_type === 'corpus' ? corpusTabs.find(t => t.id === activeDragItem.item_id)?.name
+    : activeDragItem.item_type === 'combo' ? comboSubscriptions.find(c => c.id === activeDragItem.item_id)?.name
     : activeDragItem.item_type === 'group' ? tabGroups.find(g => g.id === activeDragItem.item_id)?.name
     : activeDragItem.item_type === 'graph_tab' ? graphTabs.find(t => t.id === activeDragItem.item_id)?.label
     : null
@@ -982,6 +1071,7 @@ const AppShell = () => {
         onClick={() => {
           setActiveTab({ type: 'corpus', id: tab.id });
           setCorpusView(null);
+          setComboView(null);
           setSavedPageOpen(false);
           setMessagesPageOpen(false);
         }}
@@ -990,6 +1080,33 @@ const AppShell = () => {
       >
         <span style={styles.sidebarArrowPlaceholder} />
         <span style={styles.sidebarItemLabel}>{tab.name}</span>
+      </div>
+    );
+  };
+
+  // Render a sidebar item for a combo tab (Phase 39b)
+  const renderSidebarComboItem = (combo) => {
+    const isActive = isActiveTab('combo', combo.id);
+
+    return (
+      <div
+        key={`combo-${combo.id}`}
+        style={{
+          ...styles.sidebarItem,
+          ...(isActive ? styles.sidebarItemActive : {}),
+        }}
+        onClick={() => {
+          setActiveTab({ type: 'combo', id: combo.id });
+          setCorpusView(null);
+          setComboView(null);
+          setSavedPageOpen(false);
+          setMessagesPageOpen(false);
+        }}
+        onContextMenu={(e) => handleTabContextMenu(e, 'combo', combo.id)}
+        title={`${combo.name} — right-click for options`}
+      >
+        <span style={styles.sidebarArrowPlaceholder} />
+        <span style={styles.sidebarItemLabel}>{combo.name}</span>
       </div>
     );
   };
@@ -1006,7 +1123,7 @@ const AppShell = () => {
           paddingLeft: `${12 + depth * 16}px`,
           ...(isActive ? styles.sidebarItemActive : {}),
         }}
-        onClick={() => { setActiveTab({ type: 'graph', id: tab.id }); setCorpusView(null); setSavedPageOpen(false); setMessagesPageOpen(false); }}
+        onClick={() => { setActiveTab({ type: 'graph', id: tab.id }); setCorpusView(null); setComboView(null); setSavedPageOpen(false); setMessagesPageOpen(false); }}
         onContextMenu={(e) => handleTabContextMenu(e, 'graph', tab.id)}
         title={`${tab.label} — right-click for options`}
       >
@@ -1186,20 +1303,25 @@ const AppShell = () => {
             <div style={styles.sidebarActions}>
               {!isGuest && (
                 <button
-                  onClick={() => { setCorpusView(null); setSavedPageOpen(true); setMessagesPageOpen(false); }}
+                  onClick={() => { setCorpusView(null); setComboView(null); setSavedPageOpen(true); setMessagesPageOpen(false); }}
                   style={styles.sidebarActionButton}
                   title="View your graph votes"
                 >Graph Votes</button>
               )}
               <button
-                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setCorpusView({ view: 'list' }); }}
+                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setComboView(null); setCorpusView({ view: 'list' }); }}
                 style={styles.sidebarActionButton}
                 title="Browse and manage corpuses"
-              >Browse</button>
+              >Browse Corpuses</button>
+              <button
+                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setCorpusView(null); setComboView({ view: 'list' }); }}
+                style={styles.sidebarActionButton}
+                title="Browse and manage combos"
+              >Browse Combos</button>
               {!isGuest && (
                 <button
                   data-messages-btn
-                  onClick={() => { setSavedPageOpen(false); setCorpusView(null); setMessagesPageOpen(true); }}
+                  onClick={() => { setSavedPageOpen(false); setCorpusView(null); setComboView(null); setMessagesPageOpen(true); }}
                   style={styles.sidebarActionButton}
                   title="View your message threads"
                 >Messages{messagesUnreadCount > 0 ? ` (${messagesUnreadCount})` : ''}</button>
@@ -1237,6 +1359,15 @@ const AppShell = () => {
                       if (!group) return null;
                       return renderSidebarGroup(group, item.id);
                     }
+                    if (item.item_type === 'combo') {
+                      const combo = comboSubscriptions.find(c => c.id === item.item_id);
+                      if (!combo) return null;
+                      return (
+                        <SortableItem key={item.id} id={item.id}>
+                          {renderSidebarComboItem(combo)}
+                        </SortableItem>
+                      );
+                    }
                     if (item.item_type === 'graph_tab') {
                       const tab = graphTabs.find(t => t.id === item.item_id);
                       if (!tab || tab.group_id) return null;
@@ -1253,10 +1384,12 @@ const AppShell = () => {
                 // Fallback: sidebar order not loaded, render without DnD
                 [
                   ...corpusTabs.filter(t => !t.group_id).map(t => ({ item_type: 'corpus', item_id: t.id, _key: `c-${t.id}` })),
+                  ...comboSubscriptions.map(c => ({ item_type: 'combo', item_id: c.id, _key: `cb-${c.id}` })),
                   ...tabGroups.map(g => ({ item_type: 'group', item_id: g.id, _key: `g-${g.id}` })),
                   ...graphTabs.filter(t => !t.group_id).map(t => ({ item_type: 'graph_tab', item_id: t.id, _key: `gt-${t.id}` })),
                 ].map(item => {
                   if (item.item_type === 'corpus') return renderSidebarCorpusItem(corpusTabs.find(t => t.id === item.item_id));
+                  if (item.item_type === 'combo') return renderSidebarComboItem(comboSubscriptions.find(c => c.id === item.item_id));
                   if (item.item_type === 'group') return renderSidebarGroup(tabGroups.find(g => g.id === item.item_id));
                   if (item.item_type === 'graph_tab') return renderSidebarGraphItem(graphTabs.find(t => t.id === item.item_id));
                   return null;
@@ -1350,9 +1483,43 @@ const AppShell = () => {
             />
           )}
 
+          {/* Phase 39b: Browse Combos overlay */}
+          {!savedPageOpen && !messagesPageOpen && !corpusView && comboView && comboView.view === 'list' && (
+            <ComboListView
+              onBack={() => setComboView(null)}
+              isGuest={isGuest}
+              comboSubscriptions={comboSubscriptions}
+              onSubscribe={() => reloadComboSubscriptions()}
+              onUnsubscribe={(comboId) => handleUnsubscribeFromCombo(comboId)}
+              onComboClick={(combo) => {
+                handleSubscribeToCombo(combo.id, combo.name);
+              }}
+              onRequestLogin={() => {
+                setLoginModalTab('login');
+                setLoginModalNotice('Log in to subscribe to combos');
+                setShowLoginModal(true);
+              }}
+            />
+          )}
+
           {/* Normal tab content — hidden when overlays are active */}
-          {!savedPageOpen && !messagesPageOpen && !corpusView && (
+          {!savedPageOpen && !messagesPageOpen && !corpusView && !comboView && (
             <>
+              {/* Combo tab content — placeholder until Phase 39c */}
+              {!isGuest && comboSubscriptions.map(combo => {
+                const isActive = activeTab?.type === 'combo' && activeTab?.id === combo.id;
+                return (
+                  <div
+                    key={`combo-${combo.id}`}
+                    style={isActive ? styles.tabPane : styles.tabPaneHidden}
+                  >
+                    <div style={{ padding: '2rem', fontFamily: "'EB Garamond', serif" }}>
+                      <h2 style={{ fontFamily: "'EB Garamond', serif", fontWeight: '600', color: '#333', margin: '0 0 8px 0' }}>{combo.name}</h2>
+                      <p style={{ fontFamily: "'EB Garamond', serif", color: '#888', margin: 0 }}>Combo content coming soon.</p>
+                    </div>
+                  </div>
+                );
+              })}
               {/* Corpus tab content — render all, hide inactive to preserve document state */}
               {!isGuest && corpusTabs.map(ct => {
                 const isActive = activeTab?.type === 'corpus' && activeTab?.id === ct.id;
@@ -1374,6 +1541,7 @@ const AppShell = () => {
                         setMessagesInitialAnnotationIds(equivalentIds || null);
                         setSavedPageOpen(false);
                         setCorpusView(null);
+                        setComboView(null);
                         setMessagesPageOpen(true);
                       }}
                       pendingDocumentId={activeTab?.type === 'corpus' && activeTab?.id === ct.id ? pendingCorpusDocumentId : null}
@@ -1470,6 +1638,16 @@ const AppShell = () => {
               <button
                 style={{ ...styles.contextMenuItem, color: '#555' }}
                 onClick={() => { handleUnsubscribeFromCorpus(contextMenu.tabId); setContextMenu(null); }}
+              >Unsubscribe</button>
+            </>
+          )}
+
+          {/* Combo tab context menu — unsubscribe only */}
+          {contextMenu.tabType === 'combo' && (
+            <>
+              <button
+                style={{ ...styles.contextMenuItem, color: '#555' }}
+                onClick={() => { handleUnsubscribeFromCombo(contextMenu.tabId); setContextMenu(null); }}
               >Unsubscribe</button>
             </>
           )}
