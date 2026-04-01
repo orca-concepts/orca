@@ -279,7 +279,7 @@ async function seed() {
 
     // ── Phase B: Users ──────────────────────────────────
     console.log('\n=== Phase B: Users ===');
-    const passwordHash = await bcrypt.hash('test123', 10);
+    const passwordHash = await bcrypt.hash('testpass123!', 10);
     const userNames = ['alice', 'bob', 'carol', 'dave', 'eve', 'frank'];
     const users = {};
     const savedTabs = {};

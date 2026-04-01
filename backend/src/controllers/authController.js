@@ -1,8 +1,28 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const zxcvbn = require('zxcvbn');
 const pool = require('../config/database');
 const { normalizePhone, sendVerificationCode, checkVerificationCode, computePhoneLookup } = require('../utils/phoneAuth');
 require('dotenv').config();
+
+// Password validation helper (NIST SP 800-63B)
+function validatePassword(password, userInputs = []) {
+  if (!password || typeof password !== 'string') {
+    return { valid: false, error: 'Password is required' };
+  }
+  if (password.length < 8) {
+    return { valid: false, error: 'Password must be at least 8 characters' };
+  }
+  if (password.length > 128) {
+    return { valid: false, error: 'Password must be 128 characters or fewer' };
+  }
+  const result = zxcvbn(password, userInputs);
+  if (result.score < 2) {
+    const suggestion = result.feedback.suggestions.join(' ') || result.feedback.warning || 'Please choose a stronger password';
+    return { valid: false, error: suggestion };
+  }
+  return { valid: true };
+}
 
 const authController = {
   // Get current user info
@@ -24,7 +44,55 @@ const authController = {
     }
   },
 
-  // Send OTP code via Twilio
+  // Password login (Phase 40b)
+  login: async (req, res) => {
+    const { identifier, password } = req.body;
+
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'Username/email and password are required' });
+    }
+
+    try {
+      const isEmail = identifier.includes('@');
+
+      let user;
+      if (isEmail) {
+        const result = await pool.query(
+          'SELECT id, username, password_hash FROM users WHERE LOWER(email) = LOWER($1)',
+          [identifier.trim()]
+        );
+        user = result.rows[0];
+      } else {
+        const result = await pool.query(
+          'SELECT id, username, password_hash FROM users WHERE LOWER(username) = LOWER($1)',
+          [identifier.trim()]
+        );
+        user = result.rows[0];
+      }
+
+      if (!user || !user.password_hash) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const passwordValid = await bcrypt.compare(password, user.password_hash);
+      if (!passwordValid) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign(
+        { userId: user.id, username: user.username },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || '90d' }
+      );
+
+      res.json({ token, user: { id: user.id, username: user.username } });
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // Send OTP code via Twilio (used for registration and forgot-password)
   sendCode: async (req, res) => {
     const { phoneNumber, intent } = req.body;
 
@@ -46,17 +114,8 @@ const authController = {
         if (existing.rows.length > 0) {
           return res.status(400).json({ error: 'An account with this phone number already exists' });
         }
-      } else if (intent === 'login') {
-        // Login: reject if phone doesn't exist
-        const existing = await pool.query(
-          'SELECT id FROM users WHERE phone_lookup = $1',
-          [phoneLookup]
-        );
-        if (existing.rows.length === 0) {
-          return res.status(400).json({ error: 'No account found with this phone number' });
-        }
       }
-      // If no intent provided, skip checks (backward compatibility)
+      // intent=login no longer used (OTP login removed in Phase 40b)
     } catch (error) {
       console.error('Phone pre-check error:', error);
       return res.status(500).json({ error: 'Internal server error' });
@@ -74,12 +133,18 @@ const authController = {
     }
   },
 
-  // Verify OTP and register new user
+  // Verify OTP and register new user (Phase 40b: now requires password)
   verifyRegister: async (req, res) => {
-    const { phoneNumber, code, username, email, ageVerified } = req.body;
+    const { phoneNumber, code, username, email, password, ageVerified } = req.body;
 
     if (!phoneNumber || !code || !username) {
       return res.status(400).json({ error: 'Phone number, code, and username are required' });
+    }
+
+    // Password validation (before Twilio call)
+    const passwordValidation = validatePassword(password, [username, email].filter(Boolean));
+    if (!passwordValidation.valid) {
+      return res.status(400).json({ error: passwordValidation.error });
     }
 
     // Email validation (before Twilio call)
@@ -140,16 +205,18 @@ const authController = {
         return res.status(409).json({ error: 'An account with this phone number already exists' });
       }
 
-      // Hash phone, create user + default tab in a transaction
+      // Hash phone and password
       const phoneHash = await bcrypt.hash(normalized, 10);
+      const passwordHash = await bcrypt.hash(password, 10);
+
       const client = await pool.connect();
       let user;
       try {
         await client.query('BEGIN');
 
         const result = await client.query(
-          'INSERT INTO users (username, phone_hash, phone_lookup, email, age_verified_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING id, username',
-          [username, phoneHash, phoneLookup, email.trim()]
+          'INSERT INTO users (username, phone_hash, phone_lookup, password_hash, email, age_verified_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id, username',
+          [username, phoneHash, phoneLookup, passwordHash, email.trim()]
         );
         user = result.rows[0];
 
@@ -184,21 +251,58 @@ const authController = {
     }
   },
 
-  // Verify OTP and login existing user
-  verifyLogin: async (req, res) => {
-    const { phoneNumber, code } = req.body;
+  // Forgot password: send OTP to phone number (Phase 40b)
+  forgotPasswordSendCode: async (req, res) => {
+    const { phoneNumber } = req.body;
 
-    if (!phoneNumber || !code) {
-      return res.status(400).json({ error: 'Phone number and code are required' });
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Phone number is required' });
     }
 
-    // Verify OTP with Twilio
+    try {
+      const normalized = normalizePhone(phoneNumber);
+      const lookupHash = computePhoneLookup(normalized);
+
+      // Check user exists
+      const result = await pool.query(
+        'SELECT id FROM users WHERE phone_lookup = $1',
+        [lookupHash]
+      );
+
+      if (!result.rows[0]) {
+        // Generic response — don't reveal whether account exists
+        return res.json({ message: 'If an account exists with this phone number, a verification code has been sent' });
+      }
+
+      // Send OTP via Twilio
+      const sendResult = await sendVerificationCode(phoneNumber);
+      if (!sendResult.success) {
+        return res.status(500).json({ error: 'Failed to send verification code' });
+      }
+
+      res.json({ message: 'If an account exists with this phone number, a verification code has been sent' });
+    } catch (error) {
+      console.error('Forgot password send code error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // Forgot password: verify OTP and reset password (Phase 40b)
+  forgotPasswordReset: async (req, res) => {
+    const { phoneNumber, code, newPassword } = req.body;
+
+    if (!phoneNumber || !code || !newPassword) {
+      return res.status(400).json({ error: 'Phone number, verification code, and new password are required' });
+    }
+
+    // Verify OTP via Twilio
     let verifyResult;
     try {
-      verifyResult = await checkVerificationCode(phoneNumber, code);
+      const normalizedPhone = normalizePhone(phoneNumber);
+      verifyResult = await checkVerificationCode(normalizedPhone, code);
     } catch (error) {
-      console.error('Twilio verifyLogin error:', error);
-      return res.status(500).json({ error: 'Failed to send verification code' });
+      console.error('Twilio forgot password verify error:', error);
+      return res.status(500).json({ error: 'Failed to verify code' });
     }
     if (!verifyResult.success) {
       return res.status(400).json({ error: verifyResult.error });
@@ -206,32 +310,41 @@ const authController = {
 
     try {
       const normalized = normalizePhone(phoneNumber);
-      const phoneLookup = computePhoneLookup(normalized);
+      const lookupHash = computePhoneLookup(normalized);
 
-      // Find user by phone lookup — O(1) via HMAC index
-      const result = await pool.query(
-        'SELECT id, username FROM users WHERE phone_lookup = $1',
-        [phoneLookup]
+      const userResult = await pool.query(
+        'SELECT id, username, email FROM users WHERE phone_lookup = $1',
+        [lookupHash]
       );
-      const matchedUser = result.rows[0] || null;
+      const user = userResult.rows[0];
 
-      if (!matchedUser) {
-        return res.status(404).json({ error: 'No account found with this phone number. Please register first.' });
+      if (!user) {
+        return res.status(400).json({ error: 'No account found with this phone number' });
       }
 
-      // Sign JWT
+      // Validate new password
+      const validation = validatePassword(newPassword, [user.username, user.email].filter(Boolean));
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error });
+      }
+
+      // Hash and store
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+      await pool.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [passwordHash, user.id]
+      );
+
+      // Auto-login: generate JWT
       const token = jwt.sign(
-        { userId: matchedUser.id, username: matchedUser.username },
+        { userId: user.id, username: user.username },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || '90d' }
       );
 
-      res.json({
-        token,
-        user: { id: matchedUser.id, username: matchedUser.username }
-      });
+      res.json({ token, user: { id: user.id, username: user.username } });
     } catch (error) {
-      console.error('Phone login error:', error);
+      console.error('Forgot password reset error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   },

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 /**
- * LoginModal — inline modal overlay for phone OTP login and registration.
+ * LoginModal — inline modal overlay for password login, phone OTP registration, and forgot password.
  * Props:
  *   - isOpen: boolean
  *   - onClose: () => void  (dismiss, return to guest browsing)
@@ -10,28 +10,45 @@ import { useAuth } from '../contexts/AuthContext';
  *   - notice: optional string shown above the form (e.g. pending invite message)
  */
 const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
-  const { sendCode, phoneRegister, phoneLogin } = useAuth();
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const { login, sendCode, phoneRegister, forgotPasswordSendCode, forgotPasswordReset } = useAuth();
 
-  // Shared state
-  const [step, setStep] = useState(1);
+  // 'login' | 'signup' | 'forgot'
+  const [mode, setMode] = useState(initialTab === 'signup' ? 'signup' : 'login');
+
+  // Login state
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Signup state
+  const [signupStep, setSignupStep] = useState(1); // 1=phone, 2=OTP, 3=details
   const [phoneDigits, setPhoneDigits] = useState('');
   const [code, setCode] = useState('');
+  const [username, setUsername] = useState('');
+  const [signUpEmail, setSignUpEmail] = useState('');
+  const [signUpPassword, setSignUpPassword] = useState('');
+  const [signUpConfirm, setSignUpConfirm] = useState('');
+  const [showSignUpPassword, setShowSignUpPassword] = useState(false);
+  const [ageVerified, setAgeVerified] = useState(false);
+
+  // Forgot state
+  const [forgotStep, setForgotStep] = useState(1); // 1=phone, 2=OTP, 3=new password
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  // Shared state
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Sign Up only
-  const [username, setUsername] = useState('');
-  const [signUpEmail, setSignUpEmail] = useState('');
-  const [ageVerified, setAgeVerified] = useState(false);
-  const [emailError, setEmailError] = useState('');
-
-  // Reset when initialTab changes (e.g. opened from different trigger)
+  // Reset when opened or initialTab changes
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(initialTab);
-      resetForm();
+      setMode(initialTab === 'signup' ? 'signup' : 'login');
+      resetAll();
     }
   }, [isOpen, initialTab]);
 
@@ -62,49 +79,76 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     }
   }, [isOpen, handleKeyDown]);
 
-  const resetForm = () => {
-    setStep(1);
+  const resetAll = () => {
+    setIdentifier('');
+    setPassword('');
+    setShowPassword(false);
+    setSignupStep(1);
     setPhoneDigits('');
     setCode('');
     setUsername('');
     setSignUpEmail('');
+    setSignUpPassword('');
+    setSignUpConfirm('');
+    setShowSignUpPassword(false);
     setAgeVerified(false);
-    setEmailError('');
+    setForgotStep(1);
+    setForgotPhone('');
+    setForgotCode('');
+    setNewPassword('');
+    setNewPasswordConfirm('');
+    setShowNewPassword(false);
     setError('');
     setLoading(false);
     setResendCooldown(0);
   };
 
-  const handleTabSwitch = (tab) => {
-    setActiveTab(tab);
-    resetForm();
+  const switchMode = (newMode) => {
+    setMode(newMode);
+    resetAll();
   };
 
-  const handlePhoneChange = (e) => {
-    const raw = e.target.value.replace(/\D/g, '').slice(0, 10);
-    setPhoneDigits(raw);
+  const handlePhoneChange = (value, setter) => {
+    setter(value.replace(/\D/g, '').slice(0, 10));
   };
 
-  const handleCodeChange = (e) => {
-    const raw = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setCode(raw);
+  const handleCodeChange = (value, setter) => {
+    setter(value.replace(/\D/g, '').slice(0, 6));
   };
 
-  const handleSendCode = async () => {
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  // ── LOGIN ──
+  const handleLogin = async (e) => {
+    e && e.preventDefault();
+    setError('');
+    if (!identifier.trim() || !password) {
+      setError('Username/email and password are required');
+      return;
+    }
+    setLoading(true);
+    const result = await login(identifier.trim(), password);
+    if (result.success) {
+      onClose();
+    } else {
+      setError(result.error);
+    }
+    setLoading(false);
+  };
+
+  // ── SIGNUP Step 1: Send code ──
+  const handleSignupSendCode = async () => {
     setError('');
     if (phoneDigits.length !== 10) {
       setError('Enter a 10-digit phone number');
       return;
     }
-    if (activeTab === 'signup' && !username.trim()) {
-      setError('Username is required');
-      return;
-    }
     setLoading(true);
     try {
-      const intent = activeTab === 'signup' ? 'register' : 'login';
-      await sendCode('+1' + phoneDigits, intent);
-      setStep(2);
+      await sendCode('+1' + phoneDigits, 'register');
+      setSignupStep(2);
       setResendCooldown(30);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to send code');
@@ -112,13 +156,66 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     setLoading(false);
   };
 
-  const handleResendCode = async () => {
+  // ── SIGNUP Step 2: Verify code ──
+  const handleSignupVerifyCode = async () => {
+    setError('');
+    if (code.length !== 6) {
+      setError('Enter the 6-digit code');
+      return;
+    }
+    // Move to step 3 (details) — code verification happens on final submit
+    setSignupStep(3);
+  };
+
+  // ── SIGNUP Step 3: Create account ──
+  const handleSignupCreate = async () => {
+    setError('');
+    if (!username.trim()) {
+      setError('Username is required');
+      return;
+    }
+    if (!signUpEmail.trim()) {
+      setError('Email address is required');
+      return;
+    }
+    const atIdx = signUpEmail.indexOf('@');
+    if (atIdx < 1 || signUpEmail.indexOf('.', atIdx) === -1) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    if (!signUpPassword) {
+      setError('Password is required');
+      return;
+    }
+    if (signUpPassword.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    if (signUpPassword !== signUpConfirm) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (!ageVerified) {
+      setError('Age verification is required');
+      return;
+    }
+    setLoading(true);
+    const result = await phoneRegister('+1' + phoneDigits, code, username.trim(), signUpEmail.trim(), signUpPassword, ageVerified);
+    if (result.success) {
+      onClose();
+    } else {
+      setError(result.error);
+    }
+    setLoading(false);
+  };
+
+  // ── SIGNUP resend ──
+  const handleSignupResend = async () => {
     if (resendCooldown > 0) return;
     setError('');
     setLoading(true);
     try {
-      const intent = activeTab === 'signup' ? 'register' : 'login';
-      await sendCode('+1' + phoneDigits, intent);
+      await sendCode('+1' + phoneDigits, 'register');
       setResendCooldown(30);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to resend code');
@@ -126,14 +223,51 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     setLoading(false);
   };
 
-  const handleVerifyLogin = async () => {
+  // ── FORGOT Step 1: Send code ──
+  const handleForgotSendCode = async () => {
     setError('');
-    if (code.length !== 6) {
-      setError('Enter the 6-digit code');
+    if (forgotPhone.length !== 10) {
+      setError('Enter a 10-digit phone number');
       return;
     }
     setLoading(true);
-    const result = await phoneLogin('+1' + phoneDigits, code);
+    try {
+      await forgotPasswordSendCode('+1' + forgotPhone);
+      setForgotStep(2);
+      setResendCooldown(30);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to send code');
+    }
+    setLoading(false);
+  };
+
+  // ── FORGOT Step 2: Verify code ──
+  const handleForgotVerifyCode = async () => {
+    setError('');
+    if (forgotCode.length !== 6) {
+      setError('Enter the 6-digit code');
+      return;
+    }
+    setForgotStep(3);
+  };
+
+  // ── FORGOT Step 3: Reset password ──
+  const handleForgotReset = async () => {
+    setError('');
+    if (!newPassword) {
+      setError('New password is required');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      setError('Passwords do not match');
+      return;
+    }
+    setLoading(true);
+    const result = await forgotPasswordReset('+1' + forgotPhone, forgotCode, newPassword);
     if (result.success) {
       onClose();
     } else {
@@ -142,34 +276,82 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     setLoading(false);
   };
 
-  const isEmailValid = (val) => {
-    const at = val.indexOf('@');
-    return at > 0 && val.indexOf('.', at) !== -1;
-  };
-
-  const handleVerifyRegister = async () => {
+  // ── FORGOT resend ──
+  const handleForgotResend = async () => {
+    if (resendCooldown > 0) return;
     setError('');
-    if (code.length !== 6) {
-      setError('Enter the 6-digit code');
-      return;
-    }
     setLoading(true);
-    const result = await phoneRegister('+1' + phoneDigits, code, username, signUpEmail, ageVerified);
-    if (result.success) {
-      onClose();
-    } else {
-      setError(result.error);
+    try {
+      await forgotPasswordSendCode('+1' + forgotPhone);
+      setResendCooldown(30);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to resend code');
     }
     setLoading(false);
-  };
-
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) onClose();
   };
 
   if (!isOpen) return null;
 
-  const renderLoginStep1 = () => (
+  const passwordToggle = (show, setShow) => (
+    <span
+      onClick={() => setShow(!show)}
+      style={styles.passwordToggle}
+    >
+      {show ? 'Hide' : 'Show'}
+    </span>
+  );
+
+  // ── RENDER: Login ──
+  const renderLogin = () => (
+    <div style={styles.form}>
+      {error && <div style={styles.error}>{error}</div>}
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>Username or email</label>
+        <input
+          type="text"
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          placeholder="Username or email"
+          style={styles.input}
+          disabled={loading}
+          autoFocus
+          onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+        />
+      </div>
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>Password</label>
+        <div style={styles.passwordRow}>
+          <input
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            style={{ ...styles.input, flex: 1 }}
+            disabled={loading}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+          />
+          {passwordToggle(showPassword, setShowPassword)}
+        </div>
+      </div>
+      <button
+        onClick={handleLogin}
+        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={loading}
+      >
+        {loading ? 'Logging in...' : 'Log In'}
+      </button>
+      <div style={styles.linksRow}>
+        <span onClick={() => switchMode('forgot')} style={styles.link}>Forgot password?</span>
+      </div>
+      <div style={styles.switchRow}>
+        <span style={styles.switchText}>Don't have an account? </span>
+        <span onClick={() => switchMode('signup')} style={styles.link}>Sign up</span>
+      </div>
+    </div>
+  );
+
+  // ── RENDER: Signup Step 1 (phone) ──
+  const renderSignupStep1 = () => (
     <div style={styles.form}>
       {error && <div style={styles.error}>{error}</div>}
       <div style={styles.inputGroup}>
@@ -179,25 +361,31 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
           <input
             type="text"
             value={phoneDigits}
-            onChange={handlePhoneChange}
+            onChange={(e) => handlePhoneChange(e.target.value, setPhoneDigits)}
             placeholder="Phone number"
             style={styles.phoneInput}
             disabled={loading}
             autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleSignupSendCode()}
           />
         </div>
       </div>
       <button
-        onClick={handleSendCode}
+        onClick={handleSignupSendCode}
         style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
         disabled={loading}
       >
         {loading ? 'Sending...' : 'Send Code'}
       </button>
+      <div style={styles.switchRow}>
+        <span style={styles.switchText}>Already have an account? </span>
+        <span onClick={() => switchMode('login')} style={styles.link}>Log in</span>
+      </div>
     </div>
   );
 
-  const renderLoginStep2 = () => (
+  // ── RENDER: Signup Step 2 (OTP code) ──
+  const renderSignupStep2 = () => (
     <div style={styles.form}>
       <div style={styles.confirmText}>Code sent to +1 {phoneDigits}</div>
       {error && <div style={styles.error}>{error}</div>}
@@ -205,30 +393,31 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
         <input
           type="text"
           value={code}
-          onChange={handleCodeChange}
+          onChange={(e) => handleCodeChange(e.target.value, setCode)}
           placeholder="6-digit code"
           maxLength={6}
           style={styles.input}
           disabled={loading}
           autoFocus
+          onKeyDown={(e) => e.key === 'Enter' && handleSignupVerifyCode()}
         />
       </div>
       <button
-        onClick={handleVerifyLogin}
-        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
-        disabled={loading}
+        onClick={handleSignupVerifyCode}
+        style={code.length !== 6 ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={code.length !== 6}
       >
-        {loading ? 'Verifying...' : 'Verify & Log In'}
+        Next
       </button>
       <div style={styles.linksRow}>
         <span
-          onClick={resendCooldown > 0 ? undefined : handleResendCode}
+          onClick={resendCooldown > 0 ? undefined : handleSignupResend}
           style={resendCooldown > 0 ? { ...styles.link, ...styles.disabledLink } : styles.link}
         >
           {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}
         </span>
         <span
-          onClick={() => { setStep(1); setCode(''); setError(''); setResendCooldown(0); }}
+          onClick={() => { setSignupStep(1); setCode(''); setError(''); setResendCooldown(0); }}
           style={styles.link}
         >
           Back
@@ -237,7 +426,8 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     </div>
   );
 
-  const renderSignupStep1 = () => (
+  // ── RENDER: Signup Step 3 (details + password) ──
+  const renderSignupStep3 = () => (
     <div style={styles.form}>
       {error && <div style={styles.error}>{error}</div>}
       <div style={styles.inputGroup}>
@@ -254,63 +444,40 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
         />
       </div>
       <div style={styles.inputGroup}>
-        <label style={styles.label}>Phone number</label>
-        <div style={styles.phoneRow}>
-          <span style={styles.phonePrefix}>+1</span>
-          <input
-            type="text"
-            value={phoneDigits}
-            onChange={handlePhoneChange}
-            placeholder="Phone number"
-            style={styles.phoneInput}
-            disabled={loading}
-          />
-        </div>
-      </div>
-      <button
-        onClick={handleSendCode}
-        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
-        disabled={loading}
-      >
-        {loading ? 'Sending...' : 'Send Code'}
-      </button>
-    </div>
-  );
-
-  const signupStep2Disabled = loading || code.length !== 6 || !signUpEmail.trim() || !isEmailValid(signUpEmail) || !ageVerified;
-
-  const renderSignupStep2 = () => (
-    <div style={styles.form}>
-      <div style={styles.confirmText}>Code sent to +1 {phoneDigits}</div>
-      {error && <div style={styles.error}>{error}</div>}
-      <div style={styles.inputGroup}>
-        <input
-          type="text"
-          value={code}
-          onChange={handleCodeChange}
-          placeholder="6-digit code"
-          maxLength={6}
-          style={styles.input}
-          disabled={loading}
-          autoFocus
-        />
-      </div>
-      <div style={styles.inputGroup}>
         <label style={styles.label}>Email address</label>
         <input
           type="email"
           value={signUpEmail}
-          onChange={(e) => { setSignUpEmail(e.target.value); setEmailError(''); }}
-          onBlur={() => {
-            if (signUpEmail.trim() && !isEmailValid(signUpEmail)) {
-              setEmailError('Please enter a valid email address');
-            }
-          }}
+          onChange={(e) => setSignUpEmail(e.target.value)}
           placeholder="Email address"
           style={styles.input}
           disabled={loading}
         />
-        {emailError && <div style={{ fontSize: '13px', fontFamily: '"EB Garamond", Georgia, serif', color: '#c00', marginTop: '2px' }}>{emailError}</div>}
+      </div>
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>Password</label>
+        <div style={styles.passwordRow}>
+          <input
+            type={showSignUpPassword ? 'text' : 'password'}
+            value={signUpPassword}
+            onChange={(e) => setSignUpPassword(e.target.value)}
+            placeholder="Password (8+ characters)"
+            style={{ ...styles.input, flex: 1 }}
+            disabled={loading}
+          />
+          {passwordToggle(showSignUpPassword, setShowSignUpPassword)}
+        </div>
+      </div>
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>Confirm password</label>
+        <input
+          type={showSignUpPassword ? 'text' : 'password'}
+          value={signUpConfirm}
+          onChange={(e) => setSignUpConfirm(e.target.value)}
+          placeholder="Confirm password"
+          style={styles.input}
+          disabled={loading}
+        />
       </div>
       <label style={styles.checkboxRow}>
         <input
@@ -322,21 +489,15 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
         <span style={styles.checkboxLabel}>I confirm I am at least 18 years old</span>
       </label>
       <button
-        onClick={handleVerifyRegister}
-        style={signupStep2Disabled ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
-        disabled={signupStep2Disabled}
+        onClick={handleSignupCreate}
+        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={loading}
       >
-        {loading ? 'Verifying...' : 'Verify & Create Account'}
+        {loading ? 'Creating account...' : 'Create Account'}
       </button>
       <div style={styles.linksRow}>
         <span
-          onClick={resendCooldown > 0 ? undefined : handleResendCode}
-          style={resendCooldown > 0 ? { ...styles.link, ...styles.disabledLink } : styles.link}
-        >
-          {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}
-        </span>
-        <span
-          onClick={() => { setStep(1); setCode(''); setError(''); setResendCooldown(0); }}
+          onClick={() => { setSignupStep(2); setError(''); }}
           style={styles.link}
         >
           Back
@@ -345,35 +506,150 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     </div>
   );
 
+  // ── RENDER: Forgot Step 1 (phone) ──
+  const renderForgotStep1 = () => (
+    <div style={styles.form}>
+      <div style={styles.confirmText}>Enter the phone number associated with your account</div>
+      {error && <div style={styles.error}>{error}</div>}
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>Phone number</label>
+        <div style={styles.phoneRow}>
+          <span style={styles.phonePrefix}>+1</span>
+          <input
+            type="text"
+            value={forgotPhone}
+            onChange={(e) => handlePhoneChange(e.target.value, setForgotPhone)}
+            placeholder="Phone number"
+            style={styles.phoneInput}
+            disabled={loading}
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleForgotSendCode()}
+          />
+        </div>
+      </div>
+      <button
+        onClick={handleForgotSendCode}
+        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={loading}
+      >
+        {loading ? 'Sending...' : 'Send Code'}
+      </button>
+      <div style={styles.linksRow}>
+        <span onClick={() => switchMode('login')} style={styles.link}>Back to log in</span>
+      </div>
+    </div>
+  );
+
+  // ── RENDER: Forgot Step 2 (OTP code) ──
+  const renderForgotStep2 = () => (
+    <div style={styles.form}>
+      <div style={styles.confirmText}>Code sent to +1 {forgotPhone}</div>
+      {error && <div style={styles.error}>{error}</div>}
+      <div style={styles.inputGroup}>
+        <input
+          type="text"
+          value={forgotCode}
+          onChange={(e) => handleCodeChange(e.target.value, setForgotCode)}
+          placeholder="6-digit code"
+          maxLength={6}
+          style={styles.input}
+          disabled={loading}
+          autoFocus
+          onKeyDown={(e) => e.key === 'Enter' && handleForgotVerifyCode()}
+        />
+      </div>
+      <button
+        onClick={handleForgotVerifyCode}
+        style={forgotCode.length !== 6 ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={forgotCode.length !== 6}
+      >
+        Next
+      </button>
+      <div style={styles.linksRow}>
+        <span
+          onClick={resendCooldown > 0 ? undefined : handleForgotResend}
+          style={resendCooldown > 0 ? { ...styles.link, ...styles.disabledLink } : styles.link}
+        >
+          {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}
+        </span>
+        <span
+          onClick={() => { setForgotStep(1); setForgotCode(''); setError(''); setResendCooldown(0); }}
+          style={styles.link}
+        >
+          Back
+        </span>
+      </div>
+    </div>
+  );
+
+  // ── RENDER: Forgot Step 3 (new password) ──
+  const renderForgotStep3 = () => (
+    <div style={styles.form}>
+      {error && <div style={styles.error}>{error}</div>}
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>New password</label>
+        <div style={styles.passwordRow}>
+          <input
+            type={showNewPassword ? 'text' : 'password'}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="New password (8+ characters)"
+            style={{ ...styles.input, flex: 1 }}
+            disabled={loading}
+            autoFocus
+          />
+          {passwordToggle(showNewPassword, setShowNewPassword)}
+        </div>
+      </div>
+      <div style={styles.inputGroup}>
+        <label style={styles.label}>Confirm new password</label>
+        <input
+          type={showNewPassword ? 'text' : 'password'}
+          value={newPasswordConfirm}
+          onChange={(e) => setNewPasswordConfirm(e.target.value)}
+          placeholder="Confirm new password"
+          style={styles.input}
+          disabled={loading}
+          onKeyDown={(e) => e.key === 'Enter' && handleForgotReset()}
+        />
+      </div>
+      <button
+        onClick={handleForgotReset}
+        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={loading}
+      >
+        {loading ? 'Resetting...' : 'Reset Password'}
+      </button>
+      <div style={styles.linksRow}>
+        <span onClick={() => switchMode('login')} style={styles.link}>Back to log in</span>
+      </div>
+    </div>
+  );
+
+  // Mode title
+  const modeTitle = mode === 'login' ? 'Log In' : mode === 'signup' ? 'Sign Up' : 'Reset Password';
+
   return (
     <div style={styles.backdrop} onClick={handleBackdropClick}>
       <div style={styles.modal}>
-        {/* Tabs */}
-        <div style={styles.tabs}>
-          <button
-            style={activeTab === 'login' ? { ...styles.tab, ...styles.tabActive } : styles.tab}
-            onClick={() => handleTabSwitch('login')}
-          >
-            Log In
-          </button>
-          <button
-            style={activeTab === 'signup' ? { ...styles.tab, ...styles.tabActive } : styles.tab}
-            onClick={() => handleTabSwitch('signup')}
-          >
-            Sign Up
-          </button>
-        </div>
+        {/* Title */}
+        <div style={styles.title}>{modeTitle}</div>
 
         {/* Notice (e.g. pending invite) */}
         {notice && <div style={styles.notice}>{notice}</div>}
 
-        {/* Login flow */}
-        {activeTab === 'login' && step === 1 && renderLoginStep1()}
-        {activeTab === 'login' && step === 2 && renderLoginStep2()}
+        {/* Login */}
+        {mode === 'login' && renderLogin()}
 
-        {/* Signup flow */}
-        {activeTab === 'signup' && step === 1 && renderSignupStep1()}
-        {activeTab === 'signup' && step === 2 && renderSignupStep2()}
+        {/* Signup */}
+        {mode === 'signup' && signupStep === 1 && renderSignupStep1()}
+        {mode === 'signup' && signupStep === 2 && renderSignupStep2()}
+        {mode === 'signup' && signupStep === 3 && renderSignupStep3()}
+
+        {/* Forgot Password */}
+        {mode === 'forgot' && forgotStep === 1 && renderForgotStep1()}
+        {mode === 'forgot' && forgotStep === 2 && renderForgotStep2()}
+        {mode === 'forgot' && forgotStep === 3 && renderForgotStep3()}
       </div>
     </div>
   );
@@ -402,27 +678,15 @@ const styles = {
     padding: '28px 32px 32px',
     fontFamily: '"EB Garamond", Georgia, serif',
   },
-  tabs: {
-    display: 'flex',
-    borderBottom: '1px solid #d0d0d0',
-    marginBottom: '20px',
-  },
-  tab: {
-    flex: 1,
-    padding: '10px 0',
-    background: 'none',
-    border: 'none',
-    borderBottom: '2px solid transparent',
-    cursor: 'pointer',
-    fontSize: '16px',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#888',
-    fontWeight: '400',
-  },
-  tabActive: {
-    color: '#333',
-    borderBottomColor: '#333',
+  title: {
+    fontSize: '20px',
     fontWeight: '600',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: '20px',
+    borderBottom: '1px solid #d0d0d0',
+    paddingBottom: '12px',
   },
   notice: {
     padding: '10px 12px',
@@ -460,6 +724,19 @@ const styles = {
     outline: 'none',
     backgroundColor: '#fff',
     color: '#333',
+  },
+  passwordRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  passwordToggle: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#888',
+    cursor: 'pointer',
+    userSelect: 'none',
+    whiteSpace: 'nowrap',
   },
   phoneRow: {
     display: 'flex',
@@ -530,6 +807,15 @@ const styles = {
     color: '#aaa',
     cursor: 'default',
     textDecoration: 'none',
+  },
+  switchRow: {
+    textAlign: 'center',
+    marginTop: '4px',
+  },
+  switchText: {
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#888',
   },
   checkboxRow: {
     display: 'flex',

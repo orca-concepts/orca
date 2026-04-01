@@ -2062,6 +2062,15 @@ const createTables = async () => {
 
     console.log('Phase 39a: Created combos, combo_edges, combo_subscriptions, combo_annotation_votes tables');
 
+    // Phase 40b: Set password_hash for test users (alice-frank) to known test password
+    const testPasswordHash = await bcrypt.hash('testpass123!', 10);
+    const testUpdateResult = await client.query(`
+      UPDATE users
+      SET password_hash = $1
+      WHERE username IN ('alice', 'bob', 'carol', 'dave', 'eve', 'frank')
+    `, [testPasswordHash]);
+    console.log('Phase 40b: Set test user passwords (' + testUpdateResult.rowCount + ' rows updated)');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

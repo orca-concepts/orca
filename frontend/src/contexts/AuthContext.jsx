@@ -40,6 +40,23 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  // Password login (Phase 40b)
+  const login = async (identifier, password) => {
+    try {
+      setError(null);
+      const response = await authAPI.login(identifier, password);
+      const { token, user } = response.data;
+      localStorage.setItem('token', token);
+      setUser(user);
+      return { success: true };
+    } catch (error) {
+      const message = error.response?.data?.error || 'Login failed';
+      setError(message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Phone OTP for registration (Phase 40b)
   const sendCode = async (phoneNumber, intent) => {
     try {
       const response = await authAPI.sendCode(phoneNumber, intent);
@@ -49,10 +66,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const phoneRegister = async (phoneNumber, code, username, email, ageVerified) => {
+  const phoneRegister = async (phoneNumber, code, username, email, password, ageVerified) => {
     try {
       setError(null);
-      const response = await authAPI.verifyRegister(phoneNumber, code, username, email, ageVerified);
+      const response = await authAPI.verifyRegister(phoneNumber, code, username, email, password, ageVerified);
       const { token, user } = response.data;
       localStorage.setItem('token', token);
       setUser(user);
@@ -64,16 +81,26 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const phoneLogin = async (phoneNumber, code) => {
+  // Forgot password (Phase 40b)
+  const forgotPasswordSendCode = async (phoneNumber) => {
+    try {
+      const response = await authAPI.forgotPasswordSendCode(phoneNumber);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const forgotPasswordReset = async (phoneNumber, code, newPassword) => {
     try {
       setError(null);
-      const response = await authAPI.verifyLogin(phoneNumber, code);
+      const response = await authAPI.forgotPasswordReset(phoneNumber, code, newPassword);
       const { token, user } = response.data;
       localStorage.setItem('token', token);
       setUser(user);
       return { success: true };
     } catch (error) {
-      const message = error.response?.data?.error || 'Login failed';
+      const message = error.response?.data?.error || 'Password reset failed';
       setError(message);
       return { success: false, error: message };
     }
@@ -94,9 +121,11 @@ export const AuthProvider = ({ children }) => {
     loading,
     error,
     logout,
+    login,
     sendCode,
     phoneRegister,
-    phoneLogin,
+    forgotPasswordSendCode,
+    forgotPasswordReset,
     logoutEverywhere,
     isAuthenticated: !!user,
     isGuest: !user,

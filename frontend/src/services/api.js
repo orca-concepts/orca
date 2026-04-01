@@ -29,14 +29,23 @@ export const authAPI = {
   getCurrentUser: () =>
     api.get('/auth/me'),
 
+  // Password login (Phase 40b)
+  login: (identifier, password) =>
+    api.post('/auth/login', { identifier, password }),
+
+  // Phone OTP for registration (Phase 40b)
   sendCode: (phoneNumber, intent) =>
     api.post('/auth/send-code', { phoneNumber, intent }),
 
-  verifyRegister: (phoneNumber, code, username, email, ageVerified) =>
-    api.post('/auth/verify-register', { phoneNumber, code, username, email, ageVerified }),
+  verifyRegister: (phoneNumber, code, username, email, password, ageVerified) =>
+    api.post('/auth/verify-register', { phoneNumber, code, username, email, password, ageVerified }),
 
-  verifyLogin: (phoneNumber, code) =>
-    api.post('/auth/verify-login', { phoneNumber, code }),
+  // Forgot password (Phase 40b)
+  forgotPasswordSendCode: (phoneNumber) =>
+    api.post('/auth/forgot-password/send-code', { phoneNumber }),
+
+  forgotPasswordReset: (phoneNumber, code, newPassword) =>
+    api.post('/auth/forgot-password/reset', { phoneNumber, code, newPassword }),
 
   logoutEverywhere: () =>
     api.post('/auth/logout-everywhere'),

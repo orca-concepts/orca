@@ -12,6 +12,14 @@ const sendCodeLimiter = rateLimit({
   legacyHeaders: false
 });
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 const verifyCodeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -20,10 +28,16 @@ const verifyCodeLimiter = rateLimit({
   legacyHeaders: false
 });
 
-// Phone OTP routes (Phase 32b)
+// Password login (Phase 40b)
+router.post('/login', loginLimiter, authController.login);
+
+// Phone OTP routes (registration only, Phase 40b)
 router.post('/send-code', sendCodeLimiter, authController.sendCode);
 router.post('/verify-register', verifyCodeLimiter, authController.verifyRegister);
-router.post('/verify-login', verifyCodeLimiter, authController.verifyLogin);
+
+// Forgot password (Phase 40b)
+router.post('/forgot-password/send-code', sendCodeLimiter, authController.forgotPasswordSendCode);
+router.post('/forgot-password/reset', verifyCodeLimiter, authController.forgotPasswordReset);
 
 // Protected routes
 router.get('/me', authenticateToken, authController.getCurrentUser);
