@@ -461,6 +461,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
         <div style={styles.sortBar}>
           {[
             { key: 'combo_votes', label: 'Combo Votes' },
+            ...(user ? [{ key: 'subscribed', label: 'Subscribed' }] : []),
             { key: 'new', label: 'New' },
             { key: 'annotation_votes', label: 'Annotation Votes' },
           ].map((opt, i) => (

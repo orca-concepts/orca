@@ -316,8 +316,8 @@ export const corpusAPI = {
   createAnnotation: (corpusId, documentId, edgeId, quoteText, comment, quoteOccurrence) =>
     api.post('/corpuses/annotations/create', { corpusId, documentId, edgeId, quoteText: quoteText || null, comment: comment || null, quoteOccurrence: quoteOccurrence || null }),
 
-  getDocumentAnnotations: (corpusId, documentId, filter) =>
-    api.get(`/corpuses/${corpusId}/documents/${documentId}/annotations`, { params: filter ? { filter } : {} }),
+  getDocumentAnnotations: (corpusId, documentId, filter, sort) =>
+    api.get(`/corpuses/${corpusId}/documents/${documentId}/annotations`, { params: { ...(filter ? { filter } : {}), ...(sort ? { sort } : {}) } }),
 
   getAnnotationsForEdge: (edgeId) =>
     api.get(`/corpuses/annotations/edge/${edgeId}`),

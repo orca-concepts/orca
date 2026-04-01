@@ -293,6 +293,15 @@ const ConceptAnnotationPanel = ({
             onClick={() => setAnnotationSort('votes')}
             style={{ ...styles.sortOption, ...(annotationSort === 'votes' ? styles.sortOptionActive : {}) }}
           >Top</span>
+          {user && (
+            <>
+              <span style={styles.sortSep}>{'\u00b7'}</span>
+              <span
+                onClick={() => setAnnotationSort('subscribed')}
+                style={{ ...styles.sortOption, ...(annotationSort === 'subscribed' ? styles.sortOptionActive : {}) }}
+              >Subscribed</span>
+            </>
+          )}
           <span style={styles.sortSep}>{'\u00b7'}</span>
           <span
             onClick={() => setAnnotationSort('newest')}

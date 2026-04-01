@@ -1212,7 +1212,8 @@ const conceptsController = {
         return res.status(400).json({ error: 'Invalid concept ID' });
       }
 
-      const sort = req.query.sort === 'newest' ? 'newest' : 'votes';
+      const sortParam = req.query.sort;
+      const sort = sortParam === 'newest' ? 'newest' : sortParam === 'subscribed' ? 'subscribed' : 'votes';
       const edgeId = req.query.edgeId ? parseInt(req.query.edgeId) : null;
       const tagId = req.query.tagId ? parseInt(req.query.tagId) : null;
       const corpusIds = req.query.corpusIds
@@ -1220,9 +1221,14 @@ const conceptsController = {
         : null;
       const userId = req.user ? req.user.userId : null;
 
-      const orderClause = sort === 'newest'
-        ? 'ORDER BY created_at DESC'
-        : 'ORDER BY vote_count DESC, created_at DESC';
+      let orderClause;
+      if (sort === 'newest') {
+        orderClause = 'ORDER BY created_at DESC';
+      } else if (sort === 'subscribed' && userId) {
+        orderClause = 'ORDER BY subscribed_vote_count DESC, vote_count DESC, created_at DESC';
+      } else {
+        orderClause = 'ORDER BY vote_count DESC, created_at DESC';
+      }
 
       // Build dynamic WHERE filters with parameterized queries
       const params = [conceptId];
@@ -1243,6 +1249,28 @@ const conceptsController = {
         extraFilters += ` AND da.corpus_id = ANY($${params.length}::integer[])`;
       }
 
+      // Build subscribed_members CTE only when sort=subscribed and user is authenticated
+      const useSubscribed = sort === 'subscribed' && userId;
+      const subscribedCte = useSubscribed
+        ? `, subscribed_members AS (
+            SELECT DISTINCT member_id AS user_id FROM (
+              SELECT c.created_by AS member_id
+              FROM corpus_subscriptions cs
+              JOIN corpuses c ON c.id = cs.corpus_id
+              WHERE cs.user_id = $${userParamIdx}
+              AND c.created_by IS NOT NULL
+              UNION
+              SELECT cau.user_id AS member_id
+              FROM corpus_subscriptions cs
+              JOIN corpus_allowed_users cau ON cau.corpus_id = cs.corpus_id
+              WHERE cs.user_id = $${userParamIdx}
+            ) members
+          )`
+        : '';
+      const subscribedOuterCol = useSubscribed
+        ? `, (SELECT COUNT(*) FROM annotation_votes av2 WHERE av2.annotation_id = aa.annotation_id AND av2.user_id IN (SELECT user_id FROM subscribed_members))::int AS subscribed_vote_count`
+        : '';
+
       // Deduplicate across document versions: for each version chain + corpus + creator + quote_text,
       // keep only the annotation from the latest version.
       const result = await pool.query(
@@ -1258,7 +1286,7 @@ const conceptsController = {
         roots AS (
           SELECT doc_id, current_id AS root_document_id
           FROM doc_roots WHERE source_document_id IS NULL
-        ),
+        )${subscribedCte},
         all_anns AS (
           SELECT da.id AS annotation_id,
                   da.quote_text, da.comment, da.quote_occurrence,
@@ -1305,7 +1333,8 @@ const conceptsController = {
                corpus_id, corpus_name, edge_id, parent_id, graph_path,
                attribute_id, parent_name, attribute_name,
                vote_count, user_voted
-        FROM all_anns WHERE rn = 1
+               ${subscribedOuterCol}
+        FROM all_anns aa WHERE rn = 1
         ${orderClause}`,
         params
       );
@@ -1348,6 +1377,7 @@ const conceptsController = {
           corpusName: row.corpus_name,
           voteCount: row.vote_count,
           userVoted: row.user_voted || false,
+          ...(row.subscribed_vote_count !== undefined ? { subscribedVoteCount: row.subscribed_vote_count } : {}),
           context: {
             edgeId: row.edge_id,
             parentId: row.parent_id,

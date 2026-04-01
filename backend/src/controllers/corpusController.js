@@ -1454,8 +1454,37 @@ const getDocumentAnnotations = async (req, res) => {
       params.push(authorIds);
     }
 
+    // Sort parameter: votes (default) or subscribed
+    const sortParam = req.query.sort;
+    const useSubscribed = sortParam === 'subscribed' && userId !== -1;
+
+    let subscribedCte = '';
+    let subscribedCol = '';
+    let orderClause = 'ORDER BY vote_count DESC';
+
+    if (useSubscribed) {
+      // Push userId for subscribed_members CTE — reuses $3 which is already userId
+      subscribedCte = `WITH subscribed_members AS (
+        SELECT DISTINCT member_id AS user_id FROM (
+          SELECT c.created_by AS member_id
+          FROM corpus_subscriptions cs
+          JOIN corpuses c ON c.id = cs.corpus_id
+          WHERE cs.user_id = $3
+          AND c.created_by IS NOT NULL
+          UNION
+          SELECT cau.user_id AS member_id
+          FROM corpus_subscriptions cs
+          JOIN corpus_allowed_users cau ON cau.corpus_id = cs.corpus_id
+          WHERE cs.user_id = $3
+        ) members
+      )`;
+      subscribedCol = `, (SELECT COUNT(*) FROM annotation_votes av2 WHERE av2.annotation_id = da.id AND av2.user_id IN (SELECT user_id FROM subscribed_members))::int AS subscribed_vote_count`;
+      orderClause = 'ORDER BY subscribed_vote_count DESC, vote_count DESC, da.created_at DESC';
+    }
+
     const result = await pool.query(
-      `SELECT da.id, da.corpus_id, da.document_id, da.edge_id,
+      `${subscribedCte}
+       SELECT da.id, da.corpus_id, da.document_id, da.edge_id,
               da.quote_text, da.comment, da.quote_occurrence, da.layer,
               da.created_by, da.created_at,
               u.username AS creator_username,
@@ -1465,6 +1494,7 @@ const getDocumentAnnotations = async (req, res) => {
               c_parent.name AS parent_name,
               (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count,
               EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $3) AS user_voted
+              ${subscribedCol}
               ${badgeColumns}
        FROM document_annotations da
        JOIN users u ON u.id = da.created_by
@@ -1474,7 +1504,7 @@ const getDocumentAnnotations = async (req, res) => {
        LEFT JOIN concepts c_parent ON c_parent.id = e.parent_id
        WHERE da.corpus_id = $1 AND da.document_id = $2
        ${filterClause}
-       ORDER BY vote_count DESC`,
+       ${orderClause}`,
       params
     );
 

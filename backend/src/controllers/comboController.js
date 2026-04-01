@@ -131,6 +131,8 @@ const getComboAnnotations = async (req, res) => {
       }
     }
 
+    const useSubscribed = sort === 'subscribed';
+
     let orderBy;
     switch (sort) {
       case 'new':
@@ -139,12 +141,36 @@ const getComboAnnotations = async (req, res) => {
       case 'annotation_votes':
         orderBy = 'annotation_vote_count DESC, da.created_at DESC';
         break;
+      case 'subscribed':
+        orderBy = 'subscribed_vote_count DESC, annotation_vote_count DESC, da.created_at DESC';
+        break;
       default: // combo_votes
         orderBy = 'combo_vote_count DESC, da.created_at DESC';
     }
 
+    const subscribedCte = useSubscribed
+      ? `WITH subscribed_members AS (
+          SELECT DISTINCT member_id AS user_id FROM (
+            SELECT c.created_by AS member_id
+            FROM corpus_subscriptions cs
+            JOIN corpuses c ON c.id = cs.corpus_id
+            WHERE cs.user_id = $2
+            AND c.created_by IS NOT NULL
+            UNION
+            SELECT cau.user_id AS member_id
+            FROM corpus_subscriptions cs
+            JOIN corpus_allowed_users cau ON cau.corpus_id = cs.corpus_id
+            WHERE cs.user_id = $2
+          ) members
+        )`
+      : '';
+    const subscribedCol = useSubscribed
+      ? `, (SELECT COUNT(*) FROM annotation_votes av2 WHERE av2.annotation_id = da.id AND av2.user_id IN (SELECT user_id FROM subscribed_members))::int AS subscribed_vote_count`
+      : '';
+
     const result = await pool.query(
-      `SELECT da.id AS annotation_id,
+      `${subscribedCte}
+       SELECT da.id AS annotation_id,
               da.quote_text,
               da.comment,
               da.created_at,
@@ -166,6 +192,7 @@ const getComboAnnotations = async (req, res) => {
                WHERE av.annotation_id = da.id) AS annotation_vote_count,
               EXISTS(SELECT 1 FROM combo_annotation_votes cav2
                      WHERE cav2.combo_id = $1 AND cav2.annotation_id = da.id AND cav2.user_id = $2) AS user_combo_voted
+              ${subscribedCol}
        FROM document_annotations da
        JOIN combo_edges ce ON ce.edge_id = da.edge_id AND ce.combo_id = $1
        JOIN edges e ON e.id = da.edge_id
@@ -185,6 +212,7 @@ const getComboAnnotations = async (req, res) => {
         ...r,
         combo_vote_count: Number(r.combo_vote_count),
         annotation_vote_count: Number(r.annotation_vote_count),
+        ...(r.subscribed_vote_count !== undefined ? { subscribed_vote_count: Number(r.subscribed_vote_count) } : {}),
       })),
     });
   } catch (error) {

@@ -127,7 +127,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   const [layerFilter, setLayerFilter] = useState(null); // null = default (all), 'corpus_members', 'author'
   const [attributeFilter, setAttributeFilter] = useState('all'); // 'all' or an attribute name like 'value'
   const [enabledAttributes, setEnabledAttributes] = useState([]);
-  const [annotationSort, setAnnotationSort] = useState('votes'); // 'votes' or 'position'
+  const [annotationSort, setAnnotationSort] = useState('votes'); // 'votes', 'subscribed', or 'position'
   const [isAllowedUser, setIsAllowedUser] = useState(false);
   const [isCorpusOwner, setIsCorpusOwner] = useState(false);
   const [isAuthor, setIsAuthor] = useState(false);
@@ -352,7 +352,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   const loadAnnotations = async (docId) => {
     try {
       setAnnotationsLoading(true);
-      const res = await corpusAPI.getDocumentAnnotations(corpusId, docId, layerFilter || undefined);
+      const backendSort = annotationSort === 'subscribed' ? 'subscribed' : undefined;
+      const res = await corpusAPI.getDocumentAnnotations(corpusId, docId, layerFilter || undefined, backendSort);
       const rawAnnotations = res.data.annotations || [];
 
       // Resolve path names for each annotation's graph_path
@@ -484,12 +485,12 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     return segments;
   };
 
-  // Reload annotations when filter changes
+  // Reload annotations when filter or backend sort changes
   useEffect(() => {
     if (subView?.documentId) {
       loadAnnotations(subView.documentId);
     }
-  }, [layerFilter]);
+  }, [layerFilter, annotationSort]);
 
   // Reset concept navigation state, attribute filter, and sort when document changes
   useEffect(() => {
@@ -1196,6 +1197,15 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                   ...(annotationSort === 'votes' ? styles.layerToggleBtnActive : {}),
                 }}
               >Votes</button>
+              {user && (
+                <button
+                  onClick={() => setAnnotationSort('subscribed')}
+                  style={{
+                    ...styles.layerToggleBtn,
+                    ...(annotationSort === 'subscribed' ? styles.layerToggleBtnActive : {}),
+                  }}
+                >Subscribed</button>
+              )}
               <button
                 onClick={() => setAnnotationSort('position')}
                 style={{
@@ -1627,6 +1637,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                   if (posB === -1) return 1;
                   if (posA !== posB) return posA - posB;
                   return (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0);
+                }
+                if (annotationSort === 'subscribed') {
+                  // Backend already sorted by subscribed_vote_count — preserve order
+                  return 0;
                 }
                 return (parseInt(b.vote_count) || 0) - (parseInt(a.vote_count) || 0);
               });
