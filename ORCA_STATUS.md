@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 1, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; codebase published under AGPL v3)
+**Last Updated:** April 1, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3)
 
 ---
 
@@ -66,11 +66,11 @@ CREATE TABLE users (
 ```
 
 **Key Points:**
-- Phone numbers hashed with bcryptjs (10 salt rounds) for OTP authentication (Phase 32). Passwords are no longer used.
+- Phone numbers hashed with bcryptjs (10 salt rounds) for OTP verification during registration and password reset (Phase 32, updated Phase 40b). Passwords are the primary login mechanism.
 - Username must be unique
 - No concept of "ownership" - all graphs are public/collaborative
 - `email` — **Re-activated in Phase 36.** Required for new registrations (enforced at application level, not DB constraint — column remains nullable for backward compatibility with existing rows). Collected at sign-up for legal notifications: copyright violation notices and ToS/privacy policy updates. Previously retired in Phase 32d; now written by `verifyRegister` endpoint. Test users backfilled with fake emails (Phase 36 migration).
-- `password_hash` — nullable as of Phase 32b, functionally retired as of Phase 32d. Column retained (append-only philosophy) but no longer read or written by auth code.
+- `password_hash` — **Reactivated in Phase 40b.** Stores bcrypt-hashed password (10 salt rounds). Required for new registrations. Used by `POST /auth/login` for password verification and updated by `POST /auth/forgot-password/reset`. Validated with `zxcvbn` (score >= 2, 8-128 chars). Nullable for backward compatibility — users who registered before Phase 40b may have NULL passwords (must use forgot-password flow to set one).
 - `phone_hash` — bcrypt-hashed phone number for Phone OTP auth (Phase 32a). Nullable. All six test users (alice–frank) assigned fake phone hashes via Phase 32d migration. Retained for backward compatibility but no longer used for lookup (Phase 33e).
 - `phone_lookup` — HMAC-SHA256 of normalized phone number, keyed by `PHONE_LOOKUP_KEY` env var (Phase 33e). Deterministic — enables O(1) database lookup via UNIQUE index. Replaces the O(n) bcrypt scan previously used for login and registration uniqueness checks.
 - `token_issued_after` — timestamp used by "Log out everywhere" (Phase 32b). When set, auth middleware rejects any JWT with `iat <= token_issued_after`. Nullable — null means no sessions have been invalidated.
@@ -1267,9 +1267,11 @@ CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_vot
 
 | Method | Endpoint | Auth Required | Description |
 |--------|----------|---------------|-------------|
-| POST | `/send-code` | No | Send OTP via Twilio. Accepts `{ phoneNumber }`. Rate-limited: 5 req/IP/15 min. (Phase 32b) |
-| POST | `/verify-register` | No | Verify OTP + create account. Accepts `{ phoneNumber, code, username, email, ageVerified }`. Validates email format and `ageVerified === true`. Stores email, sets `age_verified_at = NOW()`. Returns JWT. (Phase 32b, updated Phase 36) |
-| POST | `/verify-login` | No | Verify OTP + login. Accepts `{ phoneNumber, code }`. Returns JWT. (Phase 32b) |
+| POST | `/login` | No | Password login. Accepts `{ identifier, password }`. `identifier` is username or email (detected by `@`). Rate-limited: 10 req/IP/15 min. Returns JWT. (Phase 40b) |
+| POST | `/send-code` | No | Send OTP via Twilio. Accepts `{ phoneNumber, intent }`. Rate-limited: 5 req/IP/15 min. `intent=register` checks phone uniqueness before sending. (Phase 32b, updated Phase 40b — `intent=login` removed) |
+| POST | `/verify-register` | No | Verify OTP + create account. Accepts `{ phoneNumber, code, username, email, password, ageVerified }`. Validates password with zxcvbn (score >= 2), email format, and `ageVerified === true`. Stores password_hash, email, sets `age_verified_at = NOW()`. Returns JWT. (Phase 32b, updated Phase 36, Phase 40b) |
+| POST | `/forgot-password/send-code` | No | Send OTP for password reset. Accepts `{ phoneNumber }`. Looks up user via HMAC phone_lookup. Returns generic success message regardless of whether account exists (security best practice). Rate-limited: 5 req/IP/15 min. (Phase 40b) |
+| POST | `/forgot-password/reset` | No | Verify OTP + reset password. Accepts `{ phoneNumber, code, newPassword }`. Validates new password with zxcvbn. Updates password_hash. Returns JWT (auto-login). (Phase 40b) |
 | GET | `/me` | Yes | Get current user info |
 | POST | `/logout-everywhere` | Yes | Sets `token_issued_after = NOW()`, invalidating all existing JWTs. (Phase 32b) |
 | POST | `/delete-account` | Yes | Permanently delete the user's account. Pre-check: user must own zero corpuses (transfer first). CASCADE deletes votes, subscriptions, tabs, messages, flags. SET NULL on concepts, edges, annotations, web links, documents `created_by`/`uploaded_by`. Returns 400 if user still owns corpuses. (Phase 35c) |
@@ -1277,17 +1279,27 @@ CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_vot
 **Request/Response Examples:**
 
 ```javascript
-// Phone OTP flow (Phase 32b)
+// Password login (Phase 40b)
+POST /api/auth/login
+Body: { identifier, password }  // identifier = username or email
+Response: { token, user: { id, username } }
+
+// Phone OTP for registration (Phase 32b, updated Phase 40b)
 POST /api/auth/send-code
-Body: { phoneNumber }
+Body: { phoneNumber, intent }  // intent = 'register'
 Response: { message: 'Verification code sent' }
 
 POST /api/auth/verify-register
-Body: { phoneNumber, code, username, email, ageVerified }
+Body: { phoneNumber, code, username, email, password, ageVerified }
 Response: { token, user: { id, username } }
 
-POST /api/auth/verify-login
-Body: { phoneNumber, code }
+// Forgot password (Phase 40b)
+POST /api/auth/forgot-password/send-code
+Body: { phoneNumber }
+Response: { message: 'If an account exists with this phone number, a verification code has been sent' }
+
+POST /api/auth/forgot-password/reset
+Body: { phoneNumber, code, newPassword }
 Response: { token, user: { id, username } }
 
 POST /api/auth/logout-everywhere  [Authorization: Bearer TOKEN]
@@ -1706,7 +1718,7 @@ orca/
     │   │   ├── SavedPageOverlay.jsx # Standalone Saved Page with corpus tabs (Phase 7c; dormancy UI removed Phase 30a)
     │   │   ├── ProtectedRoute.jsx  # Auth route wrapper
     │   │   ├── SearchField.jsx     # Combined Add/Search field with dropdown
-    │   │   ├── LoginModal.jsx     # Phone OTP login/register modal (Phase 32c) — centered overlay with Log In/Sign Up tabs, two-step phone+code flow
+    │   │   ├── LoginModal.jsx     # Password login/register/forgot-password modal (Phase 32c, redesigned Phase 40b) — three modes: Log In (identifier+password), Sign Up (phone OTP then details+password), Forgot Password (phone OTP then new password)
     │   │   ├── SidebarDndContext.jsx # Drag-and-drop context for sidebar reordering (Phase 19c, @dnd-kit)
     │   │   ├── SwapModal.jsx       # Swap vote modal with sibling list
     │   │   └── VoteSetBar.jsx     # Vote set color swatches and filtering bar
@@ -2016,7 +2028,7 @@ This only needs to be done once per database. If you drop and recreate the datab
 177. **Document Search Excludes Superseded Versions (Phase 28d bugfix):** The `searchDocuments` query now adds `AND NOT EXISTS (SELECT 1 FROM documents d2 WHERE d2.source_document_id = d.id)` to exclude older document versions that have been superseded by newer versions. This prevents duplicate results when searching for documents.
 178. **Annotation Lists Sorted by Vote Count (Phase 28d):** Both `CorpusTabContent.jsx` (contextualized view) and the now-removed `DecontextualizedDocView.jsx` sort annotation lists by `vote_count` descending. The `getAllDocumentAnnotations` backend endpoint now includes `vote_count` (via subquery on `annotation_votes`) in the response, with accumulation across merged duplicate annotations.
 179. **Corpus Member Username Visibility (Phase 28e, updates #39):** Within a corpus, all corpus members (owner AND allowed users) can see each other's usernames in the members panel. The backend checks `corpus_allowed_users` membership (not just ownership) and returns the full username list plus `isOwner` and `isMember` flags. Invite link generation and member removal remain owner-only. Non-members still see count only. The Leave button is shown for allowed users who aren't the owner.
-180. **Phone OTP Login Modal (Phase 32c):** `LoginModal.jsx` rewired from username/password forms to a two-step phone OTP flow. Each tab (Log In / Sign Up) has Step 1 (enter phone + send code) and Step 2 (enter 6-digit code + verify). Phone input shows static "+1" prefix with raw 10-digit input. Resend code link with 30-second countdown timer (`useEffect`/`setInterval`). Tab switching resets to Step 1. `logoutEverywhere` in AppShell header does API call then local cleanup unconditionally — ensures user is always logged out locally even if the server call fails.
+180. **Password Login Modal (Phase 32c, redesigned Phase 40b):** `LoginModal.jsx` has three modes: (1) **Log In** — identifier (username or email) + password form with "Forgot password?" link; (2) **Sign Up** — 3-step flow: phone number → OTP verification → username + email + password + confirm + age checkbox; (3) **Forgot Password** — 3-step flow: phone number → OTP verification → new password + confirm. Password fields have show/hide toggle. All passwords validated with zxcvbn (score >= 2, 8-128 chars). Phone OTP is only used during registration (to verify the phone is real) and password reset (to prove identity). Normal login uses password only — no OTP. `logoutEverywhere` in AppShell header does API call then local cleanup unconditionally — ensures user is always logged out locally even if the server call fails.
 181. **Graceful Shutdown in server.js:** `server.js` registers `SIGINT`/`SIGTERM` handlers that call `server.close()` before exiting. This ensures port 5000 is released cleanly when the process is stopped or when nodemon restarts after a crash. Without this, stale Node processes hold the port and cause `EADDRINUSE` errors on restart.
 182. **Email Column Reactivated for Legal Notifications (Phase 36):** The `email` column on `users` was retired in Phase 32d but is reactivated in Phase 36 for legal notifications (copyright violations, ToS updates). Required for new registrations at application level; DB column stays nullable for backward compatibility. Not used for auth — phone OTP remains the only auth mechanism. No uniqueness constraint on email.
 183. **Add as Annotation from Graph View (Phase 38h):** Users can annotate documents with the current concept directly from the graph view without navigating to the document first. The "Add as Annotation" button (children view only, logged-in users with a context) opens `AnnotateFromGraphPicker.jsx`, a lightweight corpus/document picker that shows subscribed corpuses with their documents and existing annotations for duplicate prevention. Selecting a document triggers the pending-document navigation pattern: `AppShell.handleAnnotateFromGraph` auto-subscribes if needed, sets `pendingCorpusDocumentId` + `pendingAnnotationFromGraph`, switches to the corpus tab. `CorpusTabContent` opens the document and the annotation creation panel with concept/edge pre-filled via `prefilledConcept`/`prefilledEdge` props on `AnnotationPanel.jsx`. The user can then see the document body, add quote text and comments, and confirm.
@@ -2028,6 +2040,9 @@ This only needs to be done once per database. If you drop and recreate the datab
 189. **Add to Combo from Graph View (Phase 39d):** The "Add to Combo" button in the concept header appears when the user is logged in, owns at least one combo, and has a valid `parentEdgeId`. Single-combo shortcut: if the user owns exactly one combo, clicking adds directly without a picker. Multi-combo picker: a small floating dropdown anchored below the button. Feedback states: "Added ✓" (1.5s), "Already in combo" (2s), or error message. The picker closes on outside click or Escape.
 190. **Invite Link Generation Supports Optional Limits (Phase 39e):** The "+ New Invite Link" button in `CorpusMembersPanel` now toggles an inline form with optional "Max uses" and "Expires in days" fields. Both fields are optional — leaving them blank creates an unlimited, non-expiring link (backwards compatible). The backend already supported `maxUses` and `expiresInDays` parameters since Phase 7g; only the frontend form was missing.
 191. **Subscribed Sort Option for Annotations (Phase 40):** A "Subscribed" sort option ranks annotations by votes from members of corpuses the user subscribes to. "Members" = corpus owners (`corpuses.created_by`) UNION allowed users (`corpus_allowed_users.user_id`) for all corpuses in `corpus_subscriptions` for the current user. Each backend controller (`corpusController`, `conceptsController`, `comboController`) builds a `subscribed_members` CTE via this chain, then computes `subscribed_vote_count` per annotation by counting matching `annotation_votes`. The sort toggle appears in three views: CorpusTabContent (Votes | Subscribed | Position), ConceptAnnotationPanel (Top | Subscribed | New), and ComboTabContent (Combo Votes | Subscribed | New | Annotation Votes). Hidden for guest users (requires auth to resolve subscriptions). Secondary sort is always total `vote_count` descending.
+192. **Password Login Replaces OTP Login (Phase 40b):** Normal login uses username/email + password via `POST /auth/login`. Phone OTP is used only during registration (to verify the phone is real) and during password reset (to prove identity). The `verify-login` endpoint is removed. The `password_hash` column on `users` (dormant since Phase 32d) is reactivated. Passwords are hashed with bcryptjs (10 salt rounds). The login endpoint accepts either username or email as the identifier, detecting which one via the presence of `@`. Login rate-limited to 10 req/IP/15 min.
+193. **Password Strength via zxcvbn (Phase 40b):** Passwords must be at least 8 characters (max 128) and score >= 2 on the zxcvbn scale (0-4). This follows NIST SP 800-63B recommendations: enforce minimum length, check against common/breached passwords, but do NOT require arbitrary complexity rules (uppercase, special chars, etc.). The zxcvbn library is passed the user's username and email as penalty inputs so passwords containing the user's own info are scored lower. The zxcvbn feedback messages are returned directly to the frontend for display.
+194. **Forgot Password Uses Phone Number as Identifier (Phase 40b):** The forgot-password flow requires the user to enter their phone number (not username/email) because phone numbers are stored as irreversible hashes (bcrypt + HMAC). The system cannot look up a user's phone number from their username to send an OTP. The phone number serves as both the identifier and the verification channel. The endpoint returns a generic success message regardless of whether the phone exists (security best practice to prevent account enumeration).
 
 ### Common Tasks
 
@@ -2235,6 +2250,7 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 38:** Post-Launch Enhancements ✅ COMPLETE (38a–38k: flip view nav, root swap votes, expanded swap votes, graph votes revamp, color set threshold, attribute filter, position sort, annotate from graph, delete any version, citation links, search badge tooltip)
 - **Phase 39:** Combos ✅ COMPLETE (39a: backend infrastructure, 39b: Browse Combos overlay, 39c: combo persistent tab, 39d: add to combo from graph, 39e: polish + DnD + tab groups + invite link options)
 - **Phase 40:** Subscribed Sort Option ✅ COMPLETE — "Subscribed" sort ranks annotations by votes from members of the user's subscribed corpuses. Added to CorpusTabContent, ConceptAnnotationPanel, and ComboTabContent. Backend CTE computes subscribed_vote_count per annotation. Hidden for guests.
+- **Phase 40b:** Password Login ✅ COMPLETE — password login replaces OTP login, phone OTP retained for registration and password reset only, zxcvbn strength validation, forgot-password flow via phone OTP
   - **Phase 28a:** Visual Cleanup — Icons, Fonts, Colors ✅ (all emoji icons removed from UI chrome, EB Garamond applied everywhere via Google Fonts import + explicit fontFamily, all colored buttons converted to black-on-off-white Zen aesthetic, all italics removed, × close buttons kept)
   - **Phase 28b:** UI Removals — Ranking & Supergroups ✅ (child rankings UI removed, Layer 3 super-groups removed, ranking cleanup queries cleaned up in removeVote/removeVoteFromTab/addSwapVote)
   - **Phase 28c:** Rename & Title Changes ✅ ("Saved" → "Graph Votes" across all user-facing text in AppShell/SavedPageOverlay/Saved/SavedTabContent, sort dropdown "↓ Saves" → "↓ Votes", SwapModal/VoteSetBar/ConceptGrid/AnnotationPanel "saves" → "votes", FlipView badge "Saved" → "Voted", browser tab title "Concept Hierarchy" → "orca")
@@ -3018,6 +3034,37 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 **Architecture Decision #227 — Subscribed Sort Uses Corpus Membership as Trust Signal (Phase 40):** The "Subscribed" sort option uses corpus membership (owners + allowed users of subscribed corpuses) as a proxy for trusted community. This surfaces annotations endorsed by people the user has chosen to follow via corpus subscriptions, without requiring an explicit "follow user" feature. The CTE is computed per-request — no denormalization or caching needed at current scale.
 
 **Suggested git commit:** `feat: add Subscribed sort option for annotations across corpus, concept, and combo views`
+
+---
+
+### Phase 40b: Password Login with Phone OTP for Registration & Password Reset — ✅ COMPLETE
+
+**Goal:** Replace phone-OTP-every-time login with standard username/email + password login. Phone OTP retained only for registration (verify phone is real) and password reset (prove identity).
+
+**Implementation:**
+
+**Backend changes:**
+- New `POST /auth/login` endpoint — accepts `{ identifier, password }`, detects username vs email by `@`, rate-limited 10 req/IP/15 min
+- Updated `POST /auth/verify-register` — now requires `password` field, validates with zxcvbn before Twilio call, hashes and stores `password_hash`
+- Removed `POST /auth/verify-login` (OTP login no longer exists)
+- New `POST /auth/forgot-password/send-code` — accepts phone number, looks up user via HMAC, sends OTP, returns generic message
+- New `POST /auth/forgot-password/reset` — verifies OTP, validates new password with zxcvbn, updates `password_hash`, auto-login with JWT
+- Added `zxcvbn` dependency for NIST SP 800-63B compliant password strength checking
+- Migration sets test user passwords (alice-frank) to `testpass123!`
+
+**Frontend changes:**
+- `LoginModal.jsx` redesigned with three modes: Log In (identifier + password), Sign Up (3-step: phone OTP → details + password), Forgot Password (3-step: phone OTP → new password)
+- Password visibility toggle on all password fields
+- `AuthContext.jsx` updated: added `login()`, `forgotPasswordSendCode()`, `forgotPasswordReset()`; updated `phoneRegister` to pass password; removed `phoneLogin`
+- `api.js` updated: added `login`, `forgotPasswordSendCode`, `forgotPasswordReset`; updated `verifyRegister` with password param; removed `verifyLogin`
+
+**Architecture Decision #228 — Password Login Replaces OTP Login (Phase 40b):** Normal login uses username/email + password. Phone OTP is used only during registration (to verify the phone is real) and during password reset (to prove identity). The `verify-login` endpoint is removed. The `password_hash` column on `users` (dormant since Phase 32d) is reactivated.
+
+**Architecture Decision #229 — Password Strength via zxcvbn (Phase 40b):** Passwords must be at least 8 characters and score >= 2 on the zxcvbn scale (0-4). This follows NIST SP 800-63B: enforce minimum length, check against common/breached passwords, no arbitrary complexity rules. The zxcvbn library is passed the user's username and email as penalty inputs.
+
+**Architecture Decision #230 — Forgot Password Uses Phone Number as Identifier (Phase 40b):** The forgot-password flow requires the user to enter their phone number because phone numbers are stored as irreversible hashes. The endpoint returns a generic success message regardless of whether the phone exists (prevents account enumeration).
+
+**Suggested git commit:** `feat: 40b — password login with phone OTP for registration and password reset, zxcvbn strength validation`
 
 ---
 

@@ -34,18 +34,39 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 
 ---
 
-## 1. Authentication (Phone OTP)
+## 1. Authentication (Password Login + Phone OTP Registration)
 
-- [ ] Sending a verification code to a phone number returns success (POST `/api/auth/send-code`)
+### Password Login (Phase 40b)
+- [ ] Login with username + correct password returns JWT token and user object (POST `/api/auth/login`)
+- [ ] Login with email + correct password returns JWT token and user object
+- [ ] Login with wrong password returns 401 "Invalid credentials"
+- [ ] Login with non-existent username returns 401 "Invalid credentials" (no account enumeration)
+- [ ] Login without identifier or password returns 400
+- [ ] The old OTP login endpoint (`POST /api/auth/verify-login`) returns 404 (removed)
+
+### Registration (Phone OTP + Password)
+- [ ] Sending a verification code with `intent=register` to a new phone number returns success (POST `/api/auth/send-code`)
+- [ ] Sending a verification code with `intent=register` to an existing phone number returns 400 error before sending OTP
+- [ ] Cannot register without providing a password — returns "Password is required"
+- [ ] Cannot register with a password shorter than 8 characters — returns error
+- [ ] Cannot register with a weak password (e.g., "password") — returns zxcvbn feedback message
 - [ ] Cannot register without providing an email address — returns an error
 - [ ] Cannot register without checking the age verification box (`ageVerified: true`) — returns an error
 - [ ] Cannot register with an invalid email format (no @, no dot) — returns an error
-- [ ] Successful registration stores the email in `users.email` and sets `age_verified_at` to a timestamp
+- [ ] Successful registration stores `password_hash`, `email`, and sets `age_verified_at` to a timestamp
 - [ ] Successful registration returns a JWT token
-- [ ] Successful login returns a JWT token
+
+### Forgot Password (Phase 40b)
+- [ ] Forgot password send-code endpoint exists and returns generic success message (POST `/api/auth/forgot-password/send-code`)
+- [ ] Forgot password reset endpoint exists and validates password strength (POST `/api/auth/forgot-password/reset`)
+- [ ] Forgot password reset with weak password returns zxcvbn feedback
+- [ ] Successful password reset returns JWT token (auto-login)
+
+### General Auth
 - [ ] The `/api/auth/me` endpoint returns the current user's info when given a valid JWT
 - [ ] The `/api/auth/me` endpoint returns 401 when given no token or an invalid token
 - [ ] "Log out everywhere" (`POST /api/auth/logout-everywhere`) sets `token_issued_after` and subsequent requests with the old token return 401
+- [ ] Rate limiting: more than 10 login attempts from the same IP within 15 minutes are rejected
 - [ ] Rate limiting: more than 5 send-code requests from the same IP within 15 minutes are rejected
 
 ---
@@ -384,11 +405,12 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Web link creator can see and use the remove/delete button on their own link
 - [ ] Web link removal actually deletes the link from the database
 
-### 37b: Auth & Registration
+### 37b: Auth & Registration (updated Phase 40b)
 - [ ] During registration, entering a phone number that already exists shows an error BEFORE sending the OTP code
-- [ ] During login, entering a phone number that doesn't exist shows an error BEFORE sending the OTP code (nice-to-have)
-- [ ] The `sendCode` endpoint accepts an `intent` parameter (`login` or `register`)
-- [ ] Registration flow still works end-to-end after the change
+- [ ] The `sendCode` endpoint accepts an `intent` parameter (`register` — `login` intent removed in Phase 40b)
+- [ ] Registration flow works end-to-end: phone OTP → username/email/password → account created
+- [ ] Password login works with username and with email
+- [ ] Forgot password flow works end-to-end: phone → OTP → new password → auto-login
 
 ### 37c: Corpus & Document Frontend UX
 - [ ] Guest users clicking a document link from the concept annotation panel see the login modal (not an error)
