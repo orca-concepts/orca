@@ -334,6 +334,7 @@ const CorpusDetailView = ({ corpusId, onBack, onOpenDocument, isGuest, onSubscri
           isOwner={isOwner}
           isAllowedUser={isAllowedUser}
           isGuest={isGuest}
+          corpusId={corpusId}
           membersCount={allowedUsersCount}
           members={allowedUsersMembers}
           membersLoading={allowedUsersLoading}
@@ -344,6 +345,7 @@ const CorpusDetailView = ({ corpusId, onBack, onOpenDocument, isGuest, onSubscri
           onRemoveMember={handleMembersRemoveUser}
           onLeaveCorpus={handleMembersLeave}
           onTransferOwnership={handleTransferOwnership}
+          onMembersChanged={loadAllowedUsers}
         />
       )}
 

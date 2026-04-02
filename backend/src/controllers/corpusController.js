@@ -3486,6 +3486,75 @@ const resolveCitation = async (req, res) => {
   }
 };
 
+// Phase 41d: Direct invite user to corpus by userId
+const inviteUserToCorpus = async (req, res) => {
+  try {
+    const corpusId = parseInt(req.params.id);
+    const userId = req.user.userId;
+    const targetUserId = parseInt(req.body.userId);
+
+    if (isNaN(corpusId)) {
+      return res.status(400).json({ error: 'Invalid corpus ID' });
+    }
+    if (!targetUserId || isNaN(targetUserId)) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Check corpus exists and verify ownership
+    const corpusCheck = await pool.query(
+      'SELECT id, created_by FROM corpuses WHERE id = $1',
+      [corpusId]
+    );
+    if (corpusCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Corpus not found' });
+    }
+    if (corpusCheck.rows[0].created_by !== userId) {
+      return res.status(403).json({ error: 'Only the corpus owner can invite users' });
+    }
+
+    // Check target user exists
+    const userCheck = await pool.query(
+      'SELECT id, username, orcid_id FROM users WHERE id = $1',
+      [targetUserId]
+    );
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Cannot add the corpus owner
+    if (targetUserId === corpusCheck.rows[0].created_by) {
+      return res.status(400).json({ error: 'Cannot add the corpus owner as a member' });
+    }
+
+    // Check not already a member
+    const memberCheck = await pool.query(
+      'SELECT id FROM corpus_allowed_users WHERE corpus_id = $1 AND user_id = $2',
+      [corpusId, targetUserId]
+    );
+    if (memberCheck.rows.length > 0) {
+      return res.status(409).json({ error: 'User is already a member of this corpus' });
+    }
+
+    await pool.query(
+      'INSERT INTO corpus_allowed_users (corpus_id, user_id) VALUES ($1, $2)',
+      [corpusId, targetUserId]
+    );
+
+    const addedUser = userCheck.rows[0];
+    res.json({
+      success: true,
+      user: {
+        id: addedUser.id,
+        username: addedUser.username,
+        orcidId: addedUser.orcid_id || null,
+      },
+    });
+  } catch (error) {
+    console.error('Error inviting user to corpus:', error);
+    res.status(500).json({ error: 'Failed to invite user' });
+  }
+};
+
 module.exports = {
   createCorpus,
   listCorpuses,
@@ -3559,5 +3628,7 @@ module.exports = {
   // Phase 41c: Document external links
   getDocumentExternalLinks,
   addDocumentExternalLink,
-  removeDocumentExternalLink
+  removeDocumentExternalLink,
+  // Phase 41d: Direct invite user
+  inviteUserToCorpus,
 };

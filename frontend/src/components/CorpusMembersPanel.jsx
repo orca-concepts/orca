@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import OrcidBadge from './OrcidBadge';
+import { usersAPI, corpusAPI } from '../services/api';
 
 export default function CorpusMembersPanel({
   isOwner,
   isAllowedUser,
   isGuest,
+  corpusId,
   membersCount,
   members,
   membersLoading,
@@ -15,6 +17,7 @@ export default function CorpusMembersPanel({
   onRemoveMember,
   onLeaveCorpus,
   onTransferOwnership,
+  onMembersChanged,
 }) {
   const [generatingInvite, setGeneratingInvite] = useState(false);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -26,6 +29,66 @@ export default function CorpusMembersPanel({
   const [selectedTransferTarget, setSelectedTransferTarget] = useState(null);
   const [confirmingTransfer, setConfirmingTransfer] = useState(false);
   const [transferring, setTransferring] = useState(false);
+
+  // Phase 41d: Add member by username/ORCID search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [addFeedback, setAddFeedback] = useState({}); // { [userId]: 'added' | 'already' | 'error:...' }
+  const searchTimerRef = useRef(null);
+  const blurTimerRef = useRef(null);
+  const [showResults, setShowResults] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    };
+  }, []);
+
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    setAddFeedback({});
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (val.trim().length < 2) {
+      setSearchResults([]);
+      setShowResults(false);
+      return;
+    }
+    setSearchLoading(true);
+    setShowResults(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await usersAPI.searchUsers(val.trim());
+        setSearchResults(res.data.users || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+  };
+
+  const handleAddUser = async (targetUser) => {
+    try {
+      await corpusAPI.inviteUserToCorpus(corpusId, targetUser.id);
+      setAddFeedback(prev => ({ ...prev, [targetUser.id]: 'added' }));
+      if (onMembersChanged) onMembersChanged();
+      setTimeout(() => {
+        setSearchQuery('');
+        setSearchResults([]);
+        setShowResults(false);
+        setAddFeedback({});
+      }, 1500);
+    } catch (err) {
+      if (err.response?.status === 409) {
+        setAddFeedback(prev => ({ ...prev, [targetUser.id]: 'already' }));
+      } else {
+        setAddFeedback(prev => ({ ...prev, [targetUser.id]: 'error:' + (err.response?.data?.error || 'Failed') }));
+      }
+    }
+  };
 
   const handleGenerateInvite = async () => {
     setGeneratingInvite(true);
@@ -206,6 +269,53 @@ export default function CorpusMembersPanel({
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {isOwner && (
+            <div style={styles.addMemberSection}>
+              <span style={styles.membersInviteLabel}>Add member</span>
+              <div style={{ position: 'relative', marginTop: '6px' }}>
+                <input
+                  type="text"
+                  placeholder="Search by username or ORCID"
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  onFocus={() => { if (searchResults.length > 0 || searchQuery.trim().length >= 2) setShowResults(true); }}
+                  onBlur={() => { blurTimerRef.current = setTimeout(() => setShowResults(false), 200); }}
+                  style={styles.searchInput}
+                />
+                {showResults && (searchLoading || searchResults.length > 0 || searchQuery.trim().length >= 2) && (
+                  <div style={styles.searchDropdown}>
+                    {searchLoading ? (
+                      <div style={styles.searchHint}>Searching...</div>
+                    ) : searchResults.length === 0 ? (
+                      <div style={styles.searchHint}>No users found</div>
+                    ) : (
+                      searchResults.map(u => (
+                        <div key={u.id} style={styles.searchResultRow}>
+                          <span style={styles.membersUsername}>{u.username}<OrcidBadge orcidId={u.orcidId} /></span>
+                          {addFeedback[u.id] === 'added' ? (
+                            <span style={styles.addedFeedback}>Added &#10003;</span>
+                          ) : addFeedback[u.id] === 'already' ? (
+                            <span style={styles.alreadyFeedback}>Already a member</span>
+                          ) : addFeedback[u.id]?.startsWith('error:') ? (
+                            <span style={styles.alreadyFeedback}>{addFeedback[u.id].slice(6)}</span>
+                          ) : (
+                            <button
+                              style={styles.addUserBtn}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleAddUser(u)}
+                            >
+                              Add
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -580,5 +690,71 @@ const styles = {
     borderRadius: '4px',
     padding: '4px 12px',
     cursor: 'pointer',
+  },
+  // Phase 41d: Add member search styles
+  addMemberSection: {
+    marginBottom: '14px',
+    paddingBottom: '14px',
+    borderBottom: '1px solid #f0ebe0',
+  },
+  searchInput: {
+    width: '100%',
+    padding: '6px 10px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  searchDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    border: '1px solid #e0e0e0',
+    borderRadius: '4px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    zIndex: 10,
+    marginTop: '2px',
+    maxHeight: '200px',
+    overflowY: 'auto',
+  },
+  searchHint: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
+    padding: '8px 10px',
+  },
+  searchResultRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '6px 10px',
+    borderBottom: '1px solid #f5f5f5',
+  },
+  addUserBtn: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#5a4a2a',
+    background: 'none',
+    border: '1px solid #d4c9b8',
+    borderRadius: '4px',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  addedFeedback: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#5a7a5a',
+    flexShrink: 0,
+  },
+  alreadyFeedback: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
+    flexShrink: 0,
   },
 };

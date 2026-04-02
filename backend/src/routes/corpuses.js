@@ -155,6 +155,9 @@ router.get('/:corpusId/documents/:documentId/annotations-for-concept/:conceptId'
 
 // ---- Phase 7g: Parameterized allowed user routes ----
 
+// Phase 41d: Direct invite user to corpus by userId (corpus owner only)
+router.post('/:id/invite-user', authenticateToken, corpusController.inviteUserToCorpus);
+
 // List allowed users for a corpus (owner or allowed users only)
 router.get('/:corpusId/allowed-users', authenticateToken, corpusController.listAllowedUsers);
 

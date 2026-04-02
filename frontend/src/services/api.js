@@ -369,6 +369,9 @@ export const corpusAPI = {
   removeAllowedUser: (corpusId, targetUserId) =>
     api.post('/corpuses/allowed-users/remove', { corpusId, targetUserId }),
 
+  inviteUserToCorpus: (corpusId, userId) =>
+    api.post(`/corpuses/${corpusId}/invite-user`, { userId }),
+
   leaveCorpus: (corpusId) =>
     api.post('/corpuses/allowed-users/leave', { corpusId }),
 
@@ -604,6 +607,8 @@ export const combosAPI = {
 export const usersAPI = {
   getUserProfile: (userId) =>
     api.get(`/users/${userId}/profile`),
+  searchUsers: (query) =>
+    api.get(`/users/search?q=${encodeURIComponent(query)}`),
 };
 
 export default api;

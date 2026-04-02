@@ -2343,6 +2343,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
           isOwner={isOwner}
           isAllowedUser={isAllowedUser}
           isGuest={isGuest}
+          corpusId={corpusId}
           membersCount={membersCount}
           members={membersList}
           membersLoading={membersLoading}
@@ -2353,6 +2354,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
           onRemoveMember={handleMembersRemoveUser}
           onLeaveCorpus={handleMembersLeave}
           onTransferOwnership={handleTransferOwnership}
+          onMembersChanged={loadMembers}
         />
       )}
 
