@@ -2071,6 +2071,41 @@ const createTables = async () => {
     `, [testPasswordHash]);
     console.log('Phase 40b: Set test user passwords (' + testUpdateResult.rowCount + ' rows updated)');
 
+    // ============================================================
+    // Phase 41c: Document External Links (multi-link table)
+    // Links stored against the root document in the version chain,
+    // so all versions share one set of links (same pattern as
+    // document_authors).
+    // ============================================================
+
+    // Drop the single-column approach if it was previously applied
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'documents' AND column_name = 'external_url'
+        ) THEN
+          ALTER TABLE documents DROP COLUMN external_url;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS document_external_links (
+        id SERIAL PRIMARY KEY,
+        document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_document_external_links_doc
+        ON document_external_links(document_id)
+    `);
+    console.log('Phase 41c: Created document_external_links table');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

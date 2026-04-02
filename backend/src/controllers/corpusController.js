@@ -2761,6 +2761,137 @@ const removeDocumentTag = async (req, res) => {
   }
 };
 
+// Phase 41c: Get external links for a document (guest OK)
+// Links are stored against the root document, so all versions share one set.
+const getDocumentExternalLinks = async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.id);
+    if (isNaN(documentId)) {
+      return res.status(400).json({ error: 'Invalid document ID' });
+    }
+
+    const rootId = await getRootDocumentId(pool, documentId);
+
+    const result = await pool.query(
+      `SELECT del.id, del.url, del.added_by, del.created_at,
+              u.username AS added_by_username
+       FROM document_external_links del
+       LEFT JOIN users u ON u.id = del.added_by
+       WHERE del.document_id = $1
+       ORDER BY del.created_at ASC`,
+      [rootId]
+    );
+
+    res.json({ links: result.rows });
+  } catch (error) {
+    console.error('Error getting document external links:', error);
+    res.status(500).json({ error: 'Failed to get external links' });
+  }
+};
+
+// Phase 41c: Add an external link to a document (author only)
+const addDocumentExternalLink = async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.id);
+    const userId = req.user.userId;
+    const { url } = req.body;
+
+    if (isNaN(documentId)) {
+      return res.status(400).json({ error: 'Invalid document ID' });
+    }
+
+    if (!url || !url.trim()) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+      return res.status(400).json({ error: 'URL must start with http:// or https://' });
+    }
+    if (trimmedUrl.length > 2000) {
+      return res.status(400).json({ error: 'URL must be 2000 characters or less' });
+    }
+
+    // Verify document exists
+    const docCheck = await pool.query('SELECT id FROM documents WHERE id = $1', [documentId]);
+    if (docCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Permission: must be an author
+    const canEdit = await isDocumentAuthor(pool, documentId, userId);
+    if (!canEdit) {
+      return res.status(403).json({ error: 'Only document authors can add external links' });
+    }
+
+    const rootId = await getRootDocumentId(pool, documentId);
+
+    // Check for duplicate URL on this document
+    const dupCheck = await pool.query(
+      'SELECT id FROM document_external_links WHERE document_id = $1 AND url = $2',
+      [rootId, trimmedUrl]
+    );
+    if (dupCheck.rows.length > 0) {
+      return res.status(409).json({ error: 'This URL is already linked to this document' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO document_external_links (document_id, url, added_by)
+       VALUES ($1, $2, $3)
+       RETURNING id, url, added_by, created_at`,
+      [rootId, trimmedUrl, userId]
+    );
+
+    res.json({ success: true, link: result.rows[0] });
+  } catch (error) {
+    console.error('Error adding document external link:', error);
+    res.status(500).json({ error: 'Failed to add external link' });
+  }
+};
+
+// Phase 41c: Remove an external link from a document (author only)
+const removeDocumentExternalLink = async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.id);
+    const linkId = parseInt(req.params.linkId);
+    const userId = req.user.userId;
+
+    if (isNaN(documentId) || isNaN(linkId)) {
+      return res.status(400).json({ error: 'Invalid document or link ID' });
+    }
+
+    // Verify document exists
+    const docCheck = await pool.query('SELECT id FROM documents WHERE id = $1', [documentId]);
+    if (docCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Permission: must be an author
+    const canEdit = await isDocumentAuthor(pool, documentId, userId);
+    if (!canEdit) {
+      return res.status(403).json({ error: 'Only document authors can remove external links' });
+    }
+
+    const rootId = await getRootDocumentId(pool, documentId);
+
+    // Verify link exists and belongs to this document
+    const linkCheck = await pool.query(
+      'SELECT id FROM document_external_links WHERE id = $1 AND document_id = $2',
+      [linkId, rootId]
+    );
+    if (linkCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+
+    await pool.query('DELETE FROM document_external_links WHERE id = $1', [linkId]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing document external link:', error);
+    res.status(500).json({ error: 'Failed to remove external link' });
+  }
+};
+
 // Get tag for a specific document (guest OK — Phase 25a: single tag via documents.tag_id)
 const getDocumentTags = async (req, res) => {
   try {
@@ -3416,5 +3547,9 @@ module.exports = {
   getAnnotationsForConceptOnDocument,
   // Phase 38j: Citation links
   getDocumentCitations,
-  resolveCitation
+  resolveCitation,
+  // Phase 41c: Document external links
+  getDocumentExternalLinks,
+  addDocumentExternalLink,
+  removeDocumentExternalLink
 };

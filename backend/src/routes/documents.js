@@ -36,6 +36,11 @@ router.post('/:id/delete', authenticateToken, corpusController.deleteDocument);
 // Phase 38j: Get citations for a document (guest OK)
 router.get('/:id/citations', optionalAuth, corpusController.getDocumentCitations);
 
+// Phase 41c: Document external links (multiple per document)
+router.get('/:id/external-links', optionalAuth, corpusController.getDocumentExternalLinks);
+router.post('/:id/external-links/add', authenticateToken, corpusController.addDocumentExternalLink);
+router.post('/:id/external-links/:linkId/remove', authenticateToken, corpusController.removeDocumentExternalLink);
+
 // Get a single document with full body text + corpus list (guest OK)
 // NOTE: This was previously a standalone route in server.js — moved here for organization
 router.get('/:id', optionalAuth, corpusController.getDocument);

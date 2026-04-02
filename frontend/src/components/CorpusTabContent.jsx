@@ -146,6 +146,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   // Phase 17b: Document tags
   const [allTags, setAllTags] = useState([]);       // all available tags from backend
 
+  // Phase 41c: Document external links state
+  const [externalLinks, setExternalLinks] = useState([]);
+  const [showAddExternalLink, setShowAddExternalLink] = useState(false);
+  const [externalLinkInput, setExternalLinkInput] = useState('');
+
   useEffect(() => {
     loadCorpus();
   }, [corpusId]);
@@ -288,6 +293,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       documentsAPI.getCitations(docId)
         .then(res => setCitations(res.data.citations || []))
         .catch(() => setCitations([]));
+      // Phase 41c: Load external links
+      documentsAPI.getExternalLinks(docId)
+        .then(res => setExternalLinks(res.data.links || []))
+        .catch(() => setExternalLinks([]));
     } catch (err) {
       console.error('Failed to load document:', err);
     } finally {
@@ -432,6 +441,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     setVersionFile(null);
     setVersionFileError('');
     setVersionCopyrightConfirmed(false);
+    // Phase 41c: Clear external links state
+    setExternalLinks([]);
+    setShowAddExternalLink(false);
+    setExternalLinkInput('');
     // Phase 7i: Clear concept links
     setConceptLinks([]);
     // Phase 38j: Clear citations
@@ -1242,6 +1255,82 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               </>
             )}
           </div>
+
+          {/* Phase 41c: External links display + add/remove */}
+          {(externalLinks.length > 0 || isDocAuthor) && (
+            <div style={{ marginTop: '4px' }}>
+              {externalLinks.map(link => (
+                <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', fontSize: '13px', fontFamily: '"EB Garamond", Georgia, serif', color: '#666' }}>
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={link.url}
+                    style={{ color: '#5a4a2a', textDecoration: 'underline', textDecorationColor: 'rgba(90,74,42,0.35)', fontFamily: '"EB Garamond", Georgia, serif', fontSize: '13px' }}
+                  >
+                    {link.url.length > 60 ? link.url.substring(0, 60) + '\u2026' : link.url}
+                    {' \u2197'}
+                  </a>
+                  {isDocAuthor && (
+                    <span
+                      style={{ color: '#999', cursor: 'pointer', fontSize: '12px', fontFamily: '"EB Garamond", Georgia, serif' }}
+                      onClick={async () => {
+                        try {
+                          await documentsAPI.removeExternalLink(document.id, link.id);
+                          setExternalLinks(prev => prev.filter(l => l.id !== link.id));
+                        } catch (err) { /* ignore */ }
+                      }}
+                    >{'\u2715'}</span>
+                  )}
+                </div>
+              ))}
+              {isDocAuthor && !showAddExternalLink && (
+                <span
+                  style={{ fontSize: '12px', fontFamily: '"EB Garamond", Georgia, serif', color: '#999', cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={() => setShowAddExternalLink(true)}
+                >+ Add source link</span>
+              )}
+              {showAddExternalLink && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                  <input
+                    type="text"
+                    value={externalLinkInput}
+                    onChange={(e) => setExternalLinkInput(e.target.value)}
+                    placeholder="https://..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && externalLinkInput.trim()) {
+                        documentsAPI.addExternalLink(document.id, externalLinkInput.trim())
+                          .then(res => {
+                            setExternalLinks(prev => [...prev, res.data.link]);
+                            setExternalLinkInput('');
+                            setShowAddExternalLink(false);
+                          })
+                          .catch(() => {});
+                      }
+                    }}
+                    style={{ flex: 1, padding: '3px 8px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '13px', fontFamily: '"EB Garamond", Georgia, serif', outline: 'none', maxWidth: '350px' }}
+                  />
+                  <span
+                    style={{ fontSize: '13px', fontFamily: '"EB Garamond", Georgia, serif', color: '#333', cursor: 'pointer', textDecoration: 'underline' }}
+                    onClick={() => {
+                      if (!externalLinkInput.trim()) return;
+                      documentsAPI.addExternalLink(document.id, externalLinkInput.trim())
+                        .then(res => {
+                          setExternalLinks(prev => [...prev, res.data.link]);
+                          setExternalLinkInput('');
+                          setShowAddExternalLink(false);
+                        })
+                        .catch(() => {});
+                    }}
+                  >Add</span>
+                  <span
+                    style={{ fontSize: '13px', fontFamily: '"EB Garamond", Georgia, serif', color: '#999', cursor: 'pointer' }}
+                    onClick={() => { setShowAddExternalLink(false); setExternalLinkInput(''); }}
+                  >Cancel</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Phase 26a: Co-author management panel */}
           {showAuthorPanel && isDocAuthor && authorData.authors && (

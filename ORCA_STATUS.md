@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 1, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3)
+**Last Updated:** April 2, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41 planned — ORCID integration, document external links, corpus invite by username/ORCID)
 
 ---
 
@@ -59,10 +59,12 @@ CREATE TABLE users (
   password_hash VARCHAR(255),
   phone_hash VARCHAR(255),
   phone_lookup VARCHAR(64) UNIQUE,
+  orcid_id VARCHAR(19),
   token_issued_after TIMESTAMP,
   age_verified_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX idx_users_orcid ON users(orcid_id) WHERE orcid_id IS NOT NULL;
 ```
 
 **Key Points:**
@@ -75,6 +77,7 @@ CREATE TABLE users (
 - `phone_lookup` — HMAC-SHA256 of normalized phone number, keyed by `PHONE_LOOKUP_KEY` env var (Phase 33e). Deterministic — enables O(1) database lookup via UNIQUE index. Replaces the O(n) bcrypt scan previously used for login and registration uniqueness checks.
 - `token_issued_after` — timestamp used by "Log out everywhere" (Phase 32b). When set, auth middleware rejects any JWT with `iat <= token_issued_after`. Nullable — null means no sessions have been invalidated.
 - `age_verified_at` — timestamp recording when the user confirmed they are at least 18 years old during registration (Phase 36). Set once at account creation, never cleared. Nullable — null for users who registered before Phase 36 (test users backfilled with `NOW()` in migration).
+- `orcid_id` — verified ORCID iD in the format `0000-0000-0000-0000` (19 chars with dashes). Set via ORCID OAuth `/authenticate` flow (Phase 41a). Nullable — null for users who haven't linked an ORCID. Partial unique index (`WHERE orcid_id IS NOT NULL`) prevents two users from linking the same ORCID. Users can disconnect (set to NULL) at any time via their profile page. **Important:** Per ORCID's integration requirements, iDs must be authenticated via OAuth — users cannot manually type an ORCID iD.
 - **Note:** `last_active` column was originally planned for inactive user filtering. The inactive feature was redesigned to operate at the **corpus tab level on the Saved Page** instead — see Phase 8 (Inactive Corpus Tab Dormancy, now complete). No `last_active` column is needed on the users table.
 
 ---
@@ -541,7 +544,8 @@ CREATE TABLE documents (
   version_number INTEGER NOT NULL DEFAULT 1,
   source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
   tag_id INTEGER REFERENCES document_tags(id) ON DELETE SET NULL,
-  copyright_confirmed_at TIMESTAMP
+  copyright_confirmed_at TIMESTAMP,
+  external_url TEXT
 );
 
 CREATE INDEX idx_documents_uploaded_by ON documents(uploaded_by);
@@ -563,6 +567,11 @@ CREATE INDEX idx_documents_source ON documents(source_document_id);
   - New versions inherit the source document's `tag_id` automatically via `createVersion`.
 - **Phase 36 copyright confirmation column:**
   - `copyright_confirmed_at` — timestamp recording when the uploader confirmed they have the right to upload the content (owns it or it is public domain). Set per document at upload time. Required for both original uploads and version uploads. Nullable — null for documents uploaded before Phase 36.
+- **Phase 41c external URL column:**
+  - `external_url` — optional external source URL (e.g., arXiv link, DOI, journal URL) for the document. Set by the uploader or co-authors at upload time or any time after. Nullable — null for documents without an external link.
+  - **Version chain propagation:** Setting or clearing the external URL uses the same recursive CTE pattern as tag propagation (Phase 25a) — walks the full version chain and updates all versions simultaneously.
+  - New versions inherit the source document's `external_url` automatically via `createVersion`.
+  - **Validation:** Must start with `http://` or `https://`. Max 2000 characters. Authors-only edit (uploader or `document_authors`).
 - **LEFT JOIN requirement for `uploaded_by` (Phase 36 bug fix):** Because `uploaded_by` uses `ON DELETE SET NULL` (Phase 35c), it becomes NULL when the uploading user deletes their account. Any query that JOINs `users` via `uploaded_by` **must** use `LEFT JOIN`, not inner JOIN — otherwise the document silently disappears from results. This applies to all provenance FKs changed by Phase 35c (`created_by`, `added_by`, `uploaded_by`, etc.).
 - **File upload model (Phase 22a):** Documents are created by uploading files (.txt, .md, .pdf, .docx) or via drag-and-drop. There is no in-app text editor. Text is extracted server-side from uploaded files using `pdf-parse` (PDFs) and `mammoth` (Word docs). The `format` column stores the original file type. Document updates happen by uploading a new version (version chain via `source_document_id`), not by editing the body in-place.
 - **Edit endpoint retired (Phase 22a):** The `POST /api/corpuses/documents/:id/edit` endpoint and `adjustAnnotationOffsets` helper from Phase 21a are removed. The `diff-match-patch` dependency is also removed. Since documents can no longer be edited in-place, annotation offset adjustment is no longer needed — annotations remain stable against the uploaded text. Document "editing" is now accomplished by creating a new version.
@@ -1275,6 +1284,9 @@ CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_vot
 | GET | `/me` | Yes | Get current user info |
 | POST | `/logout-everywhere` | Yes | Sets `token_issued_after = NOW()`, invalidating all existing JWTs. (Phase 32b) |
 | POST | `/delete-account` | Yes | Permanently delete the user's account. Pre-check: user must own zero corpuses (transfer first). CASCADE deletes votes, subscriptions, tabs, messages, flags. SET NULL on concepts, edges, annotations, web links, documents `created_by`/`uploaded_by`. Returns 400 if user still owns corpuses. (Phase 35c) |
+| GET | `/orcid/authorize-url` | Yes | Returns the ORCID OAuth authorization URL for the frontend to redirect to. Constructs URL with client_id, /authenticate scope, and redirect_uri. (Phase 41a) |
+| POST | `/orcid/callback` | Yes | Exchanges the ORCID OAuth authorization code for a verified ORCID iD. Stores `orcid_id` on the user row. Returns 409 if ORCID already linked to another account. (Phase 41a) |
+| POST | `/orcid/disconnect` | Yes | Removes the ORCID iD from the user's account (sets `orcid_id = NULL`). (Phase 41a) |
 
 **Request/Response Examples:**
 
@@ -1305,6 +1317,15 @@ Response: { token, user: { id, username } }
 POST /api/auth/logout-everywhere  [Authorization: Bearer TOKEN]
 Response: { message: 'All sessions invalidated. Please log in again.' }
 ```
+
+---
+
+### Users (`/api/users`) — ✅ IMPLEMENTED (Phase 41a)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/:id/profile` | Guest OK | Returns user's public profile: username, orcid_id (if set), created_at, corpus count, document count. (Phase 41a) |
+| GET | `/search` | Required | Search users by username (ILIKE prefix match) or ORCID iD (exact match). Query: `?q=searchterm`. Returns max 10 results, excludes requesting user. (Phase 41d) |
 
 ---
 
@@ -1556,6 +1577,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/:corpusId/allowed-users` | Required | Get corpus members — owner sees full list with usernames; others see count only (Phase 7g, updated 26b) |
 | POST | `/allowed-users/remove` | Owner only | Remove an allowed user from a corpus (Phase 7g) |
 | POST | `/allowed-users/display-name` | — | ⛔ Returns 410 Gone (Phase 26b) — display names retired |
+| POST | `/:id/invite-user` | Owner only | Directly add a user to corpus by userId. Body: `{ userId }`. Checks user exists, not already a member, not the owner. Returns 409 if already a member. (Phase 41d) |
 | GET | `/:corpusId/removal-log` | — | ⛔ Returns 410 Gone (Phase 26c) — annotation deletion removed |
 | GET | `/:corpusId/allowed-status` | Required | Check if current user is an allowed user of a corpus (Phase 7g) |
 | POST | `/versions/create` | Author only | Create a new version of a document within a corpus — uploader or co-author via `document_authors`. Requires `copyrightConfirmed: true` in request body; sets `copyright_confirmed_at = NOW()` on the new version row (Phase 36). **Copies all `document_annotations` and `annotation_votes` from source to new version** (annotations are carried forward so version-aware threads and navigation work). Does NOT copy `message_threads`. (Phase 7h, updated 26a, annotation copy Phase 31d, copyright Phase 36) |
@@ -1593,6 +1615,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/:id/version-annotation-map` | Guest OK | Get annotation fingerprints across all versions in a document's lineage. Returns `{annotations: [{document_id, version_number, edge_id, quote_text}, ...]}`. Uses bidirectional recursive CTE (chain_up + chain_down). Powers version navigation buttons on annotation cards. (Phase 31d) |
 | POST | `/:id/delete` | Uploader only | Permanently delete a single document version. Cascades to annotations, messages, favorites, cache, corpus_documents. Downstream versions referencing this one get `source_document_id = NULL`. Returns `{ deletedDocumentId }`. (Phase 35a) |
 | GET | `/:id/citations` | Guest OK | Get all citation links for a document. Returns live annotation data when `cited_annotation_id` is not null, snapshot data with `unavailable: true` when it is. (Phase 38j) |
+| POST | `/:id/external-url` | Author only | Set, update, or remove the external URL. Body: `{ url }` (string or null). Permission: `uploaded_by` or `document_authors` member. Propagates across the full version chain via recursive CTE. (Phase 41c) |
 
 ### Combos (`/api/combos`) — ✅ IMPLEMENTED (Phase 39a)
 
@@ -1715,6 +1738,9 @@ orca/
     │   │   ├── HiddenConceptsView.jsx # Hidden concepts review panel — flag counts, hide/show voting, comments, admin unhide (Phase 16c)
     │   │   ├── InfoPage.jsx          # Informational page with community comments (Phase 30g) — Using Orca, Constitution, Donate
     │   │   ├── OrphanRescueModal.jsx # Orphan rescue modal — rescues allowed users' orphaned documents (Phase 9b)
+    │   │   ├── OrcidBadge.jsx        # Small green ORCID iD icon linking to user's ORCID profile (Phase 41b)
+    │   │   ├── OrcidCallback.jsx     # Handles ORCID OAuth redirect — extracts code param, calls backend, redirects to profile (Phase 41a)
+    │   │   ├── ProfilePage.jsx       # User profile page — username, ORCID connect/disconnect, public stats (Phase 41a)
     │   │   ├── SavedPageOverlay.jsx # Standalone Saved Page with corpus tabs (Phase 7c; dormancy UI removed Phase 30a)
     │   │   ├── ProtectedRoute.jsx  # Auth route wrapper
     │   │   ├── SearchField.jsx     # Combined Add/Search field with dropdown
@@ -1775,6 +1801,11 @@ TWILIO_VERIFY_SERVICE_SID=your_twilio_verify_service_sid
 ADMIN_USER_ID=1
 ENABLED_ATTRIBUTES=value,action,tool,question
 ENABLED_DOCUMENT_TAGS=preprint,protocol,grant application,review article,dataset,thesis,textbook,lecture notes,commentary
+
+# ORCID OAuth (Phase 41a)
+ORCID_CLIENT_ID=your_orcid_client_id
+ORCID_CLIENT_SECRET=your_orcid_client_secret
+ORCID_REDIRECT_URI=http://localhost:3000/orcid/callback
 ```
 
 **Important:** The `.env` file is gitignored. Use `.env.example` as template.
@@ -2043,6 +2074,17 @@ This only needs to be done once per database. If you drop and recreate the datab
 192. **Password Login Replaces OTP Login (Phase 40b):** Normal login uses username/email + password via `POST /auth/login`. Phone OTP is used only during registration (to verify the phone is real) and during password reset (to prove identity). The `verify-login` endpoint is removed. The `password_hash` column on `users` (dormant since Phase 32d) is reactivated. Passwords are hashed with bcryptjs (10 salt rounds). The login endpoint accepts either username or email as the identifier, detecting which one via the presence of `@`. Login rate-limited to 10 req/IP/15 min.
 193. **Password Strength via zxcvbn (Phase 40b):** Passwords must be at least 8 characters (max 128) and score >= 2 on the zxcvbn scale (0-4). This follows NIST SP 800-63B recommendations: enforce minimum length, check against common/breached passwords, but do NOT require arbitrary complexity rules (uppercase, special chars, etc.). The zxcvbn library is passed the user's username and email as penalty inputs so passwords containing the user's own info are scored lower. The zxcvbn feedback messages are returned directly to the frontend for display.
 194. **Forgot Password Uses Phone Number as Identifier (Phase 40b):** The forgot-password flow requires the user to enter their phone number (not username/email) because phone numbers are stored as irreversible hashes (bcrypt + HMAC). The system cannot look up a user's phone number from their username to send an OTP. The phone number serves as both the identifier and the verification channel. The endpoint returns a generic success message regardless of whether the phone exists (security best practice to prevent account enumeration).
+195. **ORCID Verified via OAuth Only (Phase 41a):** Users cannot manually type an ORCID iD. Per ORCID's integration requirements, iDs must be authenticated via the OAuth flow. The profile page has a "Connect ORCID" button, not a text input. The flow: frontend redirects to ORCID → user authenticates → ORCID redirects back with authorization code → backend exchanges code for verified ORCID iD via server-to-server token exchange → stores `orcid_id` on user row.
+196. **ORCID Access Tokens Not Stored (Phase 41a):** Orca only uses the `/authenticate` scope to get the verified ORCID iD. The access token from the OAuth exchange is used once and discarded. Orca never reads or writes ORCID record data — it only confirms the iD belongs to the user.
+197. **Profile Page Is Read-Only for Others (Phase 41a):** Any user (including guests) can view a profile page at `/profile/:userId` to see username, ORCID link, and public stats (corpus count, document count). Only the profile owner sees the "Connect/Disconnect ORCID" button. Username in the AppShell header links to the user's own profile.
+198. **ORCID Uniqueness at Application Level (Phase 41a):** A unique partial index on `users.orcid_id WHERE orcid_id IS NOT NULL` prevents two users from linking the same ORCID. The backend returns 409 Conflict if a duplicate is attempted.
+199. **ORCID Badge Placement Is Strategic (Phase 41b):** ORCID icons appear only where a username represents authorship or membership — document uploaders, corpus members/owners, annotation creators, and corpus list/detail views. They do NOT appear in every username occurrence (e.g., not in the AppShell header, not in page comments, not in moderation views). The badge is a small green ORCID iD icon (16x16px) that links to the user's ORCID profile in a new tab.
+200. **One External URL Per Document (Phase 41c):** Documents have a single `external_url` column, not a many-to-many table. If a paper has both an arXiv link and a DOI, the author picks one. This keeps the UI clean and avoids the complexity of link management. The URL displays at the top of the document viewer for all users.
+201. **External URL Propagates Across Version Chain (Phase 41c):** Setting or clearing the external URL updates all versions in the chain simultaneously, using the same recursive CTE pattern as document tag propagation (Phase 25a). New versions inherit the source document's `external_url`.
+202. **External URL Authors-Only Edit (Phase 41c):** Only the document uploader (`uploaded_by`) or co-authors (`document_authors`) can set/change/remove the external URL. Corpus owners cannot — this is the author's metadata about their work.
+203. **Direct Add for Corpus Invite by Username/ORCID (Phase 41d):** Searching by username or ORCID adds the user directly to `corpus_allowed_users`, skipping an accept/decline flow. This is simpler than building a notification system and mirrors how invite links work (the owner generates the access; the user just shows up). Users can always "Leave corpus" if added unwantedly.
+204. **User Search Requires Authentication (Phase 41d):** The `GET /api/users/search` endpoint requires login. This prevents anonymous scraping of usernames and ORCID associations. Username search is prefix-match (ILIKE), ORCID search is exact match. Max 10 results, excludes the requesting user.
+205. **ORCID Search Is Exact Match (Phase 41d):** When the search query looks like an ORCID iD (digits with dashes), the backend does an exact match on `users.orcid_id`. No fuzzy matching on ORCID iDs — they're precise identifiers.
 
 ### Common Tasks
 
@@ -2251,6 +2293,11 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 39:** Combos ✅ COMPLETE (39a: backend infrastructure, 39b: Browse Combos overlay, 39c: combo persistent tab, 39d: add to combo from graph, 39e: polish + DnD + tab groups + invite link options)
 - **Phase 40:** Subscribed Sort Option ✅ COMPLETE — "Subscribed" sort ranks annotations by votes from members of the user's subscribed corpuses. Added to CorpusTabContent, ConceptAnnotationPanel, and ComboTabContent. Backend CTE computes subscribed_vote_count per annotation. Hidden for guests.
 - **Phase 40b:** Password Login ✅ COMPLETE — password login replaces OTP login, phone OTP retained for registration and password reset only, zxcvbn strength validation, forgot-password flow via phone OTP
+- **Phase 41:** ORCID Integration, Document External Links, Corpus Invite Enhancements — 🔲 PLANNED
+  - **Phase 41a:** Profile Page + ORCID OAuth Verification 🔲 (new `users.orcid_id` column, profile route `/profile/:userId`, ORCID OAuth `/authenticate` flow, Connect/Disconnect ORCID button, public profile stats)
+  - **Phase 41b:** ORCID Display Across UI 🔲 (OrcidBadge.jsx component, `orcid_id` returned alongside usernames in corpus/document/annotation endpoints, displayed next to usernames in doc viewer, corpus members panel, annotation cards, corpus list/detail)
+  - **Phase 41c:** Document External Links 🔲 (new `documents.external_url` column, set/edit/remove endpoint with version chain propagation, display at top of doc viewer, optional field in upload form, authors-only edit)
+  - **Phase 41d:** Corpus Invite by Username/ORCID Lookup 🔲 (new `GET /api/users/search` endpoint, new `POST /api/corpuses/:id/invite-user` endpoint, search-as-you-type in CorpusMembersPanel, direct-add to corpus_allowed_users)
   - **Phase 28a:** Visual Cleanup — Icons, Fonts, Colors ✅ (all emoji icons removed from UI chrome, EB Garamond applied everywhere via Google Fonts import + explicit fontFamily, all colored buttons converted to black-on-off-white Zen aesthetic, all italics removed, × close buttons kept)
   - **Phase 28b:** UI Removals — Ranking & Supergroups ✅ (child rankings UI removed, Layer 3 super-groups removed, ranking cleanup queries cleaned up in removeVote/removeVoteFromTab/addSwapVote)
   - **Phase 28c:** Rename & Title Changes ✅ ("Saved" → "Graph Votes" across all user-facing text in AppShell/SavedPageOverlay/Saved/SavedTabContent, sort dropdown "↓ Saves" → "↓ Votes", SwapModal/VoteSetBar/ConceptGrid/AnnotationPanel "saves" → "votes", FlipView badge "Saved" → "Voted", browser tab title "Concept Hierarchy" → "orca")
@@ -3065,6 +3112,115 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 **Architecture Decision #230 — Forgot Password Uses Phone Number as Identifier (Phase 40b):** The forgot-password flow requires the user to enter their phone number because phone numbers are stored as irreversible hashes. The endpoint returns a generic success message regardless of whether the phone exists (prevents account enumeration).
 
 **Suggested git commit:** `feat: 40b — password login with phone OTP for registration and password reset, zxcvbn strength validation`
+
+---
+
+---
+
+### Phase 41: ORCID Integration, Document External Links, Corpus Invite Enhancements — 🔲 PLANNED
+
+**Goal:** Three interconnected features: (1) users can verify and link their ORCID iD via OAuth, with verified iDs displayed as subtle icons next to usernames; (2) documents can have an external source URL (e.g., arXiv) visible to all users; (3) corpus owners can invite members by searching usernames or ORCID iDs, in addition to the existing invite link method.
+
+#### Phase 41a: Profile Page + ORCID OAuth Verification — 🔲 PLANNED
+
+**Goal:** Add a user profile page accessible by clicking any username. The logged-in user's own profile includes a "Connect ORCID" button that initiates the ORCID OAuth flow to verify and store their ORCID iD. Other users' profiles are read-only.
+
+**Database changes:**
+- Add `orcid_id VARCHAR(19)` column to `users` table (nullable)
+- Add unique partial index: `CREATE UNIQUE INDEX idx_users_orcid ON users(orcid_id) WHERE orcid_id IS NOT NULL`
+
+**New environment variables:** `ORCID_CLIENT_ID`, `ORCID_CLIENT_SECRET`, `ORCID_REDIRECT_URI`
+
+**Backend changes:**
+- New `GET /api/auth/orcid/authorize-url` — returns ORCID OAuth URL with `/authenticate` scope
+- New `POST /api/auth/orcid/callback` — exchanges authorization code for verified ORCID iD via server-to-server token exchange (`POST https://orcid.org/oauth/token`), stores on user row, 409 if duplicate
+- New `POST /api/auth/orcid/disconnect` — sets `orcid_id = NULL`
+- New `GET /api/users/:id/profile` — returns public profile data (username, orcid_id, created_at, corpus count, document count)
+
+**Frontend changes:**
+- New `ProfilePage.jsx` — route `/profile/:userId`, shows username, ORCID link (if set), stats. Owner sees Connect/Disconnect ORCID button.
+- New `OrcidCallback.jsx` — route `/orcid/callback`, extracts `code` query param, calls backend, redirects to profile
+- AppShell header username becomes clickable link to own profile
+- New routes in `App.jsx`: `/profile/:userId`, `/orcid/callback`
+- New API functions: `getOrcidAuthorizeUrl()`, `orcidCallback(code)`, `disconnectOrcid()`, `getUserProfile(userId)`
+
+**ORCID OAuth flow:**
+1. User clicks "Connect ORCID" → frontend calls `GET /api/auth/orcid/authorize-url`
+2. Backend returns URL: `https://orcid.org/oauth/authorize?client_id=APP-XXX&response_type=code&scope=/authenticate&redirect_uri=...`
+3. Frontend redirects to this URL (window.location)
+4. User authenticates at ORCID, grants access → ORCID redirects to `/orcid/callback?code=XYZ`
+5. `OrcidCallback.jsx` catches route, sends `POST /api/auth/orcid/callback` with `{ code }`
+6. Backend exchanges code via `POST https://orcid.org/oauth/token` → gets `{ orcid: "0000-0001-2345-6789" }`
+7. Backend stores `orcid_id`, returns success → frontend redirects to profile page
+
+**Architecture Decisions:** #231 (OAuth only, no manual entry), #232 (access tokens not stored), #233 (read-only for others), #234 (uniqueness via partial index)
+
+**Pre-requisites:** Register for ORCID Public API credentials (free) at orcid.org Developer Tools. For development, use ORCID sandbox (`sandbox.orcid.org`). Register `http://localhost:3000/orcid/callback` as redirect URI for dev, `https://orcaconcepts.org/orcid/callback` for production.
+
+#### Phase 41b: ORCID Display Across UI — 🔲 PLANNED
+
+**Goal:** Where Orca displays a username and that user has a verified ORCID, show a small green ORCID iD icon next to the name that links to their ORCID profile in a new tab.
+
+**Backend changes:** Modify the following endpoints to include `orcid_id` in user-related response data (via LEFT JOIN to users table):
+- `GET /api/corpuses/:id` — owner's `orcid_id`
+- `GET /api/corpuses` — owner's `orcid_id`
+- `GET /api/corpuses/:corpusId/allowed-users` — each member's `orcid_id`
+- `GET /api/corpuses/:corpusId/documents/:documentId/annotations` — creator's `orcid_id`
+- `GET /api/corpuses/annotations/concept/:conceptId` — creator's `orcid_id`
+- `GET /api/documents/:id` — uploader's `orcid_id`
+
+**Frontend changes:**
+- New `OrcidBadge.jsx` — accepts `orcidId` prop, renders small green iD icon (16x16px) linking to `https://orcid.org/{orcidId}` in new tab. Renders nothing if null.
+- Update `CorpusTabContent.jsx` — badge next to document uploader name and annotation creator names
+- Update `CorpusMembersPanel.jsx` — badge next to each member username
+- Update `ConceptAnnotationPanel.jsx` — badge next to annotation creator names
+- Update `CorpusDetailView.jsx` — badge next to corpus owner name
+- Update `CorpusListView.jsx` — badge next to corpus owner name
+
+**Architecture Decisions:** #235 (icon is a link, not tooltip), #236 (strategic placement — authorship/membership contexts only)
+
+#### Phase 41c: Document External Links — 🔲 PLANNED
+
+**Goal:** Allow document authors to attach an external source URL (e.g., arXiv link, DOI, journal URL) to a document. The link displays at the top of the document viewer for all users. Propagates across version chain.
+
+**Database changes:**
+- Add `external_url TEXT` column to `documents` table (nullable)
+
+**Backend changes:**
+- New `POST /api/documents/:id/external-url` — set/update/remove external URL. Body: `{ url }` (string or null). Author-only permission (`uploaded_by` or `document_authors`). Version chain propagation via recursive CTE (same pattern as tag propagation).
+- Update `POST /api/corpuses/:id/documents/upload` — accept optional `externalUrl` field
+- Update `POST /api/corpuses/versions/create` — new versions inherit `external_url` from source
+- Update `GET /api/documents/:id` and `GET /api/corpuses/:id` — include `external_url` in response
+- URL validation: must start with `http://` or `https://`, max 2000 characters
+
+**Frontend changes:**
+- `CorpusTabContent.jsx` — display external URL at top of document body (below title/metadata, above text). Format: `Source: {url} ↗` with truncated display. Only visible if set.
+- `CorpusUploadForm.jsx` — optional "External source URL" text input below file picker
+- `CorpusTabContent.jsx` — "Edit link" button for authors, inline form to set/change/remove URL
+- New API function: `setDocumentExternalUrl(documentId, url)`
+
+**Architecture Decisions:** #237 (one URL per doc), #238 (version chain propagation), #239 (authors-only edit)
+
+#### Phase 41d: Corpus Invite by Username/ORCID Lookup — 🔲 PLANNED
+
+**Goal:** Expand corpus invitation to support three methods: invite link (existing), search by username, and search by ORCID. Direct-add (no accept/decline notification flow).
+
+**Backend changes:**
+- New `GET /api/users/search` — search by username (ILIKE prefix match) or ORCID (exact match). Query: `?q=searchterm` (min 2 chars). Auth required. Max 10 results. Excludes requesting user. Detects ORCID format (digits with dashes) vs username automatically.
+- New `POST /api/corpuses/:id/invite-user` — owner-only. Body: `{ userId }`. Verifies user exists, not already a member, not the owner. Inserts into `corpus_allowed_users`. Returns 409 if already a member.
+
+**Frontend changes:**
+- `CorpusMembersPanel.jsx` — new "Add member" section below invite link section (owner-only). Search input with placeholder "Search by username or ORCID". Debounced search (300ms, min 2 chars) calls `/api/users/search`. Dropdown results show username + OrcidBadge + "Add" button. Success refreshes member list. 409 shows "Already a member."
+- New API functions: `searchUsers(query)`, `inviteUserToCorpus(corpusId, userId)`
+
+**Architecture Decisions:** #240 (direct add, not invitation), #241 (search requires auth), #242 (ORCID exact match)
+
+#### Phase 41 Implementation Priority
+
+1. **41a** — Profile page + ORCID OAuth (foundation for everything else)
+2. **41b** — ORCID display in UI (depends on 41a)
+3. **41c** — Document external links (independent, can run in parallel with 41b)
+4. **41d** — Corpus invite by username/ORCID (depends on 41a for ORCID search)
 
 ---
 

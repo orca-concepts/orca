@@ -459,6 +459,16 @@ export const documentsAPI = {
   // Phase 38j: Get citations for a document (guest OK)
   getCitations: (documentId) =>
     api.get(`/documents/${documentId}/citations`),
+
+  // Phase 41c: Document external links (multiple per document)
+  getExternalLinks: (documentId) =>
+    api.get(`/documents/${documentId}/external-links`),
+
+  addExternalLink: (documentId, url) =>
+    api.post(`/documents/${documentId}/external-links/add`, { url }),
+
+  removeExternalLink: (documentId, linkId) =>
+    api.post(`/documents/${documentId}/external-links/${linkId}/remove`),
 };
 
 // Phase 38j: Citation resolution
