@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 2, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41 planned — ORCID integration, document external links, corpus invite by username/ORCID)
+**Last Updated:** April 2, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a/41b/41d planned — ORCID integration, corpus invite by username/ORCID)
 
 ---
 
@@ -544,8 +544,7 @@ CREATE TABLE documents (
   version_number INTEGER NOT NULL DEFAULT 1,
   source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
   tag_id INTEGER REFERENCES document_tags(id) ON DELETE SET NULL,
-  copyright_confirmed_at TIMESTAMP,
-  external_url TEXT
+  copyright_confirmed_at TIMESTAMP
 );
 
 CREATE INDEX idx_documents_uploaded_by ON documents(uploaded_by);
@@ -567,11 +566,6 @@ CREATE INDEX idx_documents_source ON documents(source_document_id);
   - New versions inherit the source document's `tag_id` automatically via `createVersion`.
 - **Phase 36 copyright confirmation column:**
   - `copyright_confirmed_at` — timestamp recording when the uploader confirmed they have the right to upload the content (owns it or it is public domain). Set per document at upload time. Required for both original uploads and version uploads. Nullable — null for documents uploaded before Phase 36.
-- **Phase 41c external URL column:**
-  - `external_url` — optional external source URL (e.g., arXiv link, DOI, journal URL) for the document. Set by the uploader or co-authors at upload time or any time after. Nullable — null for documents without an external link.
-  - **Version chain propagation:** Setting or clearing the external URL uses the same recursive CTE pattern as tag propagation (Phase 25a) — walks the full version chain and updates all versions simultaneously.
-  - New versions inherit the source document's `external_url` automatically via `createVersion`.
-  - **Validation:** Must start with `http://` or `https://`. Max 2000 characters. Authors-only edit (uploader or `document_authors`).
 - **LEFT JOIN requirement for `uploaded_by` (Phase 36 bug fix):** Because `uploaded_by` uses `ON DELETE SET NULL` (Phase 35c), it becomes NULL when the uploading user deletes their account. Any query that JOINs `users` via `uploaded_by` **must** use `LEFT JOIN`, not inner JOIN — otherwise the document silently disappears from results. This applies to all provenance FKs changed by Phase 35c (`created_by`, `added_by`, `uploaded_by`, etc.).
 - **File upload model (Phase 22a):** Documents are created by uploading files (.txt, .md, .pdf, .docx) or via drag-and-drop. There is no in-app text editor. Text is extracted server-side from uploaded files using `pdf-parse` (PDFs) and `mammoth` (Word docs). The `format` column stores the original file type. Document updates happen by uploading a new version (version chain via `source_document_id`), not by editing the body in-place.
 - **Edit endpoint retired (Phase 22a):** The `POST /api/corpuses/documents/:id/edit` endpoint and `adjustAnnotationOffsets` helper from Phase 21a are removed. The `diff-match-patch` dependency is also removed. Since documents can no longer be edited in-place, annotation offset adjustment is no longer needed — annotations remain stable against the uploaded text. Document "editing" is now accomplished by creating a new version.
@@ -1175,6 +1169,31 @@ CREATE INDEX idx_citation_links_cited_annotation ON document_citation_links(cite
 - Snapshot metadata (`snapshot_concept_name`, `snapshot_quote_text`, `snapshot_document_title`, `snapshot_corpus_name`) stored at detection time for dead-link resilience
 - `ON DELETE CASCADE` from `citing_document_id` ensures cleanup when the citing document is deleted
 
+#### `document_external_links` — ✅ IMPLEMENTED (Phase 41c)
+External source URLs (arXiv links, DOIs, journal URLs) attached to documents. Links are stored against the **root document** in the version chain — all versions share one set of links, with no propagation needed (same pattern as `document_authors`).
+
+```sql
+CREATE TABLE document_external_links (
+  id SERIAL PRIMARY KEY,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_document_external_links_doc ON document_external_links(document_id);
+```
+
+**Key Points:**
+- `document_id` references the **root document** in the version chain. When adding/removing/querying links for any version, the backend walks up via `getRootDocumentId()` to find the root, then operates on that ID. All versions in the lineage automatically see the same links.
+- Multiple links per document — a paper can have both an arXiv link and a DOI, for example
+- `added_by` uses `ON DELETE SET NULL` — links survive if the adding user deletes their account
+- Duplicate URL check: same URL on the same root document returns 409 Conflict
+- URL validation: must start with `http://` or `https://`, max 2000 characters
+- Permission: only document authors (uploader or `document_authors` members) can add or remove links
+- `ON DELETE CASCADE` from `document_id` ensures cleanup when the root document is deleted
+- Links displayed at the top of the document viewer in `CorpusTabContent`, below the title/metadata bar
+
 #### `combos` — ✅ IMPLEMENTED (Phase 39a)
 User-created collections of edges (concepts-in-context) from across the graph system. Combos group related concepts from different graphs and attributes, presenting a unified view of all annotations attached to those edges.
 
@@ -1601,7 +1620,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | ~~POST~~ | ~~`/:parentId/add-subcorpus`~~ | ~~Owner/Allowed~~ | ~~Set an existing corpus as a sub-corpus of a parent (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
 | ~~POST~~ | ~~`/:parentId/remove-subcorpus`~~ | ~~Owner/Allowed~~ | ~~Remove a sub-corpus link — corpus becomes top-level (Phase 12a)~~ — ❌ REMOVED (Phase 19a) |
 
-### Documents (`/api/documents`) — ✅ IMPLEMENTED (Phase 7a, extended Phase 17a, 21c, 31d, 38j)
+### Documents (`/api/documents`) — ✅ IMPLEMENTED (Phase 7a, extended Phase 17a, 21c, 31d, 38j, 41c)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -1615,7 +1634,9 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/:id/version-annotation-map` | Guest OK | Get annotation fingerprints across all versions in a document's lineage. Returns `{annotations: [{document_id, version_number, edge_id, quote_text}, ...]}`. Uses bidirectional recursive CTE (chain_up + chain_down). Powers version navigation buttons on annotation cards. (Phase 31d) |
 | POST | `/:id/delete` | Uploader only | Permanently delete a single document version. Cascades to annotations, messages, favorites, cache, corpus_documents. Downstream versions referencing this one get `source_document_id = NULL`. Returns `{ deletedDocumentId }`. (Phase 35a) |
 | GET | `/:id/citations` | Guest OK | Get all citation links for a document. Returns live annotation data when `cited_annotation_id` is not null, snapshot data with `unavailable: true` when it is. (Phase 38j) |
-| POST | `/:id/external-url` | Author only | Set, update, or remove the external URL. Body: `{ url }` (string or null). Permission: `uploaded_by` or `document_authors` member. Propagates across the full version chain via recursive CTE. (Phase 41c) |
+| GET | `/:id/external-links` | Guest OK | Get all external links for a document. Resolves to root document — all versions share one set of links. Returns `{ links: [{ id, url, added_by, added_by_username, created_at }] }`. (Phase 41c) |
+| POST | `/:id/external-links/add` | Author only | Add an external link to a document. Body: `{ url }`. Validates URL format (http/https, max 2000 chars). Returns 409 for duplicate URL on same document. Permission: `uploaded_by` or `document_authors` member. (Phase 41c) |
+| POST | `/:id/external-links/:linkId/remove` | Author only | Remove an external link from a document. Permission: `uploaded_by` or `document_authors` member. (Phase 41c) |
 
 ### Combos (`/api/combos`) — ✅ IMPLEMENTED (Phase 39a)
 
@@ -2079,9 +2100,9 @@ This only needs to be done once per database. If you drop and recreate the datab
 197. **Profile Page Is Read-Only for Others (Phase 41a):** Any user (including guests) can view a profile page at `/profile/:userId` to see username, ORCID link, and public stats (corpus count, document count). Only the profile owner sees the "Connect/Disconnect ORCID" button. Username in the AppShell header links to the user's own profile.
 198. **ORCID Uniqueness at Application Level (Phase 41a):** A unique partial index on `users.orcid_id WHERE orcid_id IS NOT NULL` prevents two users from linking the same ORCID. The backend returns 409 Conflict if a duplicate is attempted.
 199. **ORCID Badge Placement Is Strategic (Phase 41b):** ORCID icons appear only where a username represents authorship or membership — document uploaders, corpus members/owners, annotation creators, and corpus list/detail views. They do NOT appear in every username occurrence (e.g., not in the AppShell header, not in page comments, not in moderation views). The badge is a small green ORCID iD icon (16x16px) that links to the user's ORCID profile in a new tab.
-200. **One External URL Per Document (Phase 41c):** Documents have a single `external_url` column, not a many-to-many table. If a paper has both an arXiv link and a DOI, the author picks one. This keeps the UI clean and avoids the complexity of link management. The URL displays at the top of the document viewer for all users.
-201. **External URL Propagates Across Version Chain (Phase 41c):** Setting or clearing the external URL updates all versions in the chain simultaneously, using the same recursive CTE pattern as document tag propagation (Phase 25a). New versions inherit the source document's `external_url`.
-202. **External URL Authors-Only Edit (Phase 41c):** Only the document uploader (`uploaded_by`) or co-authors (`document_authors`) can set/change/remove the external URL. Corpus owners cannot — this is the author's metadata about their work.
+200. **Multiple External Links Per Document via Root Document (Phase 41c):** External links use a separate `document_external_links` table rather than a column on `documents`. This allows multiple links (arXiv, DOI, journal URL, etc.) per document. Links are stored against the root document in the version chain — all versions share one set of links automatically, with no propagation needed. This follows the same pattern as `document_authors`.
+201. **External Links Authors-Only Edit (Phase 41c):** Only the document uploader (`uploaded_by`) or co-authors (`document_authors`) can add or remove external links. Corpus owners cannot — this is the author's metadata about their work. Duplicate URLs on the same document are rejected (409 Conflict).
+202. **External Links Displayed Below Document Metadata (Phase 41c):** External links render at the top of the document viewer in CorpusTabContent, below the title/metadata row and above the document body. Each link shows a truncated URL (60 char max) with an external link arrow (↗). Authors see ✕ remove buttons and an "+ Add source link" toggle. Links are not shown in the upload form — authors add them after upload via the document viewer.
 203. **Direct Add for Corpus Invite by Username/ORCID (Phase 41d):** Searching by username or ORCID adds the user directly to `corpus_allowed_users`, skipping an accept/decline flow. This is simpler than building a notification system and mirrors how invite links work (the owner generates the access; the user just shows up). Users can always "Leave corpus" if added unwantedly.
 204. **User Search Requires Authentication (Phase 41d):** The `GET /api/users/search` endpoint requires login. This prevents anonymous scraping of usernames and ORCID associations. Username search is prefix-match (ILIKE), ORCID search is exact match. Max 10 results, excludes the requesting user.
 205. **ORCID Search Is Exact Match (Phase 41d):** When the search query looks like an ORCID iD (digits with dashes), the backend does an exact match on `users.orcid_id`. No fuzzy matching on ORCID iDs — they're precise identifiers.
@@ -2296,7 +2317,7 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 41:** ORCID Integration, Document External Links, Corpus Invite Enhancements — 🔲 PLANNED
   - **Phase 41a:** Profile Page + ORCID OAuth Verification 🔲 (new `users.orcid_id` column, profile route `/profile/:userId`, ORCID OAuth `/authenticate` flow, Connect/Disconnect ORCID button, public profile stats)
   - **Phase 41b:** ORCID Display Across UI 🔲 (OrcidBadge.jsx component, `orcid_id` returned alongside usernames in corpus/document/annotation endpoints, displayed next to usernames in doc viewer, corpus members panel, annotation cards, corpus list/detail)
-  - **Phase 41c:** Document External Links 🔲 (new `documents.external_url` column, set/edit/remove endpoint with version chain propagation, display at top of doc viewer, optional field in upload form, authors-only edit)
+  - **Phase 41c:** Document External Links ✅ COMPLETE (new `document_external_links` table, add/remove/get endpoints, multiple links per document stored on root doc, display in doc viewer with author add/remove UI)
   - **Phase 41d:** Corpus Invite by Username/ORCID Lookup 🔲 (new `GET /api/users/search` endpoint, new `POST /api/corpuses/:id/invite-user` endpoint, search-as-you-type in CorpusMembersPanel, direct-add to corpus_allowed_users)
   - **Phase 28a:** Visual Cleanup — Icons, Fonts, Colors ✅ (all emoji icons removed from UI chrome, EB Garamond applied everywhere via Google Fonts import + explicit fontFamily, all colored buttons converted to black-on-off-white Zen aesthetic, all italics removed, × close buttons kept)
   - **Phase 28b:** UI Removals — Ranking & Supergroups ✅ (child rankings UI removed, Layer 3 super-groups removed, ranking cleanup queries cleaned up in removeVote/removeVoteFromTab/addSwapVote)
@@ -3179,27 +3200,28 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 **Architecture Decisions:** #235 (icon is a link, not tooltip), #236 (strategic placement — authorship/membership contexts only)
 
-#### Phase 41c: Document External Links — 🔲 PLANNED
+#### Phase 41c: Document External Links — ✅ COMPLETE
 
-**Goal:** Allow document authors to attach an external source URL (e.g., arXiv link, DOI, journal URL) to a document. The link displays at the top of the document viewer for all users. Propagates across version chain.
+**Goal:** Allow document authors to attach external source URLs (arXiv links, DOIs, journal URLs) to a document. Multiple links per document. Links display at the top of the document viewer for all users. All versions share one set of links via root document storage.
 
 **Database changes:**
-- Add `external_url TEXT` column to `documents` table (nullable)
+- New `document_external_links` table — `id`, `document_id` (FK to root doc, ON DELETE CASCADE), `url` (TEXT), `added_by` (FK to users, ON DELETE SET NULL), `created_at`
+- Index on `document_id` for fast lookups
+- Originally implemented as a single `external_url` column on `documents`; redesigned to a separate table to support multiple links per document
 
 **Backend changes:**
-- New `POST /api/documents/:id/external-url` — set/update/remove external URL. Body: `{ url }` (string or null). Author-only permission (`uploaded_by` or `document_authors`). Version chain propagation via recursive CTE (same pattern as tag propagation).
-- Update `POST /api/corpuses/:id/documents/upload` — accept optional `externalUrl` field
-- Update `POST /api/corpuses/versions/create` — new versions inherit `external_url` from source
-- Update `GET /api/documents/:id` and `GET /api/corpuses/:id` — include `external_url` in response
-- URL validation: must start with `http://` or `https://`, max 2000 characters
+- New `GET /api/documents/:id/external-links` — guest-accessible. Returns all links for a document, resolving to root document via `getRootDocumentId()`. LEFT JOIN on users for `added_by_username`.
+- New `POST /api/documents/:id/external-links/add` — author-only (`isDocumentAuthor` check). URL validation (http/https, max 2000 chars). Duplicate URL returns 409.
+- New `POST /api/documents/:id/external-links/:linkId/remove` — author-only. Verifies link belongs to the document's root.
+- Three handlers in `corpusController.js`: `getDocumentExternalLinks`, `addDocumentExternalLink`, `removeDocumentExternalLink`
+- Three routes in `documents.js`
 
 **Frontend changes:**
-- `CorpusTabContent.jsx` — display external URL at top of document body (below title/metadata, above text). Format: `Source: {url} ↗` with truncated display. Only visible if set.
-- `CorpusUploadForm.jsx` — optional "External source URL" text input below file picker
-- `CorpusTabContent.jsx` — "Edit link" button for authors, inline form to set/change/remove URL
-- New API function: `setDocumentExternalUrl(documentId, url)`
+- `api.js` — three new methods in `documentsAPI`: `getExternalLinks`, `addExternalLink`, `removeExternalLink`
+- `CorpusTabContent.jsx` — external links display below document metadata, above body. Each link shows truncated URL (60 chars) with ↗ icon. Authors see ✕ remove buttons and "+ Add source link" toggle with inline input form. State: `externalLinks`, `showAddExternalLink`, `externalLinkInput`. Links loaded alongside citations when document opens; state cleared on back-to-list.
+- Upload form does NOT include an external link field — authors add links after upload via the doc viewer UI (cleaner for multiple links)
 
-**Architecture Decisions:** #237 (one URL per doc), #238 (version chain propagation), #239 (authors-only edit)
+**Architecture Decisions:** #200 (multiple links via root doc table), #201 (authors-only edit), #202 (display below metadata)
 
 #### Phase 41d: Corpus Invite by Username/ORCID Lookup — 🔲 PLANNED
 
@@ -3219,7 +3241,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 1. **41a** — Profile page + ORCID OAuth (foundation for everything else)
 2. **41b** — ORCID display in UI (depends on 41a)
-3. **41c** — Document external links (independent, can run in parallel with 41b)
+3. ~~**41c** — Document external links~~ ✅
 4. **41d** — Corpus invite by username/ORCID (depends on 41a for ORCID search)
 
 ---
