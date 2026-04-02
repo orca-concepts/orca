@@ -1308,7 +1308,14 @@ const AppShell = () => {
             </div>
           ) : (
             <div style={styles.userSection}>
-              <span style={styles.username}>{user?.username}</span>
+              <span
+                style={styles.username}
+                onClick={() => navigate(`/profile/${user?.id}`)}
+                role="button"
+                tabIndex={0}
+                onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+                onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+              >{user?.username}</span>
               <div ref={accountMenuRef} style={{ position: 'relative' }}>
                 <button
                   onClick={() => setShowAccountMenu(prev => !prev)}
@@ -1832,6 +1839,7 @@ const styles = {
     fontSize: '14px',
     color: '#666',
     fontFamily: '"EB Garamond", Georgia, serif',
+    cursor: 'pointer',
   },
   logoutButton: {
     padding: '6px 14px',

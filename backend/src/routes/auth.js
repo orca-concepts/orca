@@ -44,4 +44,10 @@ router.get('/me', authenticateToken, authController.getCurrentUser);
 router.post('/logout-everywhere', authenticateToken, authController.logoutEverywhere);
 router.post('/delete-account', authenticateToken, authController.deleteAccount);
 
+// Phase 41a: ORCID OAuth
+router.get('/orcid/authorize-url', authenticateToken, authController.getOrcidAuthorizeUrl);
+router.post('/orcid/callback', authenticateToken, authController.orcidCallback);
+router.post('/orcid/disconnect', authenticateToken, authController.disconnectOrcid);
+router.post('/orcid/dev-connect', authenticateToken, authController.devConnectOrcid);
+
 module.exports = router;

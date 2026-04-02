@@ -52,6 +52,19 @@ export const authAPI = {
 
   deleteAccount: () =>
     api.post('/auth/delete-account'),
+
+  // Phase 41a: ORCID OAuth
+  getOrcidAuthorizeUrl: () =>
+    api.get('/auth/orcid/authorize-url'),
+
+  orcidCallback: (code) =>
+    api.post('/auth/orcid/callback', { code }),
+
+  disconnectOrcid: () =>
+    api.post('/auth/orcid/disconnect'),
+
+  devConnectOrcid: (orcidId) =>
+    api.post('/auth/orcid/dev-connect', { orcidId }),
 };
 
 // Concepts endpoints
@@ -585,6 +598,12 @@ export const combosAPI = {
 
   unvoteAnnotation: (comboId, annotationId) =>
     api.post(`/combos/${comboId}/annotations/unvote`, { annotationId }),
+};
+
+// Phase 41a: Users endpoints
+export const usersAPI = {
+  getUserProfile: (userId) =>
+    api.get(`/users/${userId}/profile`),
 };
 
 export default api;

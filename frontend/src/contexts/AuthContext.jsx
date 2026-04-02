@@ -40,6 +40,16 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  // Update user data (e.g., after ORCID connect/disconnect)
+  const refreshUser = async () => {
+    try {
+      const response = await authAPI.getCurrentUser();
+      setUser(response.data.user);
+    } catch (error) {
+      console.error('Refresh user failed:', error);
+    }
+  };
+
   // Password login (Phase 40b)
   const login = async (identifier, password) => {
     try {
@@ -127,6 +137,7 @@ export const AuthProvider = ({ children }) => {
     forgotPasswordSendCode,
     forgotPasswordReset,
     logoutEverywhere,
+    refreshUser,
     isAuthenticated: !!user,
     isGuest: !user,
   };

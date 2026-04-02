@@ -29,7 +29,7 @@ const authController = {
   getCurrentUser: async (req, res) => {
     try {
       const result = await pool.query(
-        'SELECT id, username, email, created_at FROM users WHERE id = $1',
+        'SELECT id, username, email, orcid_id, created_at FROM users WHERE id = $1',
         [req.user.userId]
       );
 
@@ -37,7 +37,8 @@ const authController = {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      res.json({ user: result.rows[0] });
+      const row = result.rows[0];
+      res.json({ user: { id: row.id, username: row.username, email: row.email, orcidId: row.orcid_id, created_at: row.created_at } });
     } catch (error) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -393,6 +394,148 @@ const authController = {
       res.status(500).json({ error: 'Internal server error' });
     } finally {
       client.release();
+    }
+  },
+
+  // Phase 41a: ORCID OAuth — get authorize URL
+  getOrcidAuthorizeUrl: async (req, res) => {
+    try {
+      const clientId = process.env.ORCID_CLIENT_ID;
+      const redirectUri = process.env.ORCID_REDIRECT_URI;
+      const baseUrl = process.env.ORCID_BASE_URL || 'https://orcid.org';
+
+      if (!clientId || !redirectUri) {
+        return res.status(500).json({ error: 'ORCID OAuth is not configured' });
+      }
+
+      const url = `${baseUrl}/oauth/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code&scope=/authenticate&redirect_uri=${encodeURIComponent(redirectUri)}`;
+      res.json({ url });
+    } catch (error) {
+      console.error('ORCID authorize URL error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // Phase 41a: ORCID OAuth — exchange code for verified ORCID iD
+  orcidCallback: async (req, res) => {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ error: 'Authorization code is required' });
+    }
+
+    try {
+      const clientId = process.env.ORCID_CLIENT_ID;
+      const clientSecret = process.env.ORCID_CLIENT_SECRET;
+      const redirectUri = process.env.ORCID_REDIRECT_URI;
+      const baseUrl = process.env.ORCID_BASE_URL || 'https://orcid.org';
+
+      if (!clientId || !clientSecret || !redirectUri) {
+        return res.status(500).json({ error: 'ORCID OAuth is not configured' });
+      }
+
+      // Server-to-server token exchange with ORCID
+      const tokenUrl = `${baseUrl}/oauth/token`;
+      const body = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      });
+
+      const tokenResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+        },
+        body: body.toString(),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        console.error('ORCID token exchange failed:', tokenResponse.status, errorText);
+        return res.status(400).json({ error: 'Failed to verify ORCID authorization code' });
+      }
+
+      const tokenData = await tokenResponse.json();
+      const orcidId = tokenData.orcid;
+
+      if (!orcidId) {
+        return res.status(400).json({ error: 'No ORCID iD returned from ORCID' });
+      }
+
+      // Check uniqueness — another user may already have this ORCID
+      const existing = await pool.query(
+        'SELECT id FROM users WHERE orcid_id = $1 AND id != $2',
+        [orcidId, req.user.userId]
+      );
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ error: 'This ORCID iD is already linked to another account' });
+      }
+
+      // Store the verified ORCID iD
+      await pool.query(
+        'UPDATE users SET orcid_id = $1 WHERE id = $2',
+        [orcidId, req.user.userId]
+      );
+
+      res.json({ success: true, orcidId });
+    } catch (error) {
+      console.error('ORCID callback error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // Phase 41a: ORCID disconnect
+  disconnectOrcid: async (req, res) => {
+    try {
+      await pool.query(
+        'UPDATE users SET orcid_id = NULL WHERE id = $1',
+        [req.user.userId]
+      );
+      res.json({ success: true });
+    } catch (error) {
+      console.error('ORCID disconnect error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // Phase 41a: Dev-mode ORCID bypass (non-production only)
+  devConnectOrcid: async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ error: 'Route not found' });
+    }
+
+    const { orcidId } = req.body;
+    if (!orcidId) {
+      return res.status(400).json({ error: 'orcidId is required' });
+    }
+
+    // Validate ORCID format: 0000-0000-0000-0000 (last char can be X)
+    if (!/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(orcidId)) {
+      return res.status(400).json({ error: 'Invalid ORCID format. Expected: 0000-0000-0000-0000' });
+    }
+
+    try {
+      // Check uniqueness
+      const existing = await pool.query(
+        'SELECT id FROM users WHERE orcid_id = $1 AND id != $2',
+        [orcidId, req.user.userId]
+      );
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ error: 'This ORCID iD is already linked to another account' });
+      }
+
+      await pool.query(
+        'UPDATE users SET orcid_id = $1 WHERE id = $2',
+        [orcidId, req.user.userId]
+      );
+
+      res.json({ success: true, orcidId });
+    } catch (error) {
+      console.error('Dev ORCID connect error:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 };

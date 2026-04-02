@@ -5,6 +5,8 @@ import AppShell from './components/AppShell';
 import AcceptInvite from './components/AcceptInvite';
 import DocInviteAccept from './components/DocInviteAccept';
 import CitationRedirect from './components/CitationRedirect';
+import ProfilePage from './components/ProfilePage';
+import OrcidCallback from './components/OrcidCallback';
 
 function App() {
   return (
@@ -23,6 +25,12 @@ function App() {
 
           {/* Phase 38j: Citation URL handling */}
           <Route path="/cite/a/:annotationId" element={<CitationRedirect />} />
+
+          {/* Phase 41a: User profile page */}
+          <Route path="/profile/:userId" element={<ProfilePage />} />
+
+          {/* Phase 41a: ORCID OAuth callback */}
+          <Route path="/orcid/callback" element={<OrcidCallback />} />
 
           {/* AppShell handles both authenticated and guest users */}
           <Route

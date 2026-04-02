@@ -2106,6 +2106,26 @@ const createTables = async () => {
     `);
     console.log('Phase 41c: Created document_external_links table');
 
+    // ============================================================
+    // Phase 41a: ORCID Integration — add orcid_id column to users
+    // ============================================================
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'orcid_id'
+        ) THEN
+          ALTER TABLE users ADD COLUMN orcid_id VARCHAR(19);
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_orcid
+        ON users(orcid_id) WHERE orcid_id IS NOT NULL
+    `);
+    console.log('Phase 41a: Added orcid_id column to users table');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');
