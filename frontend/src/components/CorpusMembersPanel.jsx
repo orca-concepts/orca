@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import OrcidBadge from './OrcidBadge';
 
 export default function CorpusMembersPanel({
   isOwner,
@@ -217,7 +218,7 @@ export default function CorpusMembersPanel({
             ) : (
               members.map(au => (
                 <div key={au.user_id} style={styles.membersRow}>
-                  <span style={styles.membersUsername}>{au.username}</span>
+                  <span style={styles.membersUsername}>{au.username}<OrcidBadge orcidId={au.orcid_id} /></span>
                   {isOwner && (
                     <button
                       style={styles.membersRemoveBtn}
@@ -278,7 +279,7 @@ export default function CorpusMembersPanel({
                   <div style={styles.transferPickLabel}>Select new owner:</div>
                   {members.map(m => (
                     <div key={m.user_id} style={styles.transferPickRow}>
-                      <span style={styles.membersUsername}>{m.username}</span>
+                      <span style={styles.membersUsername}>{m.username}<OrcidBadge orcidId={m.orcid_id} /></span>
                       <button
                         style={styles.transferPickBtn}
                         onClick={() => {

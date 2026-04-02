@@ -19,6 +19,7 @@ const listCombos = async (req, res) => {
     const result = await pool.query(
       `SELECT c.id, c.name, c.description, c.created_by, c.created_at,
               u.username AS creator_username,
+              u.orcid_id AS creator_orcid_id,
               (SELECT COUNT(*) FROM combo_edges ce WHERE ce.combo_id = c.id) AS edge_count,
               (SELECT COUNT(DISTINCT da.id)
                FROM combo_edges ce2
@@ -30,7 +31,7 @@ const listCombos = async (req, res) => {
        LEFT JOIN users u ON u.id = c.created_by
        LEFT JOIN combo_subscriptions cs_user ON cs_user.combo_id = c.id AND cs_user.user_id = $1
        ${whereClause}
-       GROUP BY c.id, u.username
+       GROUP BY c.id, u.username, u.orcid_id
        ORDER BY ${orderBy}`,
       params
     );
@@ -59,13 +60,14 @@ const getCombo = async (req, res) => {
     const comboResult = await pool.query(
       `SELECT c.id, c.name, c.description, c.created_by, c.created_at,
               u.username AS creator_username,
+              u.orcid_id AS creator_orcid_id,
               (SELECT COUNT(*) FROM combo_subscriptions cs WHERE cs.combo_id = c.id) AS subscriber_count,
               BOOL_OR(cs_user.user_id IS NOT NULL) AS user_subscribed
        FROM combos c
        LEFT JOIN users u ON u.id = c.created_by
        LEFT JOIN combo_subscriptions cs_user ON cs_user.combo_id = c.id AND cs_user.user_id = $1
        WHERE c.id = $2
-       GROUP BY c.id, u.username`,
+       GROUP BY c.id, u.username, u.orcid_id`,
       [userId, comboId]
     );
 
@@ -178,6 +180,7 @@ const getComboAnnotations = async (req, res) => {
               da.document_id,
               da.corpus_id,
               creator.username AS creator_username,
+              creator.orcid_id AS creator_orcid_id,
               d.title AS document_title,
               corp.name AS corpus_name,
               e.child_id AS concept_id,

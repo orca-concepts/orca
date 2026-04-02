@@ -5,6 +5,7 @@ import AnnotationPanel from './AnnotationPanel';
 import CorpusDocumentList from './CorpusDocumentList';
 import CorpusUploadForm from './CorpusUploadForm';
 import CorpusMembersPanel from './CorpusMembersPanel';
+import OrcidBadge from './OrcidBadge';
 
 
 // Find all occurrences of text in body, return array of { idx, before, match, after }
@@ -1240,7 +1241,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
           <div style={styles.metaRow}>
             <span>{document.format}</span>
             <span style={styles.metaDot}>·</span>
-            <span>uploaded by {document.uploader_username}</span>
+            <span>uploaded by {document.uploader_username}<OrcidBadge orcidId={document.uploader_orcid_id} /></span>
             <span style={styles.metaDot}>·</span>
             <span>{new Date(document.created_at).toLocaleDateString()}</span>
             {authorData && (
@@ -1589,7 +1590,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                     )}
                   </div>
                   <div style={styles.versionCardMeta}>
-                    by {v.uploader_username || 'deleted user'} · {new Date(v.created_at).toLocaleDateString()}
+                    by {v.uploader_username || 'deleted user'}<OrcidBadge orcidId={v.uploader_orcid_id} /> · {new Date(v.created_at).toLocaleDateString()}
                   </div>
                 </div>
               ))}
@@ -1904,7 +1905,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                           </div>
 
                           <div style={styles.annotationCreator}>
-                            by {ann.creator_username} · {new Date(ann.created_at).toLocaleDateString()}
+                            by {ann.creator_username}<OrcidBadge orcidId={ann.creator_orcid_id} /> · {new Date(ann.created_at).toLocaleDateString()}
                           </div>
 
                           {/* Phase 31d: Version navigation for this annotation */}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { corpusAPI } from '../services/api';
+import OrcidBadge from './OrcidBadge';
 
 const CorpusListView = ({ onSelectCorpus, onBack, isGuest, onSubscribe, corpusTabs }) => {
   const [corpuses, setCorpuses] = useState([]);
@@ -177,7 +178,7 @@ const CorpusListView = ({ onSelectCorpus, onBack, isGuest, onSubscribe, corpusTa
                     <span style={styles.metaDot}>·</span>
                     <span>{corpus.subscriber_count || 0} subscriber{corpus.subscriber_count != 1 ? 's' : ''}</span>
                     <span style={styles.metaDot}>·</span>
-                    <span>by {corpus.owner_username || 'you'}</span>
+                    <span>by {corpus.owner_username || 'you'}<OrcidBadge orcidId={corpus.owner_orcid_id} /></span>
                     <span style={styles.metaDot}>·</span>
                     <span>{new Date(corpus.created_at).toLocaleDateString()}</span>
                   </div>
@@ -250,7 +251,7 @@ const CorpusListView = ({ onSelectCorpus, onBack, isGuest, onSubscribe, corpusTa
                   <span style={styles.metaDot}>·</span>
                   <span>{corpus.subscriber_count || 0} subscriber{corpus.subscriber_count != 1 ? 's' : ''}</span>
                   <span style={styles.metaDot}>·</span>
-                  <span>by {corpus.owner_username || 'you'}</span>
+                  <span>by {corpus.owner_username || 'you'}<OrcidBadge orcidId={corpus.owner_orcid_id} /></span>
                   <span style={styles.metaDot}>·</span>
                   <span>{new Date(corpus.created_at).toLocaleDateString()}</span>
                 </div>

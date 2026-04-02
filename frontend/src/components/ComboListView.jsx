@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { combosAPI } from '../services/api';
+import OrcidBadge from './OrcidBadge';
 
 const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubscriptions, onComboClick, onRequestLogin }) => {
   const [combos, setCombos] = useState([]);
@@ -238,7 +239,7 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
                 </div>
               )}
               <div style={styles.cardMeta}>
-                <span>Created by {combo.creator_username || '[deleted user]'}</span>
+                <span>Created by {combo.creator_username || '[deleted user]'}<OrcidBadge orcidId={combo.creator_orcid_id} /></span>
                 <span style={styles.metaDot}>{'\u00B7'}</span>
                 <span>{combo.edge_count || 0} concept{combo.edge_count != 1 ? 's' : ''}</span>
                 <span style={styles.metaDot}>{'\u00B7'}</span>

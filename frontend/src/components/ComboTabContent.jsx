@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { combosAPI, conceptsAPI } from '../services/api';
+import OrcidBadge from './OrcidBadge';
 
 const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDocument, onRequestLogin, refreshKey }) => {
   const [combo, setCombo] = useState(null);
@@ -323,7 +324,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
             <p style={styles.comboDescription}>{combo.description}</p>
           )}
           <div style={styles.metaLine}>
-            Created by {combo?.creator_username || '[deleted user]'}
+            Created by {combo?.creator_username || '[deleted user]'}<OrcidBadge orcidId={combo?.creator_orcid_id} />
             {' \u00B7 '}
             {edges.length} concept{edges.length !== 1 ? 's' : ''}
             {' \u00B7 '}
@@ -547,7 +548,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
                   </span>
                 </div>
                 <span style={styles.meta}>
-                  by {a.creator_username || '[deleted user]'} {'\u00B7'} {relativeTime(a.created_at)}
+                  by {a.creator_username || '[deleted user]'}<OrcidBadge orcidId={a.creator_orcid_id} /> {'\u00B7'} {relativeTime(a.created_at)}
                 </span>
               </div>
             </div>

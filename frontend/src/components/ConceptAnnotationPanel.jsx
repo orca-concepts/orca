@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { conceptsAPI, votesAPI, corpusAPI, documentsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import OrcidBadge from './OrcidBadge';
 
 function relativeTime(dateStr) {
   const now = new Date();
@@ -341,7 +342,7 @@ const ConceptAnnotationPanel = ({
               <div style={styles.bottomRow}>
                 <span style={styles.voteCount}>&uarr; {a.voteCount}</span>
                 <span style={styles.meta}>
-                  {a.creatorUsername} &middot; {relativeTime(a.createdAt)}
+                  {a.creatorUsername}<OrcidBadge orcidId={a.creatorOrcidId} /> &middot; {relativeTime(a.createdAt)}
                 </span>
               </div>
             </div>

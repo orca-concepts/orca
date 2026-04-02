@@ -77,6 +77,7 @@ const listCorpuses = async (req, res) => {
     const result = await pool.query(
       `SELECT c.id, c.name, c.description, c.annotation_mode, c.created_by, c.created_at,
               u.username AS owner_username,
+              u.orcid_id AS owner_orcid_id,
               COUNT(DISTINCT cd.document_id) AS document_count,
               (SELECT COUNT(*) FROM corpus_subscriptions cs WHERE cs.corpus_id = c.id) AS subscriber_count,
               BOOL_OR(cs_user.user_id IS NOT NULL) AS user_subscribed
@@ -84,7 +85,7 @@ const listCorpuses = async (req, res) => {
        JOIN users u ON u.id = c.created_by
        LEFT JOIN corpus_documents cd ON cd.corpus_id = c.id
        LEFT JOIN corpus_subscriptions cs_user ON cs_user.corpus_id = c.id AND cs_user.user_id = $1
-       GROUP BY c.id, u.username
+       GROUP BY c.id, u.username, u.orcid_id
        ORDER BY c.created_at DESC`,
       [userId]
     );
@@ -131,6 +132,7 @@ const getCorpus = async (req, res) => {
     const corpusResult = await pool.query(
       `SELECT c.id, c.name, c.description, c.annotation_mode, c.created_by, c.created_at,
               u.username AS owner_username,
+              u.orcid_id AS owner_orcid_id,
               (SELECT COUNT(*) FROM corpus_subscriptions cs WHERE cs.corpus_id = c.id) AS subscriber_count
        FROM corpuses c
        JOIN users u ON u.id = c.created_by
@@ -174,6 +176,7 @@ const getCorpus = async (req, res) => {
               d.version_number, d.source_document_id,
               r.root_document_id,
               u.username AS uploader_username,
+              u.orcid_id AS uploader_orcid_id,
               cd.added_by AS added_to_corpus_by,
               cd.created_at AS added_at,
               CASE WHEN dt.id IS NOT NULL
@@ -827,7 +830,8 @@ const getDocument = async (req, res) => {
     const result = await pool.query(
       `SELECT d.id, d.title, d.body, d.format, d.uploaded_by, d.created_at,
               d.version_number, d.source_document_id,
-              u.username AS uploader_username
+              u.username AS uploader_username,
+              u.orcid_id AS uploader_orcid_id
        FROM documents d
        LEFT JOIN users u ON u.id = d.uploaded_by
        WHERE d.id = $1`,
@@ -841,7 +845,8 @@ const getDocument = async (req, res) => {
     // Also return which corpuses this document belongs to
     const corpusesResult = await pool.query(
       `SELECT c.id, c.name, c.annotation_mode, c.created_by,
-              u.username AS owner_username
+              u.username AS owner_username,
+              u.orcid_id AS owner_orcid_id
        FROM corpus_documents cd
        JOIN corpuses c ON c.id = cd.corpus_id
        JOIN users u ON u.id = c.created_by
@@ -1066,7 +1071,8 @@ const getVersionHistory = async (req, res) => {
         JOIN lineage l ON d.source_document_id = l.id
       )
       SELECT d.id, d.title, d.version_number, d.source_document_id,
-             d.uploaded_by, d.created_at, u.username AS uploader_username
+             d.uploaded_by, d.created_at, u.username AS uploader_username,
+             u.orcid_id AS uploader_orcid_id
       FROM documents d
       LEFT JOIN users u ON u.id = d.uploaded_by
       WHERE d.id IN (SELECT id FROM lineage)
@@ -1488,6 +1494,7 @@ const getDocumentAnnotations = async (req, res) => {
               da.quote_text, da.comment, da.quote_occurrence, da.layer,
               da.created_by, da.created_at,
               u.username AS creator_username,
+              u.orcid_id AS creator_orcid_id,
               e.parent_id, e.child_id, e.graph_path, e.attribute_id,
               c_child.name AS concept_name,
               a.name AS attribute_name,
@@ -2190,7 +2197,7 @@ const listAllowedUsers = async (req, res) => {
     // Owner and allowed members get the full member list; everyone else gets count only
     if (isMember) {
       const result = await pool.query(
-        `SELECT cau.user_id, u.username
+        `SELECT cau.user_id, u.username, u.orcid_id
          FROM corpus_allowed_users cau
          JOIN users u ON u.id = cau.user_id
          WHERE cau.corpus_id = $1
@@ -3290,6 +3297,7 @@ const getAnnotationsForConceptOnDocument = async (req, res) => {
               a.name AS attribute_name,
               c_parent.name AS parent_name,
               u.username AS created_by_username,
+              u.orcid_id AS created_by_orcid_id,
               (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count,
               EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $4) AS user_voted
        FROM document_annotations da

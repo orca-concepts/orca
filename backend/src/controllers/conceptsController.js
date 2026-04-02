@@ -1292,6 +1292,7 @@ const conceptsController = {
                   da.quote_text, da.comment, da.quote_occurrence,
                   da.created_at, da.created_by,
                   u.username AS creator_username,
+                  u.orcid_id AS creator_orcid_id,
                   da.document_id, d.title AS document_title,
                   d.tag_id, d.version_number,
                   dt.name AS tag_name,
@@ -1321,14 +1322,14 @@ const conceptsController = {
              AND e.is_hidden = false
              ${extraFilters}
            GROUP BY da.id, da.quote_text, da.comment, da.quote_occurrence,
-                    da.created_at, da.created_by, u.username,
+                    da.created_at, da.created_by, u.username, u.orcid_id,
                     da.document_id, d.title, d.tag_id, d.version_number, dt.name,
                     da.corpus_id, cor.name,
                     da.edge_id, e.parent_id, e.graph_path, e.attribute_id,
                     pc.name, att.name, r.root_document_id
         )
         SELECT annotation_id, quote_text, comment, quote_occurrence,
-               created_at, created_by, creator_username,
+               created_at, created_by, creator_username, creator_orcid_id,
                document_id, document_title, tag_id, tag_name,
                corpus_id, corpus_name, edge_id, parent_id, graph_path,
                attribute_id, parent_name, attribute_name,
@@ -1369,6 +1370,7 @@ const conceptsController = {
           quoteOccurrence: row.quote_occurrence,
           createdAt: row.created_at,
           creatorUsername: row.creator_username,
+          creatorOrcidId: row.creator_orcid_id || null,
           documentId: row.document_id,
           documentTitle: row.document_title,
           tagId: row.tag_id || null,

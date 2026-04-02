@@ -3,6 +3,7 @@ import { corpusAPI, documentsAPI } from '../services/api';
 import CorpusDocumentList from './CorpusDocumentList';
 import CorpusUploadForm from './CorpusUploadForm';
 import CorpusMembersPanel from './CorpusMembersPanel';
+import OrcidBadge from './OrcidBadge';
 
 const CorpusDetailView = ({ corpusId, onBack, onOpenDocument, isGuest, onSubscribe, onUnsubscribe, isSubscribed, currentUserId, onSelectCorpus }) => {
   const [corpus, setCorpus] = useState(null);
@@ -287,7 +288,7 @@ const CorpusDetailView = ({ corpusId, onBack, onOpenDocument, isGuest, onSubscri
               <p style={styles.corpusDescription}>{corpus.description}</p>
             )}
             <div style={styles.metaRow}>
-              <span>Created by {corpus.owner_username}</span>
+              <span>Created by {corpus.owner_username}<OrcidBadge orcidId={corpus.owner_orcid_id} /></span>
               <span style={styles.metaDot}>·</span>
               <span>{new Date(corpus.created_at).toLocaleDateString()}</span>
               <span style={styles.metaDot}>·</span>
