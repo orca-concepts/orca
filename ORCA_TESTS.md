@@ -529,4 +529,57 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 
 ---
 
+## 27. ORCID Display (Phase 41b)
+
+- [ ] OrcidBadge component renders a small green "iD" badge when `orcidId` is provided
+- [ ] OrcidBadge renders nothing when `orcidId` is null or undefined
+- [ ] Clicking the badge opens `https://orcid.org/{orcidId}` in a new tab
+- [ ] Badge appears next to corpus owner names in Browse Corpuses list
+- [ ] Badge appears next to corpus owner name in corpus detail header
+- [ ] Badge appears next to member usernames in the corpus members panel
+- [ ] Badge appears next to document uploader name in the document viewer
+- [ ] Badge appears next to annotation creator names in the document annotation sidebar
+- [ ] Badge appears next to annotation creator names in the concept annotation panel
+- [ ] Badge appears next to combo creator names in Browse Combos and combo tab header
+- [ ] Badge appears next to annotation creator names on combo annotation cards
+- [ ] Badge appears next to version uploader names in version history
+- [ ] Users without an ORCID do NOT show a badge anywhere
+- [ ] Backend endpoints return `orcid_id` / `orcidId` fields: corpus list, corpus detail, allowed users, document detail, document annotations, concept annotations, combo list, combo detail, combo annotations, version history
+
+---
+
+## 28. Corpus Invite by Username/ORCID (Phase 41d)
+
+### User Search Endpoint
+- [ ] `GET /api/users/search?q=bo` returns matching users with username and orcidId
+- [ ] Requesting user is excluded from results (searching your own name returns nothing)
+- [ ] ORCID search: `?q=0000-0001-2345-6789` returns exact match
+- [ ] ORCID prefix: `?q=0000-0001` returns users whose ORCID starts with that prefix
+- [ ] Query shorter than 2 characters returns 400 error
+- [ ] Non-matching query returns empty `{ users: [] }`
+- [ ] Endpoint requires authentication — 401 without token
+- [ ] Max 10 results returned
+
+### Direct Invite Endpoint
+- [ ] Corpus owner can add a user: `POST /api/corpuses/:id/invite-user` with `{ userId }` succeeds
+- [ ] Adding the same user again returns 409 "User is already a member"
+- [ ] Adding the corpus owner returns 400 "Cannot add the corpus owner as a member"
+- [ ] Non-owner calling the endpoint returns 403
+- [ ] Adding a non-existent user ID returns 404 "User not found"
+- [ ] Successful add returns `{ success: true, user: { id, username, orcidId } }`
+
+### Frontend — Add Member UI
+- [ ] "Add member" section appears in corpus members panel for corpus owners only
+- [ ] Non-owners do not see the "Add member" section
+- [ ] Typing in the search input triggers a search after 300ms debounce
+- [ ] Search results show username with OrcidBadge (if user has ORCID)
+- [ ] Clicking "Add" on a result adds the user and shows "Added ✓" feedback
+- [ ] After "Added" feedback, input clears and results dropdown closes automatically
+- [ ] Member list refreshes after adding a user
+- [ ] Clicking "Add" on an already-added user shows "Already a member"
+- [ ] Search dropdown closes when input loses focus
+- [ ] Searching with fewer than 2 characters shows no results
+
+---
+
 **END OF TESTING CHECKLIST**

@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 2, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a/41b/41d planned — ORCID integration, corpus invite by username/ORCID)
+**Last Updated:** April 2, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete)
 
 ---
 
@@ -2314,11 +2314,11 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 39:** Combos ✅ COMPLETE (39a: backend infrastructure, 39b: Browse Combos overlay, 39c: combo persistent tab, 39d: add to combo from graph, 39e: polish + DnD + tab groups + invite link options)
 - **Phase 40:** Subscribed Sort Option ✅ COMPLETE — "Subscribed" sort ranks annotations by votes from members of the user's subscribed corpuses. Added to CorpusTabContent, ConceptAnnotationPanel, and ComboTabContent. Backend CTE computes subscribed_vote_count per annotation. Hidden for guests.
 - **Phase 40b:** Password Login ✅ COMPLETE — password login replaces OTP login, phone OTP retained for registration and password reset only, zxcvbn strength validation, forgot-password flow via phone OTP
-- **Phase 41:** ORCID Integration, Document External Links, Corpus Invite Enhancements — 🔲 PLANNED
-  - **Phase 41a:** Profile Page + ORCID OAuth Verification 🔲 (new `users.orcid_id` column, profile route `/profile/:userId`, ORCID OAuth `/authenticate` flow, Connect/Disconnect ORCID button, public profile stats)
-  - **Phase 41b:** ORCID Display Across UI 🔲 (OrcidBadge.jsx component, `orcid_id` returned alongside usernames in corpus/document/annotation endpoints, displayed next to usernames in doc viewer, corpus members panel, annotation cards, corpus list/detail)
+- **Phase 41:** ORCID Integration, Document External Links, Corpus Invite Enhancements — ✅ COMPLETE
+  - **Phase 41a:** Profile Page + ORCID OAuth Verification ✅ COMPLETE (new `users.orcid_id` column, profile route `/profile/:userId`, ORCID OAuth `/authenticate` flow, Connect/Disconnect ORCID button, public profile stats)
+  - **Phase 41b:** ORCID Display Across UI ✅ COMPLETE (OrcidBadge.jsx component, `orcid_id` returned alongside usernames in 11 backend queries across corpus/document/annotation/combo endpoints, displayed next to usernames in doc viewer, corpus members panel, annotation cards, corpus list/detail, combo list/detail)
   - **Phase 41c:** Document External Links ✅ COMPLETE (new `document_external_links` table, add/remove/get endpoints, multiple links per document stored on root doc, display in doc viewer with author add/remove UI)
-  - **Phase 41d:** Corpus Invite by Username/ORCID Lookup 🔲 (new `GET /api/users/search` endpoint, new `POST /api/corpuses/:id/invite-user` endpoint, search-as-you-type in CorpusMembersPanel, direct-add to corpus_allowed_users)
+  - **Phase 41d:** Corpus Invite by Username/ORCID Lookup ✅ COMPLETE (new `GET /api/users/search` endpoint, new `POST /api/corpuses/:id/invite-user` endpoint, debounced search-as-you-type in CorpusMembersPanel with OrcidBadge, direct-add to corpus_allowed_users, "Added" feedback with auto-clear)
   - **Phase 28a:** Visual Cleanup — Icons, Fonts, Colors ✅ (all emoji icons removed from UI chrome, EB Garamond applied everywhere via Google Fonts import + explicit fontFamily, all colored buttons converted to black-on-off-white Zen aesthetic, all italics removed, × close buttons kept)
   - **Phase 28b:** UI Removals — Ranking & Supergroups ✅ (child rankings UI removed, Layer 3 super-groups removed, ranking cleanup queries cleaned up in removeVote/removeVoteFromTab/addSwapVote)
   - **Phase 28c:** Rename & Title Changes ✅ ("Saved" → "Graph Votes" across all user-facing text in AppShell/SavedPageOverlay/Saved/SavedTabContent, sort dropdown "↓ Saves" → "↓ Votes", SwapModal/VoteSetBar/ConceptGrid/AnnotationPanel "saves" → "votes", FlipView badge "Saved" → "Voted", browser tab title "Concept Hierarchy" → "orca")
@@ -3178,25 +3178,32 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 **Pre-requisites:** Register for ORCID Public API credentials (free) at orcid.org Developer Tools. For development, use ORCID sandbox (`sandbox.orcid.org`). Register `http://localhost:3000/orcid/callback` as redirect URI for dev, `https://orcaconcepts.org/orcid/callback` for production.
 
-#### Phase 41b: ORCID Display Across UI — 🔲 PLANNED
+#### Phase 41b: ORCID Display Across UI — ✅ COMPLETE
 
 **Goal:** Where Orca displays a username and that user has a verified ORCID, show a small green ORCID iD icon next to the name that links to their ORCID profile in a new tab.
 
-**Backend changes:** Modify the following endpoints to include `orcid_id` in user-related response data (via LEFT JOIN to users table):
-- `GET /api/corpuses/:id` — owner's `orcid_id`
-- `GET /api/corpuses` — owner's `orcid_id`
-- `GET /api/corpuses/:corpusId/allowed-users` — each member's `orcid_id`
-- `GET /api/corpuses/:corpusId/documents/:documentId/annotations` — creator's `orcid_id`
-- `GET /api/corpuses/annotations/concept/:conceptId` — creator's `orcid_id`
-- `GET /api/documents/:id` — uploader's `orcid_id`
+**Backend changes:** Modified 11 queries across 3 controllers to include `orcid_id` in user-related response data (via existing LEFT JOIN to users table):
+- `GET /api/corpuses` — `owner_orcid_id` (listCorpuses)
+- `GET /api/corpuses/:id` — `owner_orcid_id` on corpus, `uploader_orcid_id` on documents (getCorpus)
+- `GET /api/corpuses/:corpusId/allowed-users` — `orcid_id` per member (listAllowedUsers)
+- `GET /api/corpuses/:corpusId/documents/:documentId/annotations` — `creator_orcid_id` (getDocumentAnnotations)
+- `GET /api/corpuses/:corpusId/documents/:documentId/annotations-for-concept/:conceptId` — `created_by_orcid_id` (getAnnotationsForConceptOnDocument)
+- `GET /api/concepts/:id/annotations` — `creatorOrcidId` (camelCase, getAnnotationsForConcept)
+- `GET /api/documents/:id` — `uploader_orcid_id` on document, `owner_orcid_id` on corpuses (getDocument)
+- `GET /api/corpuses/versions/:documentId/history` — `uploader_orcid_id` per version (getVersionHistory)
+- `GET /api/combos` — `creator_orcid_id` (listCombos)
+- `GET /api/combos/:id` — `creator_orcid_id` (getCombo)
+- `GET /api/combos/:id/annotations` — `creator_orcid_id` (getComboAnnotations)
 
 **Frontend changes:**
-- New `OrcidBadge.jsx` — accepts `orcidId` prop, renders small green iD icon (16x16px) linking to `https://orcid.org/{orcidId}` in new tab. Renders nothing if null.
-- Update `CorpusTabContent.jsx` — badge next to document uploader name and annotation creator names
-- Update `CorpusMembersPanel.jsx` — badge next to each member username
+- New `OrcidBadge.jsx` — accepts `orcidId` prop, renders small inline green "iD" text badge (ORCID brand color `#a6ce39`, sans-serif font, 10px) linking to `https://orcid.org/{orcidId}` in new tab. Hover darkens to filled green. Renders nothing if orcidId is falsy.
+- Update `CorpusListView.jsx` — badge next to corpus owner names (both My Corpuses and All Corpuses sections)
+- Update `CorpusDetailView.jsx` — badge next to corpus owner name in header
+- Update `CorpusMembersPanel.jsx` — badge next to each member username in list and transfer ownership panel
+- Update `CorpusTabContent.jsx` — badge next to document uploader name, annotation creator names, and version history uploader names
 - Update `ConceptAnnotationPanel.jsx` — badge next to annotation creator names
-- Update `CorpusDetailView.jsx` — badge next to corpus owner name
-- Update `CorpusListView.jsx` — badge next to corpus owner name
+- Update `ComboListView.jsx` — badge next to combo creator names
+- Update `ComboTabContent.jsx` — badge next to combo creator name in header and annotation creator names
 
 **Architecture Decisions:** #235 (icon is a link, not tooltip), #236 (strategic placement — authorship/membership contexts only)
 
@@ -3223,26 +3230,27 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 **Architecture Decisions:** #200 (multiple links via root doc table), #201 (authors-only edit), #202 (display below metadata)
 
-#### Phase 41d: Corpus Invite by Username/ORCID Lookup — 🔲 PLANNED
+#### Phase 41d: Corpus Invite by Username/ORCID Lookup — ✅ COMPLETE
 
 **Goal:** Expand corpus invitation to support three methods: invite link (existing), search by username, and search by ORCID. Direct-add (no accept/decline notification flow).
 
 **Backend changes:**
-- New `GET /api/users/search` — search by username (ILIKE prefix match) or ORCID (exact match). Query: `?q=searchterm` (min 2 chars). Auth required. Max 10 results. Excludes requesting user. Detects ORCID format (digits with dashes) vs username automatically.
-- New `POST /api/corpuses/:id/invite-user` — owner-only. Body: `{ userId }`. Verifies user exists, not already a member, not the owner. Inserts into `corpus_allowed_users`. Returns 409 if already a member.
+- New `GET /api/users/search` — in `usersController.js`. Search by username (ILIKE prefix match) or ORCID iD (exact or prefix match). Query: `?q=searchterm` (min 2 chars, returns 400 if shorter). Auth required. Max 10 results. Excludes requesting user. Auto-detects ORCID format via regex `/^\d{4}(-\d{4}){0,2}(-\d{3}[\dX])?$/` — full 19-char ORCID does exact match, partial prefix uses LIKE.
+- New `POST /api/corpuses/:id/invite-user` — in `corpusController.js`. Owner-only. Body: `{ userId }`. Validation chain: corpus exists (404), target user exists (404), target is not owner (400), target not already a member (409). Inserts into `corpus_allowed_users`. Returns `{ success: true, user: { id, username, orcidId } }`.
 
 **Frontend changes:**
-- `CorpusMembersPanel.jsx` — new "Add member" section below invite link section (owner-only). Search input with placeholder "Search by username or ORCID". Debounced search (300ms, min 2 chars) calls `/api/users/search`. Dropdown results show username + OrcidBadge + "Add" button. Success refreshes member list. 409 shows "Already a member."
-- New API functions: `searchUsers(query)`, `inviteUserToCorpus(corpusId, userId)`
+- `api.js` — new `usersAPI.searchUsers(query)` and `corpusAPI.inviteUserToCorpus(corpusId, userId)`
+- `CorpusMembersPanel.jsx` — new "Add member" section between invite links and member list (owner-only). Text input with placeholder "Search by username or ORCID", debounced 300ms with `useRef` timer, min 2 chars. Dropdown results show username + OrcidBadge + "Add" button. On success: "Added ✓" feedback (1.5s), then auto-clears input/results and refreshes member list via `onMembersChanged` callback. On 409: "Already a member". `onMouseDown={e => e.preventDefault()}` on Add button prevents input blur from closing dropdown before click registers. `blurTimerRef` with 200ms delay handles focus/blur gracefully.
+- `CorpusTabContent.jsx` and `CorpusDetailView.jsx` — pass `corpusId` and `onMembersChanged` (loadMembers/loadAllowedUsers) props to CorpusMembersPanel
 
 **Architecture Decisions:** #240 (direct add, not invitation), #241 (search requires auth), #242 (ORCID exact match)
 
-#### Phase 41 Implementation Priority
+#### Phase 41 Implementation Priority (completed)
 
-1. **41a** — Profile page + ORCID OAuth (foundation for everything else)
-2. **41b** — ORCID display in UI (depends on 41a)
-3. ~~**41c** — Document external links~~ ✅
-4. **41d** — Corpus invite by username/ORCID (depends on 41a for ORCID search)
+1. ~~**41a** (Profile page + ORCID OAuth)~~ ✅
+2. ~~**41b** (ORCID display in UI)~~ ✅
+3. ~~**41c** (Document external links)~~ ✅
+4. ~~**41d** (Corpus invite by username/ORCID)~~ ✅
 
 ---
 
