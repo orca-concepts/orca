@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 2, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete)
+**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42 planned — superconcepts rename, document coauthor lookup, superconcept ownership transfer, corpus member document removal)
 
 ---
 
@@ -1302,7 +1302,7 @@ CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_vot
 | POST | `/forgot-password/reset` | No | Verify OTP + reset password. Accepts `{ phoneNumber, code, newPassword }`. Validates new password with zxcvbn. Updates password_hash. Returns JWT (auto-login). (Phase 40b) |
 | GET | `/me` | Yes | Get current user info |
 | POST | `/logout-everywhere` | Yes | Sets `token_issued_after = NOW()`, invalidating all existing JWTs. (Phase 32b) |
-| POST | `/delete-account` | Yes | Permanently delete the user's account. Pre-check: user must own zero corpuses (transfer first). CASCADE deletes votes, subscriptions, tabs, messages, flags. SET NULL on concepts, edges, annotations, web links, documents `created_by`/`uploaded_by`. Returns 400 if user still owns corpuses. (Phase 35c) |
+| POST | `/delete-account` | Yes | Permanently delete the user's account. Pre-check: user must own zero corpuses and zero combos/superconcepts (transfer first). CASCADE deletes votes, subscriptions, tabs, messages, flags. SET NULL on concepts, edges, annotations, web links, documents `created_by`/`uploaded_by`. Returns 400 if user still owns corpuses or combos. (Phase 35c, updated Phase 42c) |
 | GET | `/orcid/authorize-url` | Yes | Returns the ORCID OAuth authorization URL for the frontend to redirect to. Constructs URL with client_id, /authenticate scope, and redirect_uri. (Phase 41a) |
 | POST | `/orcid/callback` | Yes | Exchanges the ORCID OAuth authorization code for a verified ORCID iD. Stores `orcid_id` on the user row. Returns 409 if ORCID already linked to another account. (Phase 41a) |
 | POST | `/orcid/disconnect` | Yes | Removes the ORCID iD from the user's account (sets `orcid_id = NULL`). (Phase 41a) |
@@ -1572,7 +1572,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | POST | `/:id/delete` | Owner only | Delete corpus; orphaned documents also deleted |
 | POST | `/:id/documents/upload` | Owner/Allowed | Upload a new document into a corpus (title, body, format). Requires `copyrightConfirmed: true` in request body; sets `copyright_confirmed_at = NOW()` on the document row (Phase 36). ⚠️ Permission check added in Phase 33a — was previously open to any authenticated user. |
 | POST | `/:id/documents/add` | Owner/Allowed | Add an existing document to a corpus (Phase 7g: allowed users can also add) |
-| POST | `/:id/documents/remove` | Owner only | Remove a document from a corpus; auto-deletes if orphaned |
+| POST | `/:id/documents/remove` | Owner or adder | Remove a document from a corpus; auto-deletes if orphaned. Owner can remove any document; corpus members can remove documents they added (`corpus_documents.added_by` check). (Updated Phase 42d) |
 | POST | `/check-duplicates` | Required | Check for existing documents similar to provided text (Phase 7b) |
 | GET | `/subscriptions` | Required | Get current user's corpus subscriptions with details (Phase 7c) |
 | POST | `/subscribe` | Required | Subscribe to a corpus (creates persistent corpus tab) (Phase 7c) |
@@ -1611,6 +1611,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/documents/:documentId/authors` | Guest OK (count) / Author (list) | Get co-author count (all users) or full list with usernames (authors only) (Phase 26a) |
 | POST | `/documents/:documentId/authors/remove` | Author only | Remove a co-author from the document; cannot remove the original uploader (Phase 26a) |
 | POST | `/documents/:documentId/authors/leave` | Required | Leave as a co-author (self-removal; uploader cannot leave) (Phase 26a) |
+| POST | `/documents/:documentId/invite-author` | Author only | Directly add a coauthor by userId via username/ORCID search. Body: `{ userId }`. Checks user exists, not already an author. Inserts into `document_authors` with root document ID. Returns 409 if already a coauthor. (Phase 42b) |
 | GET | `/orphaned-documents` | Required | Get current user's orphaned documents (Phase 9b) |
 | POST | `/rescue-document` | Required | Rescue an orphaned document into a corpus (Phase 9b) |
 | POST | `/dismiss-orphan` | Required | Permanently delete an orphaned document (Phase 9b) |
@@ -1654,8 +1655,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | POST | `/:id/edges/remove` | Owner only | Remove an edge from the combo |
 | POST | `/:id/annotations/vote` | Required | Vote on an annotation within this combo context |
 | POST | `/:id/annotations/unvote` | Required | Remove combo vote on an annotation |
-
-### Citations (`/api/citations`) — ✅ IMPLEMENTED (Phase 38j)
+| POST | `/:id/transfer-ownership` | Owner only | Transfer superconcept ownership to any user. Body: `{ newOwnerId }`. Auto-subscribes new owner if not already subscribed. (Phase 42c) | (`/api/citations`) — ✅ IMPLEMENTED (Phase 38j)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -2106,6 +2106,12 @@ This only needs to be done once per database. If you drop and recreate the datab
 203. **Direct Add for Corpus Invite by Username/ORCID (Phase 41d):** Searching by username or ORCID adds the user directly to `corpus_allowed_users`, skipping an accept/decline flow. This is simpler than building a notification system and mirrors how invite links work (the owner generates the access; the user just shows up). Users can always "Leave corpus" if added unwantedly.
 204. **User Search Requires Authentication (Phase 41d):** The `GET /api/users/search` endpoint requires login. This prevents anonymous scraping of usernames and ORCID associations. Username search is prefix-match (ILIKE), ORCID search is exact match. Max 10 results, excludes the requesting user.
 205. **ORCID Search Is Exact Match (Phase 41d):** When the search query looks like an ORCID iD (digits with dashes), the backend does an exact match on `users.orcid_id`. No fuzzy matching on ORCID iDs — they're precise identifiers.
+206. **Superconcepts Are a UI Rename Only (Phase 42a):** All user-facing text changes from "combo" to "superconcept" but all internal identifiers (database tables, API routes, component file names, variable names) remain as "combo". This avoids a risky mass-rename across the codebase while giving users the right conceptual framing.
+207. **Document Coauthor Direct Add Mirrors Corpus Pattern (Phase 42b):** Adding a coauthor by username/ORCID search directly inserts into `document_authors`, skipping an accept/decline flow. This matches the corpus invite-by-search pattern from Phase 41d. Coauthors can leave via the existing "Leave" button if added unwantedly.
+208. **Superconcept Transfer Target Is Any User (Phase 42c):** Unlike corpus transfer (which requires the target to be an existing `corpus_allowed_users` member), superconcept transfer allows any user as the target. Superconcepts don't have a formal membership model — only subscribers — so requiring the target to be a subscriber would be unnecessarily restrictive.
+209. **Auto-Subscribe New Superconcept Owner (Phase 42c):** When ownership transfers, if the new owner is not already a subscriber, they are automatically subscribed (row in `combo_subscriptions` + `sidebar_items`). An owner should always have access to manage their superconcept via the sidebar.
+210. **Account Deletion Requires Zero Owned Superconcepts (Phase 42c):** The `delete-account` endpoint now checks for both owned corpuses and owned superconcepts. This replaces the previous behavior where combo ownership silently became ownerless via `ON DELETE SET NULL` (Architecture Decision #225 updated). The `ON DELETE SET NULL` FK constraint remains as a defensive measure.
+211. **Corpus Members Can Remove Their Own Documents (Phase 42d):** The document removal endpoint checks `corpus_documents.added_by` in addition to corpus ownership. Members can retract documents they contributed without requiring the corpus owner to act. Same orphan cleanup behavior applies. Members cannot remove documents added by other members or by the owner.
 
 ### Common Tasks
 
@@ -3251,6 +3257,89 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 2. ~~**41b** (ORCID display in UI)~~ ✅
 3. ~~**41c** (Document external links)~~ ✅
 4. ~~**41d** (Corpus invite by username/ORCID)~~ ✅
+
+---
+
+### Phase 42: Superconcepts Rename, Document Coauthor Lookup, Superconcept Ownership Transfer, Corpus Member Document Removal
+
+**Goal:** Four improvements: (1) rename "combos" to "superconcepts" in the UI; (2) add username/ORCID search to document coauthor invitations (mirroring Phase 41d corpus invite pattern); (3) add superconcept ownership transfer with username/ORCID lookup, and require transfer before account deletion; (4) allow corpus members to remove documents they personally added to a corpus.
+
+---
+
+#### Phase 42a: Rename Combos → Superconcepts (UI Only)
+
+**Goal:** Rename all user-facing references from "combo(s)" to "superconcept(s)". No database changes, no API route changes, no table renames — purely UI string replacements. Internal code (variable names, file names, API routes, table names) stays as-is to avoid unnecessary churn.
+
+**Backend changes:**
+- None. API routes remain `/api/combos/*`.
+
+**Frontend changes:**
+- `ComboListView.jsx` — title "Browse Superconcepts", search placeholder "Search superconcepts...", create button "New Superconcept", empty states, all visible text
+- `ComboTabContent.jsx` — tab labels, header text, owner labels, empty states, all visible text referencing "combo"
+- `AppShell.jsx` — sidebar button label "Browse Superconcepts" (was "Browse Combos"), tab labels for combo tabs, context menu items
+- Any other component that renders the word "combo" to users (search through codebase for user-facing strings)
+
+**Architecture Decisions:** #243 (superconcepts are a UI rename only — all internal identifiers remain "combo")
+
+---
+
+#### Phase 42b: Document Coauthor Invite by Username/ORCID
+
+**Goal:** Add username/ORCID search to document coauthor invitations, mirroring the Phase 41d corpus invite pattern. Authors can search for and directly add coauthors instead of relying solely on invite links.
+
+**Backend changes:**
+- New `POST /api/corpuses/documents/:documentId/invite-author` — in `corpusController.js`. Author-only (uploader or existing coauthor, checked via `isDocumentAuthor` with root document resolution). Body: `{ userId }`. Validation chain: document exists (404), target user exists (404), caller is an author (403), target is not already an author — check both `uploaded_by` on root doc and `document_authors` table (409). Inserts into `document_authors` with root document ID. Returns `{ success: true, user: { id, username, orcidId } }`.
+- Reuses existing `GET /api/users/search` endpoint (Phase 41d) — no new search endpoint needed.
+
+**Frontend changes:**
+- `api.js` — new `documentsAPI.inviteAuthor(documentId, userId)` method
+- `CorpusTabContent.jsx` — in the coauthor management section (where invite link generation and coauthor list already live), add an "Add coauthor" search input between invite link UI and coauthor list. Author-only visibility. Same UX as `CorpusMembersPanel`: text input with placeholder "Search by username or ORCID", debounced 300ms with `useRef` timer, min 2 chars. Dropdown results show username + OrcidBadge + "Add" button. On success: "Added ✓" feedback (1.5s), then auto-clears input/results and refreshes coauthor list. On 409: "Already a coauthor". Same `onMouseDown`/`blurTimerRef` pattern to handle focus/blur.
+
+**Architecture Decisions:** #244 (document coauthor direct add mirrors corpus pattern from Phase 41d)
+
+---
+
+#### Phase 42c: Superconcept Ownership Transfer
+
+**Goal:** Superconcept owners can transfer ownership to any other user via username/ORCID search. Account deletion requires transferring all owned superconcepts first (matching the corpus pattern).
+
+**Backend changes:**
+- New `POST /api/combos/:id/transfer-ownership` — in `comboController.js`. Owner-only. Body: `{ newOwnerId }`. Validation: combo exists (404), caller is owner (403), target user exists (404), target is not already the owner (400). Updates `combos.created_by` to the new owner. If the new owner is not already a subscriber, auto-subscribes them (insert into `combo_subscriptions` + `sidebar_items`). Returns `{ success: true }`.
+- Update `POST /api/auth/delete-account` — add pre-check: user must own zero combos in addition to zero corpuses. Returns 400 with message indicating which combos need to be transferred. Query: `SELECT id, name FROM combos WHERE created_by = $1`.
+
+**Frontend changes:**
+- `ComboTabContent.jsx` — new "Transfer ownership" section (owner-only), below the existing owner info area. Username/ORCID search input (same pattern as 42b), with a "Transfer" button on each result. Confirmation step: "Transfer ownership of [superconcept name] to [username]?" with Confirm/Cancel. On success: refresh combo data (owner display updates), current user loses owner controls.
+- Account deletion UI — update the pre-deletion check message to mention both corpuses and superconcepts that need to be transferred.
+
+**Architecture Decisions:** #245 (transfer target is any user, not just subscribers), #246 (auto-subscribe new owner), #247 (account deletion requires zero owned superconcepts — updates Architecture Decision #225)
+
+---
+
+#### Phase 42d: Corpus Member Document Removal
+
+**Goal:** Corpus members (users in `corpus_allowed_users`) can remove documents they personally added to the corpus. Owners retain the ability to remove any document. Members cannot remove documents added by other members or by the owner.
+
+**Backend changes:**
+- Update `POST /api/corpuses/:id/documents/remove` — expand permission check. Currently owner-only. New logic:
+  1. If caller is the corpus owner → allow removal of any document (unchanged)
+  2. If caller is a corpus member (in `corpus_allowed_users`) → allow removal only if `corpus_documents.added_by = req.user.userId` for this specific corpus-document link
+  3. Otherwise → 403
+- Same orphan cleanup behavior applies regardless of who removes the document (auto-delete if document is in zero corpuses, unless uploaded by an allowed user of the former corpus — orphan rescue per Phase 9b)
+
+**Frontend changes:**
+- `CorpusTabContent.jsx` and/or `CorpusDocumentList.jsx` — show a remove/✕ button on documents where the current user is either: (a) the corpus owner, or (b) the `added_by` user for that document. This requires the document list API to return `added_by` information (or at minimum an `isRemovableByCurrentUser` flag). Check whether the existing document list response already includes `added_by` — if not, add it.
+- Confirmation dialog before removal (same pattern as existing owner removal)
+
+**Architecture Decisions:** #248 (corpus members can remove their own documents — permission expansion on existing endpoint, same orphan cleanup behavior)
+
+---
+
+#### Phase 42 Implementation Priority
+
+1. **42a** (Rename combos → superconcepts in UI)
+2. **42b** (Document coauthor invite by username/ORCID)
+3. **42c** (Superconcept ownership transfer + account deletion pre-check)
+4. **42d** (Corpus member document removal)
 
 ---
 
