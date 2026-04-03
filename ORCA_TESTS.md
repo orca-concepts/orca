@@ -138,7 +138,7 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Creating a corpus with a unique name succeeds
 - [ ] Creating a corpus with a duplicate name (case-insensitive) returns 409 Conflict
 - [ ] Renaming a corpus to an existing name returns 409 Conflict
-- [ ] Only the corpus owner can update, delete, or manage documents
+- [ ] Only the corpus owner can update or delete the corpus itself
 - [ ] Corpus listing (`GET /api/corpuses/`) is guest-accessible and shows document counts and owner usernames
 - [ ] Subscribing to a corpus creates a `corpus_subscriptions` row and a `sidebar_items` row
 - [ ] Unsubscribing removes both the subscription and the sidebar item
@@ -292,7 +292,8 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 ## 15. Account Deletion (Phase 35c)
 
 - [ ] Cannot delete account if user owns any corpuses — returns 400 with error message
-- [ ] After transferring all corpus ownership, deletion succeeds
+- [ ] Cannot delete account if user owns any superconcepts — returns 400 with error message listing the superconcepts
+- [ ] After transferring all corpus and superconcept ownership, deletion succeeds
 - [ ] CASCADE deletes: votes, subscriptions, tabs, messages, flags are removed
 - [ ] SET NULL: concepts, edges, annotations, web links, documents `created_by`/`uploaded_by` become NULL
 - [ ] Documents uploaded by the deleted user still appear in corpus views (LEFT JOIN with null username)
@@ -579,6 +580,51 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Clicking "Add" on an already-added user shows "Already a member"
 - [ ] Search dropdown closes when input loses focus
 - [ ] Searching with fewer than 2 characters shows no results
+
+---
+
+## 29. Phase 42 — Superconcepts Rename, Coauthor Lookup, Ownership Transfer, Member Document Removal
+
+### 42a: Superconcepts UI Rename
+- [ ] All user-facing text says "superconcept(s)" instead of "combo(s)" — sidebar button, browse overlay, tab headers, create form, empty states
+- [ ] API routes still use `/api/combos/*` — no backend route changes
+- [ ] Internal code (variable names, component file names) still uses "combo" terminology
+
+### 42b: Document Coauthor Invite by Username/ORCID
+- [ ] Document authors see an "Add coauthor" search input in the coauthor management section
+- [ ] Non-authors do not see the "Add coauthor" search input
+- [ ] Searching by username prefix returns matching users with OrcidBadge (if applicable)
+- [ ] Searching by ORCID (full or prefix) returns matching users
+- [ ] Clicking "Add" on a search result adds the user as a coauthor and shows "Added" feedback
+- [ ] Adding a user who is already a coauthor shows "Already a coauthor"
+- [ ] Adding the document uploader returns an error (they are already an author implicitly)
+- [ ] Non-author calling the endpoint returns 403
+- [ ] The coauthor list refreshes after adding a user
+
+### 42c: Superconcept Ownership Transfer
+- [ ] Superconcept owner sees a "Transfer ownership" section with a username/ORCID search input
+- [ ] Non-owners do not see transfer controls
+- [ ] Searching finds users by username or ORCID
+- [ ] Clicking "Transfer" on a search result shows a confirmation dialog
+- [ ] Confirming the transfer updates `combos.created_by` to the new owner
+- [ ] If the new owner was not already a subscriber, they are auto-subscribed (combo tab appears in their sidebar)
+- [ ] After transfer, the original owner loses owner controls (no add/remove subconcepts, no transfer)
+- [ ] Transferring to the current owner returns an error
+- [ ] Account deletion is blocked when the user owns superconcepts — error message lists them
+- [ ] After transferring all superconcepts, account deletion proceeds normally
+
+### 42d: Corpus Member Document Removal
+- [ ] Corpus owner can remove any document from the corpus (unchanged behavior)
+- [ ] Corpus member can remove a document they personally added (`corpus_documents.added_by` matches their user ID)
+- [ ] Corpus member cannot remove a document added by another member — returns 403 "You can only remove documents you added"
+- [ ] Corpus member cannot remove a document added by the corpus owner — returns 403
+- [ ] Non-member cannot remove any document — returns 403
+- [ ] The remove (✕) button appears on all documents for the corpus owner
+- [ ] The remove (✕) button appears only on the member's own documents for corpus members
+- [ ] The remove (✕) button does not appear for non-members or guests
+- [ ] Confirmation dialog appears before removal (same as owner removal flow)
+- [ ] Same orphan cleanup applies: if the removed document is in zero corpuses, it is auto-deleted unless the uploader is an allowed user (Phase 9b rescue)
+- [ ] Removing a document also deletes its annotations within that corpus
 
 ---
 
