@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling planned)
+**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete)
 
 ---
 
@@ -1287,7 +1287,7 @@ CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_vot
 - `ON DELETE CASCADE` from all three FKs ensures cleanup
 - No auto-vote on annotation creation (unlike corpus annotations) — combo votes are always deliberate
 
-#### `tunnel_links` — 🔲 PLANNED (Phase 43a)
+#### `tunnel_links` — ✅ IMPLEMENTED (Phase 43a)
 Stores bidirectional tunnel connections between edges (concepts-in-context) across different graphs and attributes. Each row represents one direction of a link. Creating a tunnel always inserts two rows (A→B and B→A) in a single transaction.
 
 ```sql
@@ -1313,7 +1313,7 @@ CREATE INDEX idx_tunnel_links_linked ON tunnel_links(linked_edge_id);
 - Any logged-in user can create a tunnel link between any two edges
 - Tunnel links are permanent (append-only) — cannot be deleted
 
-#### `tunnel_votes` — 🔲 PLANNED (Phase 43a)
+#### `tunnel_votes` — ✅ IMPLEMENTED (Phase 43a)
 Endorsement votes on tunnel links. Votes are directional — voting for B in A's tunnel view does NOT affect A's vote count in B's tunnel view.
 
 ```sql
@@ -1705,7 +1705,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | POST | `/:id/annotations/unvote` | Required | Remove combo vote on an annotation |
 | POST | `/:id/transfer-ownership` | Owner only | Transfer superconcept ownership to any user. Body: `{ newOwnerId }`. Auto-subscribes new owner if not already subscribed. (Phase 42c) | (`/api/citations`) — ✅ IMPLEMENTED (Phase 38j)
 
-### Tunnels (`/api/tunnels`) — 🔲 PLANNED (Phase 43a)
+### Tunnels (`/api/tunnels`) — ✅ IMPLEMENTED (Phase 43a)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -2171,6 +2171,11 @@ This only needs to be done once per database. If you drop and recreate the datab
 209. **Auto-Subscribe New Superconcept Owner (Phase 42c):** When ownership transfers, if the new owner is not already a subscriber, they are automatically subscribed (row in `combo_subscriptions` + `sidebar_items`). An owner should always have access to manage their superconcept via the sidebar.
 210. **Account Deletion Requires Zero Owned Superconcepts (Phase 42c):** The `delete-account` endpoint now checks for both owned corpuses and owned superconcepts. This replaces the previous behavior where combo ownership silently became ownerless via `ON DELETE SET NULL` (Architecture Decision #225 updated). The `ON DELETE SET NULL` FK constraint remains as a defensive measure.
 211. **Corpus Members Can Remove Their Own Documents (Phase 42d):** The document removal endpoint checks `corpus_documents.added_by` in addition to corpus ownership. Members can retract documents they contributed without requiring the corpus owner to act. Same orphan cleanup behavior applies. Members cannot remove documents added by other members or by the owner.
+212. **Tunnel Links Are Bidirectional, Votes Are Directional (Phase 43):** Creating a tunnel link between edges A and B inserts two `tunnel_links` rows (A→B and B→A) in a single transaction. Both directions are visible immediately. Votes are independent per direction — voting for B in A's tunnel view does not affect A in B's tunnel view. This allows asymmetric relevance assertions.
+213. **Tunnel View Hides Annotation Panel (Phase 43b):** When `effectiveViewMode === 'tunnel'`, the right column (`ConceptAnnotationPanel`) does not render and the left column takes full width. The annotation panel returns when switching back to children or flip view.
+214. **Tunnel Button Requires Parent Edge Context (Phase 43b):** The "Tunnel" button in the concept header only appears when `effectiveViewMode === 'children' && parentEdgeId` is truthy. Root concepts without a path have no edge to tunnel from. Root concepts navigated to WITH a path (via a graph path) DO have an edge and show the button.
+215. **Tunnel Links TO Hidden Edges Still Display (Phase 43c):** The `getTunnelLinks` query has no `is_hidden` filter on the linked edge. This matches the superconcept philosophy (Architecture Decision #222) — the user who created the tunnel made a deliberate choice. Creating tunnels to hidden edges IS blocked (validation in `createTunnelLink`).
+216. **FlipView Right-Click Opens New Graph Tab (Phase 43b):** Alt parent cards in FlipView support right-click context menu with "Open in new graph tab". Left click still navigates the current tab (Phase 38a behavior). The `onOpenNewTab` prop is optional — if not provided (standalone mode), right-click does nothing special.
 
 ### Common Tasks
 
@@ -2392,6 +2397,12 @@ Phase 6: Complete. All four sub-phases implemented:
   - **Phase 28f:** Login Panel Redesign ✅ (LoginModal.jsx with Log In/Sign Up tabs, /login and /register routes → redirect to /, AcceptInvite and DocInviteAccept show login modal for guests, Login.jsx and Register.jsx retained but unused)
   - **Phase 28g:** Expand Concept Name Character Limit ✅ (concepts.name and document_concept_links_cache.concept_name widened to VARCHAR(255) via idempotent ALTER TABLE, backend validation changed from >40 to >255, frontend SearchField and AnnotationPanel maxLength changed to 255)
   - **Phase 28 additional fixes:** DecontextualizedDocView and DocumentPage removed entirely (deleted files, removed /documents/:id route, removed getAllDocumentAnnotations from api.js); guest annotation clicks open login modal; child count singular/plural fix (pg COUNT string wrapping); swap button tooltip added; dormancy banner orphaned activity rows fix (EXISTS subquery filters); ConceptAnnotationPanel 14px horizontal padding added
+- **Phase 42:** Superconcepts Rename, Document Coauthor Lookup, Superconcept Ownership Transfer, Corpus Member Document Removal — ✅ COMPLETE
+  - **Phase 42a:** Rename Combos → Superconcepts (UI Only) ✅ COMPLETE
+  - **Phase 42b:** Document Coauthor Invite by Username/ORCID ✅ COMPLETE
+  - **Phase 42c:** Superconcept Ownership Transfer ✅ COMPLETE
+  - **Phase 42d:** Corpus Member Document Removal ✅ COMPLETE
+- **Phase 43:** Tunneling — ✅ COMPLETE (43a: backend infrastructure with `tunnel_links`/`tunnel_votes` tables, bidirectional CRUD, voting, search `?attributeId` filter; 43b: TunnelView.jsx with per-attribute columns, search/add, voting, concept card navigation, right-click "Open in new graph tab", FlipView right-click context menu, FlipView sort label "Links"→"Votes"; 43c: guest read-only access, hidden edge handling, root edge tunnel support, context menu dismiss fix, path array fix for new tab creation)
 
 ### Git Commits (Phase 27)
 1. `feat: 27a, two-column concept layout with annotation panel stub, retire links/fliplinks view modes and WebLinksView/FlipLinksView`
@@ -3402,7 +3413,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-### Phase 43: Tunneling — 🔲 PLANNED
+### Phase 43: Tunneling — ✅ COMPLETE
 
 **Goal:** Let users create cross-graph, cross-attribute links between specific edges (concepts-in-context). Tunnel links are bidirectional (creating A→B also creates B→A), edge-level, permanent (append-only), and votable independently in each direction. The tunnel view shows linked concepts organized into vertical columns by attribute, with per-column search/add and sorting.
 
@@ -3411,9 +3422,11 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - **Superconcepts** group edges into named collections to collate annotations. Tunnel links are direct pairwise connections visible from each concept's own page.
 - **Tunneling** says "this specific edge is meaningfully connected to that specific edge" — a direct, permanent, votable assertion of cross-graph relevance.
 
+**Completed:** All three sub-phases implemented and verified.
+
 ---
 
-#### Phase 43a: Backend Infrastructure — Tables, Endpoints, Search Attribute Filter — 🔲 PLANNED
+#### Phase 43a: Backend Infrastructure — Tables, Endpoints, Search Attribute Filter — ✅ COMPLETE
 
 **Complexity:** High
 
@@ -3442,7 +3455,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 43b: Tunnel View UI — 🔲 PLANNED
+#### Phase 43b: Tunnel View UI — ✅ COMPLETE
 
 **Complexity:** High
 
@@ -3493,19 +3506,19 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 43c: Polish & Edge Cases — 🔲 PLANNED
+#### Phase 43c: Polish & Edge Cases — ✅ COMPLETE
 
 **Complexity:** Low-Medium
 
-**Tasks:**
-- Nav history: tunnel view integrates with the in-tab back button (push to `navHistory` when entering tunnel view, pop back to children on back)
-- Guest access: guests can view tunnel links and vote counts (read-only). Tunnel creation and voting require login.
-- Hidden edges: tunnel links TO hidden edges are still displayed (same philosophy as superconcepts — Architecture Decision #222). Tunnel links FROM hidden edges are not shown (since the user can't navigate to a hidden edge).
+**Tasks completed:**
+- Guest access verified: tunnel button visible, search/create hidden, vote buttons read-only, card navigation works, right-click "Open in new graph tab" works via ephemeral guest tabs
+- Hidden edges verified: tunnel links TO hidden edges display (Architecture Decision #222), creating tunnels to hidden edges returns 400, navigation layer blocks FROM hidden edges naturally
 - `'tunnel'` view mode persists in `graph_tabs` table across refresh/logout (VARCHAR column, no migration needed)
-- Frontend build verification (`npm run build`)
-- Test Level 1 regression sweep
-
-**Suggested git commit:** `feat: 43c — tunnel view polish, nav history, guest access, hidden edge handling, build verification`
+- Root edge tunnel destinations display correctly (empty path, just concept name)
+- Context picker skips single-edge concepts (direct creation)
+- Fixed: `handleOpenNewTab` was passing path as comma-joined string instead of array (caused path loss when opening new graph tabs from tunnel/flip view right-click)
+- Fixed: TunnelView right-click context menu used full-screen overlay that blocked dismiss-on-click-away (removed overlay, matching FlipView pattern)
+- Frontend build verification (`npm run build`) — zero errors
 
 ---
 
@@ -3520,6 +3533,10 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - **Architecture Decision #252 — Per-Column Sort in Tunnel View (Phase 43):** Each attribute column in the tunnel view has its own independent sort toggle (Votes | New). This allows users to sort one attribute's tunnels by votes while exploring another attribute's newest additions.
 
 - **Architecture Decision #253 — Tunnel Search Filters by Attribute (Phase 43):** The concept search endpoint gains an optional `?attributeId=N` parameter for tunnel view. Each column's search field only returns concepts that have edges with the matching attribute, preventing users from accidentally trying to tunnel to a concept that doesn't exist in that attribute context.
+
+- **Architecture Decision #254 — Root Edge Tunnel Destinations Require Separate Query (Phase 43c):** The `getConceptParents` endpoint uses `JOIN concepts c ON e.parent_id = c.id` which excludes root edges (where `parent_id IS NULL`). When the tunnel view's context picker resolves edges for a concept, it queries both `getConceptParents` (for non-root edges) and `getRootConcepts` (to find root edges). Root edges matching the column's attribute are merged into the context list. This parallels how AnnotationPanel handles root edges (Architecture Decision #76).
+
+- **Architecture Decision #255 — Flip View Sort Label "Links" Renamed to "Votes" (Phase 43b):** The first sort toggle label in FlipView's contextual sort bar was changed from "Links" to "Votes" for clarity. The underlying sort key (`'links'`) and behavior (sorts by `link_count` descending) are unchanged — only the display label changed.
 
 #### Phase 43 Verification Checklist
 1. Create a tunnel link — both directions appear immediately
@@ -3542,11 +3559,11 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 18. Hidden destination edges still show tunnel links
 19. Clean build: `cd frontend && npm run build` succeeds
 
-#### Phase 43 Implementation Priority
+#### Phase 43 Implementation Priority (completed)
 
-1. **43a** — Backend tables, endpoints, search attribute filter
-2. **43b** — Tunnel view UI, flip view right-click + sort rename
-3. **43c** — Polish, nav history, edge cases, build verification
+1. ~~**43a** — Backend tables, endpoints, search attribute filter~~ ✅
+2. ~~**43b** — Tunnel view UI, flip view right-click + sort rename~~ ✅
+3. ~~**43c** — Polish, edge cases, bug fixes, build verification~~ ✅
 
 ---
 

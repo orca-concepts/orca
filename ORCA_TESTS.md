@@ -628,4 +628,78 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 
 ---
 
+## 30. Tunnel Links (Phase 43)
+
+### Backend — Tunnel CRUD & Voting
+- [ ] Creating a tunnel link inserts two rows (bidirectional): `POST /api/tunnels/create` with `{ originEdgeId, linkedEdgeId }` returns both `tunnelLinkId` and `reverseTunnelLinkId`
+- [ ] Both directions are auto-voted for the creator on creation
+- [ ] Getting tunnel links for edge A (`GET /api/tunnels/:edgeId`) returns the link to edge B, grouped by attribute
+- [ ] Getting tunnel links for edge B returns the reverse link to edge A
+- [ ] Duplicate tunnel link creation returns 409 "Tunnel link already exists"
+- [ ] Cannot create a tunnel link to the same edge (self-tunnel) — returns 400
+- [ ] Cannot create a tunnel link to a hidden edge — returns 400
+- [ ] Cannot create a tunnel link from a hidden edge — returns 400
+- [ ] Vote toggle (`POST /api/tunnels/vote`) toggles on/off correctly with updated count
+- [ ] Voting on direction A→B does not affect B→A vote count (directional)
+- [ ] Tunnel links TO hidden edges still appear in GET results (not filtered)
+- [ ] Guest users (no JWT) can GET tunnel links with `userVoted: false`
+- [ ] Guest users cannot create tunnel links or vote — returns 401
+
+### Backend — Search Attribute Filter
+- [ ] `GET /api/concepts/search?q=term&attributeId=3` returns only concepts with edges having `attribute_id = 3`
+- [ ] `GET /api/concepts/search?q=term` without `attributeId` returns all matching concepts (backwards compatible)
+- [ ] `GET /api/concepts/search?q=term&attributeId=999` returns empty results for non-existent attribute
+
+### Frontend — Tunnel Button
+- [ ] "Tunnel" button appears in concept header when in children view with a path context (`parentEdgeId` exists)
+- [ ] "Tunnel" button is NOT visible in flip view
+- [ ] "Tunnel" button is NOT visible in tunnel view itself
+- [ ] "Tunnel" button is NOT visible on root-level concepts without a path
+- [ ] "Tunnel" button IS visible for guest users (guests can browse tunnels read-only)
+- [ ] Clicking "Tunnel" switches to tunnel view — four attribute columns appear
+
+### Frontend — Tunnel View Layout
+- [ ] Tunnel view takes full width — annotation panel (right column) is NOT visible
+- [ ] One column per enabled attribute (action, tool, value, question with default config)
+- [ ] Each column has a header showing the attribute name in brackets (e.g., "[value]")
+- [ ] Empty columns show "No tunnels yet" text
+- [ ] Columns scroll horizontally on narrow viewports (< 900px)
+
+### Frontend — Tunnel View Search & Create
+- [ ] Search field at top of each column is visible for logged-in users
+- [ ] Search field is NOT visible for guest users
+- [ ] Typing in a column's search field returns results filtered to that attribute only
+- [ ] Clicking a search result with one matching context creates the tunnel directly (no picker)
+- [ ] Clicking a search result with multiple matching contexts shows a context picker
+- [ ] Clicking a root-level concept from search correctly finds and uses the root edge
+- [ ] After creating a tunnel, the new card appears in the column immediately
+- [ ] Duplicate tunnel attempt shows "Already linked" feedback
+- [ ] Search input clears after successful tunnel creation
+
+### Frontend — Tunnel View Cards
+- [ ] Each card shows concept name, path (if non-root), tunnel vote count, and save vote count
+- [ ] Root edge tunnel cards show just the concept name (no path crash)
+- [ ] Clicking a concept name navigates the current tab to that concept in children view
+- [ ] ▲ vote button toggles tunnel vote with optimistic count update (logged-in users)
+- [ ] ▲ vote button is visible but non-interactive for guests (opacity reduced, no click effect)
+- [ ] Per-column "Votes | New" sort toggle works independently per column
+- [ ] Right-click on a card shows "Open in new graph tab" context menu
+- [ ] Clicking "Open in new graph tab" creates a new graph tab at the linked concept
+- [ ] Right-click context menu dismisses on clicking away from it
+- [ ] Right-click context menu dismisses on pressing Escape
+
+### Frontend — Tunnel View Persistence
+- [ ] Tunnel view mode persists in graph tab across page refresh (`view_mode = 'tunnel'` in database)
+- [ ] Standalone URL `?view=tunnel` loads tunnel view correctly
+- [ ] "Children View" button in header returns from tunnel view to children view
+
+### Frontend — Flip View Changes (Phase 43b)
+- [ ] Flip view sort toggle reads "Votes | Similarity ↓ | Similarity ↑" (first label changed from "Links")
+- [ ] Right-click on a flip view card shows "Open in new graph tab" context menu
+- [ ] Clicking "Open in new graph tab" in flip view creates a new graph tab at that concept in the clicked parent's context
+- [ ] Left click on flip view cards still navigates the current tab (Phase 38a behavior unchanged)
+- [ ] Right-click context menu in flip view dismisses correctly on outside click
+
+---
+
 **END OF TESTING CHECKLIST**
