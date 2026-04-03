@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete)
+**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling planned)
 
 ---
 
@@ -326,7 +326,7 @@ CREATE INDEX idx_graph_tabs_user ON graph_tabs(user_id);
 - `tab_type` is `'root'` (at root page, concept_id is null) or `'concept'` (viewing a specific concept)
 - `concept_id` uses `ON DELETE SET NULL` — if a concept is removed, the tab gracefully degrades rather than being deleted
 - `path` stores the graph path as an integer array (same format as edges.graph_path)
-- `view_mode` is `'children'` or `'flip'` — persists the user's current view state. (Note: `'links'` and `'fliplinks'` were retired in Phase 27a — migration updates stale rows to `'children'`)
+- `view_mode` is `'children'`, `'flip'`, or `'tunnel'` — persists the user's current view state. (Note: `'links'` and `'fliplinks'` were retired in Phase 27a — migration updates stale rows to `'children'`. `'tunnel'` added in Phase 43b.)
 - `label` stores the display name shown in the tab bar (updated dynamically as user navigates)
 - `updated_at` tracks the last navigation action (useful for ordering/recency)
 - `group_id` is nullable — links to a `tab_groups` row if this tab is in a group, or NULL if ungrouped (Phase 5d)
@@ -1287,6 +1287,53 @@ CREATE INDEX idx_combo_annotation_votes_combo_annotation ON combo_annotation_vot
 - `ON DELETE CASCADE` from all three FKs ensures cleanup
 - No auto-vote on annotation creation (unlike corpus annotations) — combo votes are always deliberate
 
+#### `tunnel_links` — 🔲 PLANNED (Phase 43a)
+Stores bidirectional tunnel connections between edges (concepts-in-context) across different graphs and attributes. Each row represents one direction of a link. Creating a tunnel always inserts two rows (A→B and B→A) in a single transaction.
+
+```sql
+CREATE TABLE tunnel_links (
+  id SERIAL PRIMARY KEY,
+  origin_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+  linked_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(origin_edge_id, linked_edge_id)
+);
+
+CREATE INDEX idx_tunnel_links_origin ON tunnel_links(origin_edge_id);
+CREATE INDEX idx_tunnel_links_linked ON tunnel_links(linked_edge_id);
+```
+
+**Key Points:**
+- `UNIQUE(origin_edge_id, linked_edge_id)` prevents duplicate links in the same direction
+- Creating a tunnel inserts TWO rows in a transaction: `(A, B)` and `(B, A)`. If either already exists, return 409.
+- `ON DELETE CASCADE` from edges ensures cleanup if an edge is removed
+- `ON DELETE SET NULL` on `created_by` — link survives if creator deletes account
+- Both rows share the same `created_by` and `created_at`
+- Any logged-in user can create a tunnel link between any two edges
+- Tunnel links are permanent (append-only) — cannot be deleted
+
+#### `tunnel_votes` — 🔲 PLANNED (Phase 43a)
+Endorsement votes on tunnel links. Votes are directional — voting for B in A's tunnel view does NOT affect A's vote count in B's tunnel view.
+
+```sql
+CREATE TABLE tunnel_votes (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  tunnel_link_id INTEGER REFERENCES tunnel_links(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, tunnel_link_id)
+);
+
+CREATE INDEX idx_tunnel_votes_link ON tunnel_votes(tunnel_link_id);
+```
+
+**Key Points:**
+- One vote per user per tunnel link (directional — the `tunnel_link_id` is for a specific A→B direction)
+- Auto-vote on creation: when a user creates a tunnel, they auto-vote on BOTH directions
+- Toggle on/off pattern, same as annotation votes and web link votes
+- `ON DELETE CASCADE` from both FKs ensures cleanup
+
 ---
 
 ## API Endpoints
@@ -1359,7 +1406,7 @@ All concept endpoints require authentication (JWT token in Authorization header)
 | GET | `/:id?path=...` | Get concept with children in specific context |
 | GET | `/:id/parents?originPath=...` | Get all parent contexts for a concept (flip view). Returns `originEdgeId` and link vote counts in contextual mode. |
 | GET | `/:id/votesets?path=...` | Get identical vote sets for children in a specific context. Returns color-assignable groups of users who saved the same children. |
-| GET | `/search?q=...&parentId=...&path=...` | Search concepts by name (text + trigram similarity) |
+| GET | `/search?q=...&parentId=...&path=...&attributeId=...` | Search concepts by name (text + trigram similarity). Optional `attributeId` filter returns only concepts with edges matching that attribute (Phase 43a). |
 | GET | `/names/batch?ids=...` | Get concept names by comma-separated IDs |
 | POST | `/root` | Create new root concept (requires attributeId) |
 | POST | `/child` | Create child concept in specific context (requires attributeId) |
@@ -1551,6 +1598,7 @@ Orca uses three vote types, each with a short name reflecting its action:
 | ~~**Move**~~ | ~~Move Vote (formerly "Side Vote")~~ | ~~Assert concept belongs in a different context~~ | ~~Single edge~~ | ~~Yes — user specifies destination context~~ |
 | **Swap** | Swap Vote (formerly "Replace-With Vote") | Assert concept should be replaced by a sibling | Single edge | Yes — user specifies sibling |
 | **Link** | Link Vote (formerly "Similarity Vote") | Assert a parent context is helpful relative to origin context (Flip View only) | Contextual Flip View only | No — applied to existing parent context |
+| **Tunnel** | Tunnel Vote | Assert a cross-graph/cross-attribute edge link is meaningful | Tunnel View only | No — applied to existing tunnel link |
 
 **Naming convention:** UI buttons and labels use the short names (Save, Swap, Link). Technical documentation and database tables may still reference the original table names (`votes`, `replace_votes`, `similarity_votes`) for continuity.
 
@@ -1657,6 +1705,14 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | POST | `/:id/annotations/unvote` | Required | Remove combo vote on an annotation |
 | POST | `/:id/transfer-ownership` | Owner only | Transfer superconcept ownership to any user. Body: `{ newOwnerId }`. Auto-subscribes new owner if not already subscribed. (Phase 42c) | (`/api/citations`) — ✅ IMPLEMENTED (Phase 38j)
 
+### Tunnels (`/api/tunnels`) — 🔲 PLANNED (Phase 43a)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/:edgeId` | Guest OK | Get all tunnel links for an edge, grouped by attribute. Returns linked concept name, path, attribute, save vote count on destination edge, tunnel vote count, user_voted. Supports `?sort=votes\|new` (default: votes). |
+| POST | `/create` | Required | Create a tunnel link. Body: `{ originEdgeId, linkedEdgeId }`. Inserts two rows (bidirectional). Auto-votes both directions for creator. Returns 409 if link already exists. |
+| POST | `/vote` | Required | Toggle vote on a tunnel link. Body: `{ tunnelLinkId }`. Inserts if not voted, deletes if already voted. Returns `{ voted, voteCount }`. |
+
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/resolve/:annotationId` | Required | Resolve a citation annotation ID to its corpus and document context for navigation. Returns `corpusId`, `documentId`, `annotationId`. (Phase 38j) |
@@ -1711,6 +1767,7 @@ orca/
 │   │   │   ├── corpusController.js  # Corpus & document CRUD (Phase 7a)
 │   │   │   ├── moderationController.js # Moderation: flag, unflag, vote, comment, unhide (Phase 16, updated 30k)
 │   │   │   ├── pagesController.js   # Informational page comments CRUD (Phase 30g)
+│   │   │   ├── tunnelController.js  # Tunnel links CRUD, voting (Phase 43a)
 │   │   │   └── votesController.js # Voting logic
 │   │   ├── middleware/
 │   │   │   └── auth.js           # JWT verification middleware
@@ -1726,6 +1783,7 @@ orca/
 │   │   │   ├── combos.js        # Combo routes — CRUD, subscriptions, annotations, voting (Phase 39a)
 │   │   │   ├── documents.js     # Document routes — standalone doc + tags + citations (Phase 7a, 17a, 38j)
 │   │   │   ├── pages.js          # Informational page comment routes (Phase 30g)
+│   │   │   ├── tunnels.js       # Tunnel link routes — CRUD, voting (Phase 43a)
 │   │   │   └── votes.js          # Vote routes
 │   │   └── server.js             # Express app setup
 │   ├── .env                      # Environment variables (DO NOT COMMIT)
@@ -1768,6 +1826,7 @@ orca/
     │   │   ├── LoginModal.jsx     # Password login/register/forgot-password modal (Phase 32c, redesigned Phase 40b) — three modes: Log In (identifier+password), Sign Up (phone OTP then details+password), Forgot Password (phone OTP then new password)
     │   │   ├── SidebarDndContext.jsx # Drag-and-drop context for sidebar reordering (Phase 19c, @dnd-kit)
     │   │   ├── SwapModal.jsx       # Swap vote modal with sibling list
+    │   │   ├── TunnelView.jsx     # Tunnel view — cross-graph/cross-attribute edge links by attribute columns (Phase 43b)
     │   │   └── VoteSetBar.jsx     # Vote set color swatches and filtering bar
     │   ├── contexts/
     │   │   └── AuthContext.jsx     # Global auth state
@@ -1963,7 +2022,7 @@ This only needs to be done once per database. If you drop and recreate the datab
 60. **Cross-Context Links View Is Read-Only for Non-Current Contexts:** The FlipLinksView (🔗 All Links in Flip View) shows all web links across all parent contexts, but upvoting is only interactive for links in the current context. Other contexts are read-only with a "view only" hint. This prevents users from voting on links they may not have full context for.
 61. **External Links Page Access Depends on parentEdgeId — ⚠️ Moot (Phase 27a):** The External Links page was retired in Phase 27a and replaced by the ConceptAnnotationPanel's Web Links tab. The old 🔗 Links button was removed. Web links are now accessible via the right-column annotation panel.
 62. **Shareable Concept Links Use Standalone Mode URLs:** The Share button generates URLs in the format `/concept/:id?path=...` which works in standalone mode (direct URL navigation, outside the tab system). When someone opens a shared link, they get a fresh AppShell with the concept loaded in a new graph tab. The path parameter uses `effectivePath.slice(0, -1)` to exclude the current concept ID (matching how the `path` query param works in the routing system).
-63. **View Modes in Concept.jsx (Updated Phase 27a):** Concept.jsx now supports two view modes: `'children'` (default) and `'flip'` (Flip View). Both modes are stored in tab navigation state, support nav history (back button), and persist in the `graph_tabs` database table via `view_mode` column. The URL also supports `?view=flip` for standalone mode. *(Phase 27a retired `'links'` and `'fliplinks'` view modes — web links and cross-context annotations are now served by ConceptAnnotationPanel in the right column. Migration updates stale graph_tabs rows.)*
+63. **View Modes in Concept.jsx (Updated Phase 43b):** Concept.jsx now supports three view modes: `'children'` (default), `'flip'` (Flip View), and `'tunnel'` (Tunnel View). All modes are stored in tab navigation state, support nav history (back button), and persist in the `graph_tabs` database table via `view_mode` column. The URL also supports `?view=flip` and `?view=tunnel` for standalone mode. The Tunnel button is only accessible from children view (hidden in flip view). When in tunnel view, the annotation panel (right column) is hidden — tunnel view uses full width for attribute columns. *(Phase 27a retired `'links'` and `'fliplinks'` view modes — web links and cross-context annotations are now served by ConceptAnnotationPanel in the right column. Migration updates stale graph_tabs rows.)*
 64. **Corpus View Is an AppShell Overlay (Phase 7a):** The corpus browsing UI (list → detail → document) renders as an overlay in AppShell's content area, replacing tab content while active. Tab content is preserved underneath (not unmounted) via a `corpusView` state object: `null` (not showing), `{ view: 'list' }`, `{ view: 'detail', corpusId }`, or `{ view: 'document', documentId, corpusId }`. The Corpuses button in the sidebar toggles this overlay. This is a temporary architecture for Phase 7a — in Phase 7c, corpus tabs will become persistent tab-bar elements alongside graph tabs, and the overlay pattern will be retired.
 65. **Corpus Ownership Enforced Server-Side:** All ownership checks (update, delete, add/remove documents) are validated on the backend by comparing `req.user.userId` against `corpuses.created_by`. The frontend shows owner controls to all logged-in users for simplicity, relying on the backend to reject unauthorized actions. This avoids passing user IDs through component props.
 66. **Document Orphan Cleanup Is Transactional:** When removing a document from a corpus or deleting a corpus, the backend uses a database transaction to (1) remove the corpus-document link, (2) check if the document is in zero corpuses, and (3) delete the orphaned document if so. This prevents race conditions where a document could be left in limbo.
@@ -3340,6 +3399,154 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 2. ~~**42b** (Document coauthor invite by username/ORCID)~~ ✅
 3. ~~**42c** (Superconcept ownership transfer + account deletion pre-check)~~ ✅
 4. ~~**42d** (Corpus member document removal)~~ ✅
+
+---
+
+### Phase 43: Tunneling — 🔲 PLANNED
+
+**Goal:** Let users create cross-graph, cross-attribute links between specific edges (concepts-in-context). Tunnel links are bidirectional (creating A→B also creates B→A), edge-level, permanent (append-only), and votable independently in each direction. The tunnel view shows linked concepts organized into vertical columns by attribute, with per-column search/add and sorting.
+
+**Key distinction from existing features:**
+- **Flip View** shows all parent contexts where the *same concept* appears — it requires a shared concept name. Tunnel links connect *different* concepts across graphs.
+- **Superconcepts** group edges into named collections to collate annotations. Tunnel links are direct pairwise connections visible from each concept's own page.
+- **Tunneling** says "this specific edge is meaningfully connected to that specific edge" — a direct, permanent, votable assertion of cross-graph relevance.
+
+---
+
+#### Phase 43a: Backend Infrastructure — Tables, Endpoints, Search Attribute Filter — 🔲 PLANNED
+
+**Complexity:** High
+
+**New database tables:** `tunnel_links`, `tunnel_votes` (see Database Schema section for full schemas).
+
+**New API endpoints (`/api/tunnels`):**
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/:edgeId` | Guest OK | Get all tunnel links for an edge, grouped by attribute. Returns linked concept name, path, attribute, save vote count on destination edge, tunnel vote count, user_voted. Supports `?sort=votes\|new` (default: votes). |
+| POST | `/create` | Required | Create a tunnel link. Body: `{ originEdgeId, linkedEdgeId }`. Inserts two rows (bidirectional). Auto-votes both directions for creator. Returns 409 if link already exists. Validates both edges exist, are different, and are not the same edge. |
+| POST | `/vote` | Required | Toggle vote on a tunnel link. Body: `{ tunnelLinkId }`. Inserts if not voted, deletes if already voted. Returns `{ voted, voteCount }`. |
+
+**Existing endpoint modification:**
+- `GET /api/concepts/search` — add optional `?attributeId=N` query parameter to filter results to concepts that have at least one edge with the specified attribute. This enables the per-column search in tunnel view to only return concepts from the correct attribute.
+
+**Backend implementation notes:**
+- GET endpoint JOINs through `tunnel_links` → `edges` → `concepts` to return full concept name, path names (via batch concept name lookup), and attribute info
+- Save vote count on the destination edge from `COUNT(DISTINCT v.user_id)` on the `votes` table for `linked_edge_id`
+- Results grouped by `attributes.id` for the frontend to distribute into columns
+- Sort applied per-column on the frontend (backend returns all data, frontend sorts within each attribute group)
+
+**Files:** `migrate.js`, new `tunnelController.js`, new `routes/tunnels.js`, `server.js`, `api.js`, `conceptsController.js` (search attributeId filter)
+
+**Suggested git commit:** `feat: 43a — tunnel backend infrastructure, bidirectional links, voting, search attribute filter`
+
+---
+
+#### Phase 43b: Tunnel View UI — 🔲 PLANNED
+
+**Complexity:** High
+
+**New view mode:** `'tunnel'` added to `graph_tabs.view_mode` (alongside `'children'` and `'flip'`).
+
+**Tunnel button in concept header:**
+- Appears in children view only (hidden in flip view and tunnel view itself)
+- Placed in the header row alongside Flip View toggle, Share, Add as Annotation
+- Text label "Tunnel" (matching Zen aesthetic — no emoji)
+- Clicking switches to tunnel view mode; back button returns to children view
+- Persisted in `graph_tabs.view_mode`
+
+**Tunnel view layout (replaces both columns — full width, no annotation panel):**
+
+- **Column container:** Horizontal flex with one column per enabled attribute (from `ENABLED_ATTRIBUTES` env var — currently action, tool, value, question). The current concept's own attribute gets a column too (tunneling to other concepts of the same attribute is valid).
+- **Each column:**
+  - Column header: attribute name (e.g., "action", "tool", "value", "question")
+  - Search/add field at top of column (filters to that attribute via `?attributeId=N`). Same surfacing of save votes/corpus badges as existing SearchField.
+  - When user selects a concept from search, show a context picker (all parent edges for that concept with that attribute) — same pattern as AnnotationPanel context picker
+  - After selecting an edge, the tunnel link is created (both directions), auto-voted, and the card appears in the column
+  - Per-column sort toggle: "Votes | New" (flat horizontal toggle)
+  - Scrollable card list below search field
+
+- **Concept cards in each column (one per row, full column width):**
+  - Concept name (clickable — navigates current graph tab to that concept in its context)
+  - Full path displayed below the name (root → ... → parent, same path rendering as flip view cards)
+  - Tunnel vote count with clickable ▲ toggle (same pattern as flip view link votes)
+  - Small read-only save vote count on the destination edge (lighter/smaller text)
+  - Right-click context menu: "Open in new graph tab"
+
+- **Responsive behavior:** Below 900px, columns switch to horizontal scroll (`overflow-x: auto`) rather than stacking vertically.
+
+- **Empty column state:** "No tunnels yet" with the search field still active at top
+
+**Additional changes bundled in this sub-phase:**
+
+**Right-click "Open in new graph tab" on Flip View cards:**
+- FlipView concept cards currently navigate on click (Phase 38a behavior)
+- Add right-click context menu with "Open in new graph tab" option
+- Uses existing `handleOpenConceptTab` pattern to create a fresh graph tab
+
+**Flip View sort label rename:**
+- In `FlipView.jsx`, change the first sort toggle label from "Links" to "Votes" in the `Links | Similarity ↓ | Similarity ↑` toggle. No functional change — just the label text for the `similarity_votes` link vote count sort.
+
+**Files:** `Concept.jsx` (tunnel button, view mode switching), new `TunnelView.jsx`, `FlipView.jsx` (right-click context menu, sort label rename), `AppShell.jsx` (graph tab view_mode handling for 'tunnel'), `api.js`
+
+**Suggested git commit:** `feat: 43b — tunnel view UI with per-attribute columns, search/add, voting, right-click new tab, flip view sort label rename`
+
+---
+
+#### Phase 43c: Polish & Edge Cases — 🔲 PLANNED
+
+**Complexity:** Low-Medium
+
+**Tasks:**
+- Nav history: tunnel view integrates with the in-tab back button (push to `navHistory` when entering tunnel view, pop back to children on back)
+- Guest access: guests can view tunnel links and vote counts (read-only). Tunnel creation and voting require login.
+- Hidden edges: tunnel links TO hidden edges are still displayed (same philosophy as superconcepts — Architecture Decision #222). Tunnel links FROM hidden edges are not shown (since the user can't navigate to a hidden edge).
+- `'tunnel'` view mode persists in `graph_tabs` table across refresh/logout (VARCHAR column, no migration needed)
+- Frontend build verification (`npm run build`)
+- Test Level 1 regression sweep
+
+**Suggested git commit:** `feat: 43c — tunnel view polish, nav history, guest access, hidden edge handling, build verification`
+
+---
+
+#### Phase 43 Architecture Decisions
+
+- **Architecture Decision #249 — Tunnel Links Are Bidirectional, Votes Are Directional (Phase 43):** Creating a tunnel link between edges A and B inserts two `tunnel_links` rows (A→B and B→A) in a single transaction. Both directions are visible immediately. However, votes are independent per direction — voting for B in A's tunnel view does not add a vote for A in B's tunnel view. This allows communities to express asymmetric relevance (e.g., "Machine Learning is highly relevant to Statistics" may have more votes than "Statistics is highly relevant to Machine Learning").
+
+- **Architecture Decision #250 — Tunnel Links Are Edge-Level, Not Concept-Level (Phase 43):** Tunnel links connect specific edges (concept-in-context), not concept names globally. "Microscopy [tool]" under `Lab Techniques` and "Microscopy [tool]" under `Imaging Methods` are different contextual entities with independent tunnel link sets. This is consistent with Orca's core principle that identity is determined by path + attribute.
+
+- **Architecture Decision #251 — Tunnel View Uses Full Width, No Annotation Panel (Phase 43):** The tunnel view replaces both the left column (children/flip) and the right column (ConceptAnnotationPanel) with a full-width multi-column layout. This gives each attribute column enough horizontal space for readable concept cards. The annotation panel returns when the user switches back to children or flip view.
+
+- **Architecture Decision #252 — Per-Column Sort in Tunnel View (Phase 43):** Each attribute column in the tunnel view has its own independent sort toggle (Votes | New). This allows users to sort one attribute's tunnels by votes while exploring another attribute's newest additions.
+
+- **Architecture Decision #253 — Tunnel Search Filters by Attribute (Phase 43):** The concept search endpoint gains an optional `?attributeId=N` parameter for tunnel view. Each column's search field only returns concepts that have edges with the matching attribute, preventing users from accidentally trying to tunnel to a concept that doesn't exist in that attribute context.
+
+#### Phase 43 Verification Checklist
+1. Create a tunnel link — both directions appear immediately
+2. Tunnel link shows in both concepts' tunnel views
+3. Voting on direction A→B does not affect B→A vote count
+4. Auto-vote on creation applies to both directions
+5. Duplicate tunnel link returns 409
+6. Search within a column only returns concepts with matching attribute
+7. Context picker appears after concept selection (for edge choice)
+8. Per-column sort toggles work independently (Votes | New)
+9. Concept card click navigates current tab to that concept
+10. Right-click "Open in new graph tab" works in tunnel view
+11. Right-click "Open in new graph tab" works in flip view
+12. Flip view sort label reads "Votes" instead of "Links"
+13. Tunnel view is full-width (no annotation panel)
+14. Responsive: horizontal scroll on narrow screens
+15. Guest users see tunnel links read-only, no create/vote UI
+16. Tunnel view mode persists in graph tab across refresh
+17. Nav history: back button returns from tunnel to children view
+18. Hidden destination edges still show tunnel links
+19. Clean build: `cd frontend && npm run build` succeeds
+
+#### Phase 43 Implementation Priority
+
+1. **43a** — Backend tables, endpoints, search attribute filter
+2. **43b** — Tunnel view UI, flip view right-click + sort rename
+3. **43c** — Polish, nav history, edge cases, build verification
 
 ---
 
