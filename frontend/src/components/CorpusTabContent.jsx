@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI, citationsAPI } from '../services/api';
+import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI, citationsAPI, usersAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import AnnotationPanel from './AnnotationPanel';
 import CorpusDocumentList from './CorpusDocumentList';
@@ -122,6 +122,15 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   const [generatingDocInvite, setGeneratingDocInvite] = useState(false);
   const [docInviteLink, setDocInviteLink] = useState(null);
   const [copiedDocInvite, setCopiedDocInvite] = useState(false);
+
+  // Phase 42b: Add coauthor by username/ORCID search
+  const [authorSearchQuery, setAuthorSearchQuery] = useState('');
+  const [authorSearchResults, setAuthorSearchResults] = useState([]);
+  const [authorSearchLoading, setAuthorSearchLoading] = useState(false);
+  const [authorAddFeedback, setAuthorAddFeedback] = useState({});
+  const authorSearchTimerRef = useRef(null);
+  const authorBlurTimerRef = useRef(null);
+  const [showAuthorSearchResults, setShowAuthorSearchResults] = useState(false);
 
 
   // Annotation filter and user identity status
@@ -259,6 +268,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       setAuthorData(null);
       setShowAuthorPanel(false);
       setDocInviteLink(null);
+      // Reset coauthor search state
+      setAuthorSearchQuery('');
+      setAuthorSearchResults([]);
+      setShowAuthorSearchResults(false);
+      setAuthorAddFeedback({});
       const [res, chainRes] = await Promise.all([
         documentsAPI.getDocument(docId).catch(() => null),
         documentsAPI.getVersionChain(docId).catch(() => ({ data: { versions: [] } })),
@@ -358,6 +372,60 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   };
 
   const isDocAuthor = authorData?.authors != null; // authors array only returned to authors
+
+  // Phase 42b: Coauthor search handlers
+  const handleAuthorSearchChange = (e) => {
+    const val = e.target.value;
+    setAuthorSearchQuery(val);
+    setAuthorAddFeedback({});
+    if (authorSearchTimerRef.current) clearTimeout(authorSearchTimerRef.current);
+    if (val.trim().length < 2) {
+      setAuthorSearchResults([]);
+      setShowAuthorSearchResults(false);
+      return;
+    }
+    setAuthorSearchLoading(true);
+    setShowAuthorSearchResults(true);
+    authorSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await usersAPI.searchUsers(val.trim());
+        setAuthorSearchResults(res.data.users || []);
+      } catch {
+        setAuthorSearchResults([]);
+      } finally {
+        setAuthorSearchLoading(false);
+      }
+    }, 300);
+  };
+
+  const handleAddAuthor = async (targetUser) => {
+    if (!document) return;
+    try {
+      await corpusAPI.inviteAuthorToDocument(document.id, targetUser.id);
+      setAuthorAddFeedback(prev => ({ ...prev, [targetUser.id]: 'added' }));
+      loadDocumentAuthors(document.id);
+      setTimeout(() => {
+        setAuthorSearchQuery('');
+        setAuthorSearchResults([]);
+        setShowAuthorSearchResults(false);
+        setAuthorAddFeedback({});
+      }, 1500);
+    } catch (err) {
+      if (err.response?.status === 409) {
+        setAuthorAddFeedback(prev => ({ ...prev, [targetUser.id]: 'already' }));
+      } else {
+        setAuthorAddFeedback(prev => ({ ...prev, [targetUser.id]: 'error:' + (err.response?.data?.error || 'Failed') }));
+      }
+    }
+  };
+
+  // Cleanup author search timers
+  useEffect(() => {
+    return () => {
+      if (authorSearchTimerRef.current) clearTimeout(authorSearchTimerRef.current);
+      if (authorBlurTimerRef.current) clearTimeout(authorBlurTimerRef.current);
+    };
+  }, []);
 
   const loadAnnotations = async (docId) => {
     try {
@@ -1363,6 +1431,52 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
 
               <div style={styles.coauthorWarning}>
                 New co-authors will see all existing message threads on this document.
+              </div>
+
+              {/* Phase 42b: Add coauthor by username/ORCID search */}
+              <div style={styles.addCoauthorSection}>
+                <span style={styles.addCoauthorLabel}>Add coauthor</span>
+                <div style={{ position: 'relative', marginTop: '6px' }}>
+                  <input
+                    type="text"
+                    placeholder="Search by username or ORCID"
+                    value={authorSearchQuery}
+                    onChange={handleAuthorSearchChange}
+                    onFocus={() => { if (authorSearchResults.length > 0 || authorSearchQuery.trim().length >= 2) setShowAuthorSearchResults(true); }}
+                    onBlur={() => { authorBlurTimerRef.current = setTimeout(() => setShowAuthorSearchResults(false), 200); }}
+                    style={styles.addCoauthorInput}
+                  />
+                  {showAuthorSearchResults && (authorSearchLoading || authorSearchResults.length > 0 || authorSearchQuery.trim().length >= 2) && (
+                    <div style={styles.addCoauthorDropdown}>
+                      {authorSearchLoading ? (
+                        <div style={styles.addCoauthorHint}>Searching...</div>
+                      ) : authorSearchResults.length === 0 ? (
+                        <div style={styles.addCoauthorHint}>No users found</div>
+                      ) : (
+                        authorSearchResults.map(u => (
+                          <div key={u.id} style={styles.addCoauthorResultRow}>
+                            <span style={styles.addCoauthorResultName}>{u.username}<OrcidBadge orcidId={u.orcidId} /></span>
+                            {authorAddFeedback[u.id] === 'added' ? (
+                              <span style={styles.addCoauthorAdded}>Added &#10003;</span>
+                            ) : authorAddFeedback[u.id] === 'already' ? (
+                              <span style={styles.addCoauthorAlready}>Already a coauthor</span>
+                            ) : authorAddFeedback[u.id]?.startsWith('error:') ? (
+                              <span style={styles.addCoauthorAlready}>{authorAddFeedback[u.id].slice(6)}</span>
+                            ) : (
+                              <button
+                                style={styles.addCoauthorBtn}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleAddAuthor(u)}
+                              >
+                                Add
+                              </button>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={styles.authorActions}>
@@ -3749,6 +3863,83 @@ const styles = {
     border: '1px solid #e0e0e0',
     borderRadius: '4px',
     marginBottom: '8px',
+  },
+  // Phase 42b: Add coauthor search styles
+  addCoauthorSection: {
+    marginBottom: '10px',
+    paddingBottom: '10px',
+    borderBottom: '1px solid #e0e0e0',
+  },
+  addCoauthorLabel: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#555',
+    fontWeight: '600',
+  },
+  addCoauthorInput: {
+    width: '100%',
+    padding: '6px 10px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  addCoauthorDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    border: '1px solid #e0e0e0',
+    borderRadius: '4px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    zIndex: 10,
+    marginTop: '2px',
+    maxHeight: '200px',
+    overflowY: 'auto',
+  },
+  addCoauthorHint: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
+    padding: '8px 10px',
+  },
+  addCoauthorResultRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '6px 10px',
+    borderBottom: '1px solid #f5f5f5',
+  },
+  addCoauthorResultName: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#333',
+  },
+  addCoauthorBtn: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#5a4a2a',
+    background: 'none',
+    border: '1px solid #d4c9b8',
+    borderRadius: '4px',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  addCoauthorAdded: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#5a7a5a',
+    flexShrink: 0,
+  },
+  addCoauthorAlready: {
+    fontSize: '12px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
+    flexShrink: 0,
   },
   authorActions: {
     borderTop: '1px solid #e0e0e0',

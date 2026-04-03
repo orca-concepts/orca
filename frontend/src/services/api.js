@@ -429,6 +429,10 @@ export const corpusAPI = {
   leaveDocumentAuthorship: (documentId) =>
     api.post(`/corpuses/documents/${documentId}/authors/leave`),
 
+  // Phase 42b: Direct invite coauthor by userId
+  inviteAuthorToDocument: (documentId, userId) =>
+    api.post(`/corpuses/documents/${documentId}/invite-author`, { userId }),
+
   // Phase 35b: Corpus ownership transfer
   transferOwnership: (corpusId, newOwnerId) =>
     api.post(`/corpuses/${corpusId}/transfer-ownership`, { newOwnerId }),

@@ -3486,6 +3486,83 @@ const resolveCitation = async (req, res) => {
   }
 };
 
+// Phase 42b: Direct invite coauthor to document by userId
+const inviteAuthorToDocument = async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.documentId);
+    const userId = req.user.userId;
+    const targetUserId = parseInt(req.body.userId);
+
+    if (isNaN(documentId)) {
+      return res.status(400).json({ error: 'Invalid document ID' });
+    }
+    if (!targetUserId || isNaN(targetUserId)) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Check document exists
+    const docCheck = await pool.query(
+      'SELECT id FROM documents WHERE id = $1',
+      [documentId]
+    );
+    if (docCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Resolve to root document
+    const rootId = await getRootDocumentId(pool, documentId);
+
+    // Check caller is an author
+    const callerIsAuthor = await isDocumentAuthor(pool, documentId, userId);
+    if (!callerIsAuthor) {
+      return res.status(403).json({ error: 'Only document authors can invite coauthors' });
+    }
+
+    // Check target user exists
+    const userCheck = await pool.query(
+      'SELECT id, username, orcid_id FROM users WHERE id = $1',
+      [targetUserId]
+    );
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check target is not already an author (uploader or coauthor)
+    const rootDoc = await pool.query(
+      'SELECT uploaded_by FROM documents WHERE id = $1',
+      [rootId]
+    );
+    if (rootDoc.rows[0].uploaded_by === targetUserId) {
+      return res.status(409).json({ error: 'User is already a coauthor of this document' });
+    }
+    const authorCheck = await pool.query(
+      'SELECT id FROM document_authors WHERE document_id = $1 AND user_id = $2',
+      [rootId, targetUserId]
+    );
+    if (authorCheck.rows.length > 0) {
+      return res.status(409).json({ error: 'User is already a coauthor of this document' });
+    }
+
+    await pool.query(
+      'INSERT INTO document_authors (document_id, user_id) VALUES ($1, $2)',
+      [rootId, targetUserId]
+    );
+
+    const addedUser = userCheck.rows[0];
+    res.json({
+      success: true,
+      user: {
+        id: addedUser.id,
+        username: addedUser.username,
+        orcidId: addedUser.orcid_id || null,
+      },
+    });
+  } catch (error) {
+    console.error('Error inviting author to document:', error);
+    res.status(500).json({ error: 'Failed to invite coauthor' });
+  }
+};
+
 // Phase 41d: Direct invite user to corpus by userId
 const inviteUserToCorpus = async (req, res) => {
   try {
@@ -3631,4 +3708,6 @@ module.exports = {
   removeDocumentExternalLink,
   // Phase 41d: Direct invite user
   inviteUserToCorpus,
+  // Phase 42b: Direct invite coauthor to document
+  inviteAuthorToDocument,
 };

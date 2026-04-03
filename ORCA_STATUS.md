@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b–42d planned — document coauthor lookup, superconcept ownership transfer, corpus member document removal)
+**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c–42d planned — superconcept ownership transfer, corpus member document removal)
 
 ---
 
@@ -3283,7 +3283,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 42b: Document Coauthor Invite by Username/ORCID
+#### Phase 42b: Document Coauthor Invite by Username/ORCID — ✅ COMPLETE
 
 **Goal:** Add username/ORCID search to document coauthor invitations, mirroring the Phase 41d corpus invite pattern. Authors can search for and directly add coauthors instead of relying solely on invite links.
 
@@ -3292,8 +3292,8 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - Reuses existing `GET /api/users/search` endpoint (Phase 41d) — no new search endpoint needed.
 
 **Frontend changes:**
-- `api.js` — new `documentsAPI.inviteAuthor(documentId, userId)` method
-- `CorpusTabContent.jsx` — in the coauthor management section (where invite link generation and coauthor list already live), add an "Add coauthor" search input between invite link UI and coauthor list. Author-only visibility. Same UX as `CorpusMembersPanel`: text input with placeholder "Search by username or ORCID", debounced 300ms with `useRef` timer, min 2 chars. Dropdown results show username + OrcidBadge + "Add" button. On success: "Added ✓" feedback (1.5s), then auto-clears input/results and refreshes coauthor list. On 409: "Already a coauthor". Same `onMouseDown`/`blurTimerRef` pattern to handle focus/blur.
+- `api.js` — new `corpusAPI.inviteAuthorToDocument(documentId, userId)` method
+- `CorpusTabContent.jsx` — in the coauthor management section (where invite link generation and coauthor list already live), added "Add coauthor" search input between the coauthor warning and the invite link UI. Author-only visibility. Same UX as `CorpusMembersPanel`: text input with placeholder "Search by username or ORCID", debounced 300ms with `useRef` timer, min 2 chars. Dropdown results show username + OrcidBadge + "Add" button. On success: "Added ✓" feedback (1.5s), then auto-clears input/results and refreshes coauthor list. On 409: "Already a coauthor". Same `onMouseDown`/`blurTimerRef` pattern to handle focus/blur.
 
 **Architecture Decisions:** #244 (document coauthor direct add mirrors corpus pattern from Phase 41d)
 
@@ -3337,7 +3337,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 #### Phase 42 Implementation Priority
 
 1. ~~**42a** (Rename combos → superconcepts in UI)~~ ✅
-2. **42b** (Document coauthor invite by username/ORCID)
+2. ~~**42b** (Document coauthor invite by username/ORCID)~~ ✅
 3. **42c** (Superconcept ownership transfer + account deletion pre-check)
 4. **42d** (Corpus member document removal)
 

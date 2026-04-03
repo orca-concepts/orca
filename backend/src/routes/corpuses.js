@@ -97,6 +97,9 @@ router.post('/documents/:documentId/authors/remove', authenticateToken, corpusCo
 // Leave as a co-author (self-remove)
 router.post('/documents/:documentId/authors/leave', authenticateToken, corpusController.leaveDocumentAuthorship);
 
+// Phase 42b: Direct invite coauthor by userId (author only)
+router.post('/documents/:documentId/invite-author', authenticateToken, corpusController.inviteAuthorToDocument);
+
 // ---- Phase 7h: Document Versioning endpoints ----
 
 // Document Favorites — toggle (Phase 7c Overhaul, auth required)
