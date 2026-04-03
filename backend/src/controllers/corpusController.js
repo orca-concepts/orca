@@ -713,7 +713,7 @@ const addDocumentToCorpus = async (req, res) => {
   }
 };
 
-// Remove a document from a corpus (corpus owner only)
+// Remove a document from a corpus (corpus owner or member who added it)
 // If the document ends up in zero corpuses, it is deleted.
 const removeDocumentFromCorpus = async (req, res) => {
   const client = await pool.connect();
@@ -732,15 +732,41 @@ const removeDocumentFromCorpus = async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Verify corpus ownership
+    // Check corpus ownership
     const corpusCheck = await client.query(
-      'SELECT id FROM corpuses WHERE id = $1 AND created_by = $2',
-      [corpusId, userId]
+      'SELECT created_by FROM corpuses WHERE id = $1',
+      [corpusId]
     );
 
     if (corpusCheck.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Only the corpus owner can remove documents from it' });
+      return res.status(404).json({ error: 'Corpus not found' });
+    }
+
+    const isCorpusOwner = corpusCheck.rows[0].created_by === userId;
+
+    if (!isCorpusOwner) {
+      // Check if caller is a corpus member
+      const memberCheck = await client.query(
+        'SELECT 1 FROM corpus_allowed_users WHERE corpus_id = $1 AND user_id = $2',
+        [corpusId, userId]
+      );
+
+      if (memberCheck.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'You do not have permission to remove documents from this corpus' });
+      }
+
+      // Member: can only remove documents they added
+      const addedByCheck = await client.query(
+        'SELECT 1 FROM corpus_documents WHERE corpus_id = $1 AND document_id = $2 AND added_by = $3',
+        [corpusId, documentId, userId]
+      );
+
+      if (addedByCheck.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'You can only remove documents you added' });
+      }
     }
 
     // Phase 9b: Get the document's uploader BEFORE removing the link
@@ -783,9 +809,10 @@ const removeDocumentFromCorpus = async (req, res) => {
     if (parseInt(remainingLinks.rows[0].count) === 0) {
       // Phase 9b: Check if uploader is an allowed user (not corpus owner)
       const uploaderId = docInfo.rows[0].uploaded_by;
+      const corpusOwnerId = corpusCheck.rows[0].created_by;
       let isAllowedUserDoc = false;
 
-      if (uploaderId !== userId) {
+      if (uploaderId && uploaderId !== corpusOwnerId) {
         const allowedCheck = await client.query(
           'SELECT 1 FROM corpus_allowed_users WHERE corpus_id = $1 AND user_id = $2',
           [corpusId, uploaderId]

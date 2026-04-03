@@ -6,6 +6,7 @@ function CorpusDocumentList({
   currentUserId,
   isGuest,
   isOwner,
+  isMember,
   favorites,
   allTags,
   onOpenDocument,
@@ -235,7 +236,7 @@ function CorpusDocumentList({
               Delete
             </button>
           )}
-          {isOwner && (
+          {(isOwner || (isMember && doc.added_to_corpus_by === currentUserId)) && (
             <button
               style={styles.removeDocButton}
               title="Remove from corpus"

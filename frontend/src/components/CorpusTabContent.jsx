@@ -2490,6 +2490,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
         currentUserId={user?.id}
         isGuest={isGuest}
         isOwner={isOwner}
+        isMember={isAllowedUser}
         favorites={favoriteDocIds}
         allTags={allTags}
         onOpenDocument={handleOpenDocument}

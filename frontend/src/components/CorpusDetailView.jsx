@@ -367,6 +367,7 @@ const CorpusDetailView = ({ corpusId, onBack, onOpenDocument, isGuest, onSubscri
         currentUserId={currentUserId}
         isGuest={isGuest}
         isOwner={isOwner}
+        isMember={isAllowedUser}
         favorites={favoriteDocIds}
         allTags={allTags}
         onOpenDocument={handleDocListOpenDocument}
