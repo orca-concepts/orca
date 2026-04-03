@@ -51,6 +51,7 @@ const FlipView = ({
   mode = 'exploratory',
   isGuest = false,
   onParentClick: externalParentClick,
+  onOpenNewTab,
 }) => {
   const navigate = useNavigate();
   const [nameMap, setNameMap] = useState({});
@@ -60,11 +61,26 @@ const FlipView = ({
   const [sortMode, setSortMode] = useState('links');
   // Hover state for path highlighting: { edgeId, conceptId } | null
   const [hoveredInfo, setHoveredInfo] = useState(null);
+  // Right-click context menu state
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, parent }
 
   // Sync with prop changes (e.g. when parent component re-fetches)
   useEffect(() => {
     setParents(initialParents);
   }, [initialParents]);
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    const handleKey = (e) => { if (e.key === 'Escape') setContextMenu(null); };
+    window.document.addEventListener('mousedown', handleClick);
+    window.document.addEventListener('keydown', handleKey);
+    return () => {
+      window.document.removeEventListener('mousedown', handleClick);
+      window.document.removeEventListener('keydown', handleKey);
+    };
+  }, [contextMenu]);
 
   const isContextual = mode === 'contextual' && !!originEdgeId;
 
@@ -281,7 +297,7 @@ const FlipView = ({
             {isContextual && filteredParents.length > 0 && (
               <div style={styles.sortToggleRow}>
                 {[
-                  { key: 'links', label: 'Links' },
+                  { key: 'links', label: 'Votes' },
                   { key: 'similarity_desc', label: 'Similarity \u2193' },
                   { key: 'similarity_asc', label: 'Similarity \u2191' },
                 ].map(({ key, label }) => (
@@ -319,6 +335,11 @@ const FlipView = ({
               style={styles.parentCard}
               title={fullTooltip}
               onClick={() => handleParentClick(parent)}
+              onContextMenu={(e) => {
+                if (!onOpenNewTab) return;
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, parent });
+              }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.borderColor = '#333';
               }}
@@ -384,6 +405,43 @@ const FlipView = ({
           );
         })}
       </div>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            backgroundColor: 'white',
+            border: '1px solid #ddd',
+            borderRadius: '4px',
+            zIndex: 1000,
+            minWidth: '180px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{
+              padding: '8px 14px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontFamily: '"EB Garamond", Georgia, serif',
+              color: '#333',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f5f4f0'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+            onClick={() => {
+              const p = contextMenu.parent;
+              onOpenNewTab(concept.id, p.graph_path);
+              setContextMenu(null);
+            }}
+          >
+            Open in new graph tab
+          </div>
+        </div>
+      )}
     </div>
   );
 };

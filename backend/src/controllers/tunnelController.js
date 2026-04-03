@@ -88,6 +88,7 @@ const tunnelController = {
           conceptName: row.concept_name,
           parentId: row.parent_id,
           parentName: row.parent_id ? (nameMap[row.parent_id] || null) : null,
+          graphPath: row.graph_path || [],
           pathNames,
           attributeId: attrId,
           attributeName: row.attribute_name,

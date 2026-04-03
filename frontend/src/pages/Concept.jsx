@@ -13,6 +13,7 @@ import ConceptAnnotationPanel from '../components/ConceptAnnotationPanel';
 import DiffModal from '../components/DiffModal';
 import HiddenConceptsView from '../components/HiddenConceptsView';
 import AnnotateFromGraphPicker from '../components/AnnotateFromGraphPicker';
+import TunnelView from '../components/TunnelView';
 
 const Concept = ({
   // Props when running inside AppShell (graph tab mode)
@@ -53,7 +54,7 @@ const Concept = ({
     : (searchParams.get('path') || '').split(',').filter(Boolean).map(Number);
   const effectiveViewMode = isTabMode
     ? tabViewMode
-    : (searchParams.get('view') === 'flip' ? 'flip' : 'children');
+    : (searchParams.get('view') === 'flip' ? 'flip' : searchParams.get('view') === 'tunnel' ? 'tunnel' : 'children');
 
   const [concept, setConcept] = useState(null);
   const [children, setChildren] = useState([]);
@@ -228,7 +229,7 @@ const Concept = ({
       }
     } else {
       const pathStr = newPath.join(',');
-      const viewParam = newViewMode === 'flip' ? '&view=flip' : '';
+      const viewParam = newViewMode === 'flip' ? '&view=flip' : newViewMode === 'tunnel' ? '&view=tunnel' : '';
       navigate(`/concept/${newConceptId}?path=${pathStr}${viewParam}`);
     }
   };
@@ -346,6 +347,22 @@ const Concept = ({
         navigate(`/concept/${effectiveConceptId}?${params.toString()}`);
       }
     }
+  };
+
+  const handleEnterTunnel = () => {
+    navigateInTab(effectiveConceptId, effectivePath, 'tunnel');
+  };
+
+  // Callback for TunnelView and FlipView to open a concept in a new graph tab
+  const handleOpenNewTab = (newConceptId, newPath) => {
+    if (onOpenConceptTab) {
+      onOpenConceptTab(newConceptId, (newPath || []).join(','), undefined, undefined, undefined, 'children');
+    }
+  };
+
+  // Callback for TunnelView navigation (navigate current tab to a concept)
+  const handleTunnelNavigate = (newConceptId, newPath, newViewMode) => {
+    navigateInTab(newConceptId, newPath, newViewMode || 'children');
   };
 
   const handleShareLink = async () => {
@@ -628,7 +645,7 @@ const Concept = ({
                 style={styles.flipButton}
                 disabled={loadingFlip}
               >
-                {loadingFlip ? 'Loading...' : effectiveViewMode === 'children' ? 'Flip View' : 'Children View'}
+                {loadingFlip ? 'Loading...' : effectiveViewMode === 'children' ? 'Flip View' : effectiveViewMode === 'tunnel' ? 'Children View' : 'Children View'}
               </button>
             )}
             <div style={styles.shareButtonWrapper}>
@@ -640,6 +657,14 @@ const Concept = ({
                 {shareLinkCopied ? 'Copied!' : 'Share'}
               </button>
             </div>
+            {effectiveViewMode === 'children' && parentEdgeId && (
+              <button
+                onClick={handleEnterTunnel}
+                style={styles.flipButton}
+              >
+                Tunnel
+              </button>
+            )}
             {user && !isGuest && effectiveViewMode === 'children' && parentEdgeId && onAnnotateFromGraph && (
               <button
                 onClick={() => setShowAnnotatePicker(true)}
@@ -692,7 +717,7 @@ const Concept = ({
 
       <main style={styles.main}>
         <div style={effectiveConceptId ? (isNarrow ? styles.twoColumnLayoutNarrow : styles.twoColumnLayout) : undefined}>
-          <div style={effectiveConceptId ? (isNarrow ? styles.leftColumnNarrow : styles.leftColumn) : undefined}>
+          <div style={effectiveConceptId ? (effectiveViewMode === 'tunnel' ? { flex: 1, width: '100%' } : (isNarrow ? styles.leftColumnNarrow : styles.leftColumn)) : undefined}>
             {effectiveViewMode === 'children' ? (
               <>
                 <div style={styles.conceptHeader}>
@@ -785,6 +810,15 @@ const Concept = ({
                   />
                 )}
               </>
+            ) : effectiveViewMode === 'tunnel' ? (
+              <TunnelView
+                conceptId={effectiveConceptId}
+                edgeId={parentEdgeId}
+                path={effectivePath}
+                isGuest={isGuest}
+                onNavigate={handleTunnelNavigate}
+                onOpenNewTab={handleOpenNewTab}
+              />
             ) : (
               <FlipView
                 concept={concept}
@@ -794,10 +828,11 @@ const Concept = ({
                 mode={isDecontextualized ? 'exploratory' : 'contextual'}
                 isGuest={isGuest}
                 onParentClick={handleFlipViewParentClick}
+                onOpenNewTab={handleOpenNewTab}
               />
             )}
           </div>
-          {effectiveConceptId && (
+          {effectiveConceptId && effectiveViewMode !== 'tunnel' && (
             <div style={isNarrow ? styles.rightColumnNarrow : styles.rightColumn}>
               <ConceptAnnotationPanel
                 conceptId={effectiveConceptId}
