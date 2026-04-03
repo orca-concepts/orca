@@ -81,8 +81,8 @@ export const conceptsAPI = {
   getConceptNames: (ids) =>
     api.get('/concepts/names/batch', { params: { ids } }),
   
-  searchConcepts: (query, parentId, path) =>
-    api.get('/concepts/search', { params: { q: query, parentId, path } }),
+  searchConcepts: (query, parentId, path, attributeId) =>
+    api.get('/concepts/search', { params: { q: query, parentId, path, ...(attributeId ? { attributeId } : {}) } }),
   
   getAttributes: () =>
     api.get('/concepts/attributes'),
@@ -608,6 +608,18 @@ export const combosAPI = {
 
   transferOwnership: (comboId, newOwnerId) =>
     api.post(`/combos/${comboId}/transfer-ownership`, { newOwnerId }),
+};
+
+// Phase 43a: Tunnel Links
+export const tunnelsAPI = {
+  getTunnelLinks: (edgeId, sort = 'votes') =>
+    api.get(`/tunnels/${edgeId}?sort=${sort}`),
+
+  createTunnelLink: (originEdgeId, linkedEdgeId) =>
+    api.post('/tunnels/create', { originEdgeId, linkedEdgeId }),
+
+  toggleTunnelVote: (tunnelLinkId) =>
+    api.post('/tunnels/vote', { tunnelLinkId }),
 };
 
 // Phase 41a: Users endpoints

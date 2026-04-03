@@ -2126,6 +2126,49 @@ const createTables = async () => {
     `);
     console.log('Phase 41a: Added orcid_id column to users table');
 
+    // ============================================================
+    // Phase 43a: Tunnel Links table
+    // Bidirectional tunnel connections between edges across different
+    // graphs and attributes. Each row represents one direction.
+    // Creating a tunnel inserts two rows (A→B and B→A).
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tunnel_links (
+        id SERIAL PRIMARY KEY,
+        origin_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        linked_edge_id INTEGER REFERENCES edges(id) ON DELETE CASCADE,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(origin_edge_id, linked_edge_id)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tunnel_links_origin ON tunnel_links(origin_edge_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tunnel_links_linked ON tunnel_links(linked_edge_id)
+    `);
+
+    // ============================================================
+    // Phase 43a: Tunnel Votes table
+    // Endorsement votes on tunnel links. Votes are directional —
+    // voting for B in A's tunnel view does NOT affect A's vote
+    // count in B's tunnel view.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tunnel_votes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        tunnel_link_id INTEGER REFERENCES tunnel_links(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, tunnel_link_id)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tunnel_votes_link ON tunnel_votes(tunnel_link_id)
+    `);
+    console.log('Phase 43a: Created tunnel_links and tunnel_votes tables');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

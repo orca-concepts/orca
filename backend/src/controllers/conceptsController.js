@@ -389,7 +389,7 @@ const conceptsController = {
   // Search concepts by name (text matching + trigram similarity)
   // Returns attribute info for each edge context the concept appears in
   searchConcepts: async (req, res) => {
-    const { q, parentId, path } = req.query;
+    const { q, parentId, path, attributeId } = req.query;
 
     try {
       if (!q || q.trim().length === 0) {
@@ -398,26 +398,34 @@ const conceptsController = {
 
       const searchTerm = q.trim();
 
+      // Optional attribute filter: only return concepts with at least one
+      // non-hidden edge matching the given attribute_id (Phase 43a)
+      const attrFilter = attributeId
+        ? `AND EXISTS (SELECT 1 FROM edges e_attr WHERE e_attr.child_id = c.id AND e_attr.attribute_id = ${parseInt(attributeId)} AND e_attr.is_hidden = false)`
+        : '';
+
       // Combined query: exact prefix matches first, then trigram similarity matches
       // Results are deduped and limited to 20
       const searchQuery = `
         WITH exact_matches AS (
-          SELECT id, name, 1 as match_type, 
-            CASE 
-              WHEN LOWER(name) = LOWER($1) THEN 1.0
+          SELECT c.id, c.name, 1 as match_type,
+            CASE
+              WHEN LOWER(c.name) = LOWER($1) THEN 1.0
               ELSE 0.9
             END as relevance
-          FROM concepts 
-          WHERE LOWER(name) LIKE LOWER($1) || '%'
+          FROM concepts c
+          WHERE LOWER(c.name) LIKE LOWER($1) || '%'
+          ${attrFilter}
           LIMIT 10
         ),
         similar_matches AS (
-          SELECT id, name, 2 as match_type, 
-            similarity(name, $1) as relevance
-          FROM concepts 
-          WHERE similarity(name, $1) > 0.15
-            AND id NOT IN (SELECT id FROM exact_matches)
-          ORDER BY similarity(name, $1) DESC
+          SELECT c.id, c.name, 2 as match_type,
+            similarity(c.name, $1) as relevance
+          FROM concepts c
+          WHERE similarity(c.name, $1) > 0.15
+            AND c.id NOT IN (SELECT id FROM exact_matches)
+          ${attrFilter}
+          ORDER BY similarity(c.name, $1) DESC
           LIMIT 10
         ),
         combined AS (
