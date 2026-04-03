@@ -383,6 +383,19 @@ const authController = {
         });
       }
 
+      // Pre-check: user must not own any combos/superconcepts (Phase 42c)
+      const ownedCombos = await client.query(
+        'SELECT id, name FROM combos WHERE created_by = $1',
+        [req.user.userId]
+      );
+      if (ownedCombos.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `You still own ${ownedCombos.rows.length} superconcept(s). Transfer ownership before deleting your account.`,
+          ownedCombos: ownedCombos.rows
+        });
+      }
+
       // Delete the user row — CASCADE and SET NULL handle all child tables
       await client.query('DELETE FROM users WHERE id = $1', [req.user.userId]);
 

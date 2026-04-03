@@ -601,6 +601,90 @@ const unvoteComboAnnotation = async (req, res) => {
   }
 };
 
+// Transfer combo ownership (Phase 42c)
+const transferOwnership = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const comboId = req.params.id;
+    const userId = req.user.userId;
+    const { newOwnerId } = req.body;
+
+    if (!newOwnerId || isNaN(Number(newOwnerId))) {
+      return res.status(400).json({ error: 'newOwnerId is required and must be a number' });
+    }
+
+    await client.query('BEGIN');
+
+    // Verify combo exists
+    const comboCheck = await client.query(
+      'SELECT id, name, created_by FROM combos WHERE id = $1',
+      [comboId]
+    );
+    if (comboCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Superconcept not found' });
+    }
+
+    // Verify caller is owner
+    if (comboCheck.rows[0].created_by !== userId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Only the superconcept owner can transfer ownership' });
+    }
+
+    // Cannot transfer to self
+    if (Number(newOwnerId) === userId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'You already own this superconcept' });
+    }
+
+    // Verify target user exists
+    const userCheck = await client.query(
+      'SELECT id FROM users WHERE id = $1',
+      [newOwnerId]
+    );
+    if (userCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Update ownership
+    await client.query(
+      'UPDATE combos SET created_by = $1 WHERE id = $2',
+      [newOwnerId, comboId]
+    );
+
+    // Auto-subscribe new owner if not already subscribed
+    const subCheck = await client.query(
+      'SELECT id FROM combo_subscriptions WHERE user_id = $1 AND combo_id = $2',
+      [newOwnerId, comboId]
+    );
+    if (subCheck.rows.length === 0) {
+      await client.query(
+        `INSERT INTO combo_subscriptions (user_id, combo_id)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id, combo_id) DO NOTHING`,
+        [newOwnerId, comboId]
+      );
+      await client.query(
+        `INSERT INTO sidebar_items (user_id, item_type, item_id, display_order)
+         VALUES ($1, 'combo', $2,
+           COALESCE((SELECT MAX(display_order) FROM sidebar_items WHERE user_id = $1), 0) + 10)
+         ON CONFLICT (user_id, item_type, item_id) DO NOTHING`,
+        [newOwnerId, comboId]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error transferring combo ownership:', error);
+    res.status(500).json({ error: 'Failed to transfer ownership' });
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   listCombos,
   getCombo,
@@ -614,4 +698,5 @@ module.exports = {
   removeEdgeFromCombo,
   voteComboAnnotation,
   unvoteComboAnnotation,
+  transferOwnership,
 };

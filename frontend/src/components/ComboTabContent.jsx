@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { combosAPI, conceptsAPI } from '../services/api';
+import { combosAPI, conceptsAPI, usersAPI } from '../services/api';
 import OrcidBadge from './OrcidBadge';
 
 const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDocument, onRequestLogin, refreshKey }) => {
@@ -22,6 +22,15 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
   const [contextsLoading, setContextsLoading] = useState(false);
   const [addError, setAddError] = useState('');
   const searchTimerRef = useRef(null);
+
+  // Transfer ownership state (Phase 42c)
+  const [transferSearch, setTransferSearch] = useState('');
+  const [transferResults, setTransferResults] = useState([]);
+  const [transferConfirm, setTransferConfirm] = useState(null); // { id, username }
+  const [transferFeedback, setTransferFeedback] = useState('');
+  const transferTimerRef = useRef(null);
+  const transferBlurTimerRef = useRef(null);
+  const [transferInputFocused, setTransferInputFocused] = useState(false);
 
   // Path name resolution cache
   const [pathNames, setPathNames] = useState({});
@@ -246,6 +255,41 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
     }
   };
 
+  // Transfer ownership search (Phase 42c)
+  const handleTransferSearch = (value) => {
+    setTransferSearch(value);
+    setTransferFeedback('');
+    setTransferConfirm(null);
+    if (transferTimerRef.current) clearTimeout(transferTimerRef.current);
+    if (value.length < 2) {
+      setTransferResults([]);
+      return;
+    }
+    transferTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await usersAPI.searchUsers(value);
+        setTransferResults(res.data.users || []);
+      } catch {
+        setTransferResults([]);
+      }
+    }, 300);
+  };
+
+  const handleTransferConfirm = async () => {
+    if (!transferConfirm) return;
+    try {
+      await combosAPI.transferOwnership(comboId, transferConfirm.id);
+      setTransferSearch('');
+      setTransferResults([]);
+      setTransferConfirm(null);
+      setTransferFeedback('');
+      loadCombo();
+    } catch (err) {
+      setTransferFeedback(err.response?.data?.error || 'Transfer failed');
+      setTransferConfirm(null);
+    }
+  };
+
   const handleAnnotationClick = (annotation) => {
     if (isGuest) {
       if (onRequestLogin) onRequestLogin();
@@ -429,6 +473,63 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Transfer ownership (Phase 42c) */}
+      {isOwner && (
+        <div style={styles.transferSection}>
+          <div style={styles.ownerSectionTitle}>Transfer ownership</div>
+          {transferConfirm ? (
+            <div>
+              <div style={{ fontSize: '14px', fontFamily: "'EB Garamond', serif", color: '#333', marginBottom: '10px' }}>
+                Transfer ownership of "{combo?.name}" to {transferConfirm.username}?
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={handleTransferConfirm} style={styles.transferActionButton}>Confirm</button>
+                <button onClick={() => setTransferConfirm(null)} style={styles.transferActionButton}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="Search by username or ORCID"
+                value={transferSearch}
+                onChange={e => handleTransferSearch(e.target.value)}
+                onFocus={() => { setTransferInputFocused(true); if (transferBlurTimerRef.current) clearTimeout(transferBlurTimerRef.current); }}
+                onBlur={() => { transferBlurTimerRef.current = setTimeout(() => setTransferInputFocused(false), 200); }}
+                style={styles.transferInput}
+              />
+              {transferFeedback && (
+                <div style={{ fontSize: '13px', fontFamily: "'EB Garamond', serif", color: '#333', marginTop: '6px' }}>{transferFeedback}</div>
+              )}
+              {transferInputFocused && transferResults.length > 0 && (
+                <div style={styles.transferDropdown}>
+                  {transferResults.map(u => (
+                    <div key={u.id} style={styles.transferResultRow}>
+                      <span style={{ fontSize: '14px', fontFamily: "'EB Garamond', serif", color: '#333' }}>
+                        {u.username}
+                      </span>
+                      <OrcidBadge orcidId={u.orcidId} />
+                      <button
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => {
+                          setTransferConfirm({ id: u.id, username: u.username });
+                          setTransferResults([]);
+                          setTransferSearch('');
+                          setTransferInputFocused(false);
+                        }}
+                        style={styles.transferActionButton}
+                      >
+                        Transfer
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -693,6 +794,55 @@ const styles = {
     padding: '2px 4px',
     fontFamily: "'EB Garamond', serif",
     flexShrink: 0,
+  },
+  // Transfer ownership (Phase 42c)
+  transferSection: {
+    marginBottom: '16px',
+    paddingBottom: '12px',
+    borderBottom: '1px solid #e0e0e0',
+  },
+  transferInput: {
+    width: '100%',
+    padding: '6px 10px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontFamily: "'EB Garamond', serif",
+    backgroundColor: 'white',
+    color: '#333',
+    boxSizing: 'border-box',
+    marginTop: '6px',
+  },
+  transferDropdown: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '100%',
+    backgroundColor: 'white',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    zIndex: 100,
+    maxHeight: '200px',
+    overflowY: 'auto',
+  },
+  transferResultRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 10px',
+    borderBottom: '1px solid #f0f0f0',
+  },
+  transferActionButton: {
+    padding: '3px 10px',
+    border: '1px solid #ccc',
+    borderRadius: '4px',
+    backgroundColor: 'transparent',
+    color: '#333',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontFamily: "'EB Garamond', serif",
+    marginLeft: 'auto',
   },
   // Picker
   pickerArea: {

@@ -605,6 +605,9 @@ export const combosAPI = {
 
   unvoteAnnotation: (comboId, annotationId) =>
     api.post(`/combos/${comboId}/annotations/unvote`, { annotationId }),
+
+  transferOwnership: (comboId, newOwnerId) =>
+    api.post(`/combos/${comboId}/transfer-ownership`, { newOwnerId }),
 };
 
 // Phase 41a: Users endpoints

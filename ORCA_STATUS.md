@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c–42d planned — superconcept ownership transfer, corpus member document removal)
+**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d planned — corpus member document removal)
 
 ---
 
@@ -3299,7 +3299,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 42c: Superconcept Ownership Transfer
+#### Phase 42c: Superconcept Ownership Transfer — ✅ COMPLETE
 
 **Goal:** Superconcept owners can transfer ownership to any other user via username/ORCID search. Account deletion requires transferring all owned superconcepts first (matching the corpus pattern).
 
@@ -3338,7 +3338,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 1. ~~**42a** (Rename combos → superconcepts in UI)~~ ✅
 2. ~~**42b** (Document coauthor invite by username/ORCID)~~ ✅
-3. **42c** (Superconcept ownership transfer + account deletion pre-check)
+3. ~~**42c** (Superconcept ownership transfer + account deletion pre-check)~~ ✅
 4. **42d** (Corpus member document removal)
 
 ---

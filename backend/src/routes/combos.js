@@ -44,4 +44,7 @@ router.post('/:id/annotations/vote', authenticateToken, comboController.voteComb
 // Remove vote on an annotation within a combo (auth required)
 router.post('/:id/annotations/unvote', authenticateToken, comboController.unvoteComboAnnotation);
 
+// Transfer combo ownership (owner only, Phase 42c)
+router.post('/:id/transfer-ownership', authenticateToken, comboController.transferOwnership);
+
 module.exports = router;
