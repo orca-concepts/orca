@@ -356,7 +356,7 @@ const Concept = ({
   // Callback for TunnelView and FlipView to open a concept in a new graph tab
   const handleOpenNewTab = (newConceptId, newPath) => {
     if (onOpenConceptTab) {
-      onOpenConceptTab(newConceptId, (newPath || []).join(','), undefined, undefined, undefined, 'children');
+      onOpenConceptTab(newConceptId, newPath || [], undefined, undefined, undefined, 'children');
     }
   };
 

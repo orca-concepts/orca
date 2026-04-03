@@ -223,17 +223,8 @@ const TunnelView = ({
 
   const handleCardClick = (card) => {
     if (!onNavigate) return;
-    // Navigate current tab to the linked concept
-    // The card's pathNames correspond to graph_path (root to parent)
-    // For navigation, we need the path excluding the concept itself
-    // graph_path already is root-to-parent, which is the navigation path
-    const navPath = card.pathNames ? (tunnelData[card.attributeId]?.links || []).find(l => l.tunnelLinkId === card.tunnelLinkId) : card;
-    // Use the linked edge's graph_path for navigation
-    // We need the raw IDs, not names. Reconstruct from the API data.
-    // The API returns pathNames but not pathIds directly; however we can use the linkedEdgeId
-    // to navigate. The simplest approach: navigate to the concept with the path from the tunnel data.
-    // We stored graph_path in the backend response implicitly via pathNames.
-    // Actually, let's pass through the parent's graph_path directly.
+    // Navigate current tab to the linked concept in its context
+    // graphPath is the raw integer array (root-to-parent) from the API
     onNavigate(card.conceptId, card.graphPath || [], 'children');
   };
 
@@ -378,10 +369,7 @@ const TunnelView = ({
       {/* Right-click context menu */}
       {contextMenu && (
         <div
-          style={styles.contextMenuOverlay}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div style={{
+          style={{
             position: 'fixed',
             top: contextMenu.y,
             left: contextMenu.x,
@@ -391,19 +379,20 @@ const TunnelView = ({
             zIndex: 1000,
             minWidth: '180px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          }}>
-            <div
-              style={styles.contextMenuItem}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f5f4f0'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
-              onClick={() => {
-                const c = contextMenu.card;
-                if (onOpenNewTab) onOpenNewTab(c.conceptId, c.graphPath || []);
-                setContextMenu(null);
-              }}
-            >
-              Open in new graph tab
-            </div>
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div
+            style={styles.contextMenuItem}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f5f4f0'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+            onClick={() => {
+              const c = contextMenu.card;
+              if (onOpenNewTab) onOpenNewTab(c.conceptId, c.graphPath || []);
+              setContextMenu(null);
+            }}
+          >
+            Open in new graph tab
           </div>
         </div>
       )}
@@ -649,14 +638,6 @@ const styles = {
     fontSize: '12px',
     fontFamily: '"EB Garamond", Georgia, serif',
     color: '#999',
-  },
-  contextMenuOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 999,
   },
   contextMenuItem: {
     padding: '8px 14px',
