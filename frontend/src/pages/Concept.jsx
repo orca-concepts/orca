@@ -661,12 +661,12 @@ const Concept = ({
                     }
                   }}
                   style={styles.annotateButton}
-                  title="Add this concept to a combo"
+                  title="Add this concept to a superconcept"
                 >
                   {comboFeedback === 'added' ? 'Added \u2713'
-                    : comboFeedback === 'duplicate' ? 'Already in combo'
+                    : comboFeedback === 'duplicate' ? 'Already in superconcept'
                     : comboFeedback ? comboFeedback
-                    : 'Add to Combo'}
+                    : 'Add to Superconcept'}
                 </button>
                 {showComboPicker && (
                   <div style={styles.comboPickerDropdown}>

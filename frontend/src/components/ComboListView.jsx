@@ -56,9 +56,9 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
       if (onSubscribe) onSubscribe();
     } catch (err) {
       if (err.response?.status === 409) {
-        setCreateError('A combo with this name already exists');
+        setCreateError('A superconcept with this name already exists');
       } else {
-        setCreateError(err.response?.data?.error || 'Failed to create combo');
+        setCreateError(err.response?.data?.error || 'Failed to create superconcept');
       }
     } finally {
       setCreating(false);
@@ -116,14 +116,14 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
       {/* Header bar */}
       <div style={styles.headerBar}>
         <button onClick={onBack} style={styles.backButton}>← Back</button>
-        <h2 style={styles.heading}>Browse Combos</h2>
+        <h2 style={styles.heading}>Browse Superconcepts</h2>
         <div style={styles.headerRight}>
           {!isGuest && (
             <button
               onClick={() => { setShowCreate(!showCreate); setCreateError(''); }}
               style={styles.createButton}
             >
-              {showCreate ? 'Cancel' : '+ New Combo'}
+              {showCreate ? 'Cancel' : '+ New Superconcept'}
             </button>
           )}
         </div>
@@ -134,7 +134,7 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
         <div style={styles.createForm}>
           <input
             type="text"
-            placeholder="Combo name"
+            placeholder="Superconcept name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
@@ -160,7 +160,7 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
               opacity: !newName.trim() || creating ? 0.5 : 1,
             }}
           >
-            {creating ? 'Creating...' : 'Create Combo'}
+            {creating ? 'Creating...' : 'Create Superconcept'}
           </button>
         </div>
       )}
@@ -170,7 +170,7 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
         <div style={styles.searchWrapper}>
           <input
             type="text"
-            placeholder="Search combos..."
+            placeholder="Search superconcepts..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={styles.searchInput}
@@ -196,12 +196,12 @@ const ComboListView = ({ onBack, isGuest, onSubscribe, onUnsubscribe, comboSubsc
 
       {/* Combo list */}
       {loading ? (
-        <div style={styles.emptyState}>Loading combos...</div>
+        <div style={styles.emptyState}>Loading superconcepts...</div>
       ) : combos.length === 0 ? (
         <div style={styles.emptyState}>
           {debouncedSearch
-            ? `No combos matching '${debouncedSearch}'`
-            : 'No combos have been created yet.'}
+            ? `No superconcepts matching '${debouncedSearch}'`
+            : 'No superconcepts have been created yet.'}
         </div>
       ) : (
         <div style={styles.list}>

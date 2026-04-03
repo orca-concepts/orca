@@ -1383,8 +1383,8 @@ const AppShell = () => {
               <button
                 onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setCorpusView(null); setComboView({ view: 'list' }); }}
                 style={styles.sidebarActionButton}
-                title="Browse and manage combos"
-              >Browse Combos</button>
+                title="Browse and manage superconcepts"
+              >Browse Superconcepts</button>
               {!isGuest && (
                 <button
                   data-messages-btn
@@ -1563,7 +1563,7 @@ const AppShell = () => {
               }}
               onRequestLogin={() => {
                 setLoginModalTab('login');
-                setLoginModalNotice('Log in to subscribe to combos');
+                setLoginModalNotice('Log in to subscribe to superconcepts');
                 setShowLoginModal(true);
               }}
             />

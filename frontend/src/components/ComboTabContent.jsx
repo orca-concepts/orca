@@ -50,7 +50,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
         } catch (err) { /* non-critical */ }
       }
     } catch (err) {
-      setError('Failed to load combo');
+      setError('Failed to load superconcept');
       console.error('Failed to load combo:', err);
     }
   }, [comboId]);
@@ -187,7 +187,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
       await loadAnnotations();
     } catch (err) {
       if (err.response?.status === 409) {
-        setAddError('This concept in this context is already in the combo');
+        setAddError('This concept in this context is already in the superconcept');
       } else {
         setAddError(err.response?.data?.error || 'Failed to add concept');
       }
@@ -241,7 +241,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
   };
 
   const handleUnsubscribe = () => {
-    if (window.confirm(`Unsubscribe from "${combo?.name}"? This removes the combo tab from your sidebar.`)) {
+    if (window.confirm(`Unsubscribe from "${combo?.name}"? This removes the superconcept tab from your sidebar.`)) {
       if (onUnsubscribe) onUnsubscribe(comboId);
     }
   };
@@ -307,7 +307,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
   };
 
   if (loading) {
-    return <div style={styles.loadingContainer}>Loading combo...</div>;
+    return <div style={styles.loadingContainer}>Loading superconcept...</div>;
   }
 
   if (error) {
@@ -365,7 +365,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
                   <button
                     onClick={() => handleRemoveEdge(edge.edge_id)}
                     style={styles.removeButton}
-                    title="Remove from combo"
+                    title="Remove from superconcept"
                   >{'\u2715'}</button>
                 </div>
               ))}
@@ -461,7 +461,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
       {edges.length > 0 && (
         <div style={styles.sortBar}>
           {[
-            { key: 'combo_votes', label: 'Combo Votes' },
+            { key: 'combo_votes', label: 'Superconcept Votes' },
             ...(user ? [{ key: 'subscribed', label: 'Subscribed' }] : []),
             { key: 'new', label: 'New' },
             { key: 'annotation_votes', label: 'Annotation Votes' },
@@ -482,7 +482,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
       {/* Annotations list */}
       {edges.length === 0 ? (
         <div style={styles.emptyState}>
-          This combo has no concepts yet.
+          This superconcept has no concepts yet.
           {isOwner && ' Add concepts using the controls above.'}
         </div>
       ) : annotationsLoading ? (
@@ -491,7 +491,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
         <div style={styles.emptyState}>
           {activeEdgeIds !== null && activeEdgeIds.length === 0
             ? 'No annotations match the selected filters.'
-            : "The concepts in this combo don't have any annotations yet."}
+            : "The concepts in this superconcept don't have any annotations yet."}
         </div>
       ) : (
         <div style={styles.annotationList}>
@@ -534,7 +534,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
                     <span
                       style={a.user_combo_voted ? styles.voteButtonActive : styles.voteButton}
                       onClick={() => a.user_combo_voted ? handleUnvote(a.annotation_id) : handleVote(a.annotation_id)}
-                      title={a.user_combo_voted ? 'Remove combo vote' : 'Vote in this combo'}
+                      title={a.user_combo_voted ? 'Remove superconcept vote' : 'Vote in this superconcept'}
                     >
                       {'\u25B2'} {Number(a.combo_vote_count) || 0}
                     </span>
