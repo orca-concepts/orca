@@ -114,16 +114,28 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 - [ ] Save count on children updates correctly after adding/removing saves
 
 ### Swap votes
-- [ ] Adding a swap vote between any two different edges succeeds (sibling restriction removed in Phase 38c)
+- [ ] Adding a swap vote between sibling edges succeeds (Phase 44: sibling-only restriction restored)
+- [ ] Adding a swap vote between non-sibling edges returns 400 "Replacement must be a sibling"
 - [ ] Adding a swap vote where edge_id === replacement_edge_id returns an error (can't swap with self)
 - [ ] Save and swap are mutually exclusive: saving removes any existing swap on that edge; swapping removes any existing save (with cascading unsave to descendants)
+- [ ] Auto-save on swap (Phase 44): casting swap A→B auto-saves B if user hasn't already saved it; response includes `autoSaved: true`
+- [ ] Auto-save does not duplicate: casting swap A→B where user already saved B returns `autoSaved: false`
+- [ ] Auto-save cascade: casting swap A→B auto-saves B, which clears any existing swap the user had on B (Phase 20c)
+- [ ] Auto-save persists after swap removal: removing swap A→B does NOT remove the auto-saved vote on B
 - [ ] `user_swapped` field is returned in children response (true when current user has a swap vote on that edge, false otherwise)
 - [ ] `user_swapped` is false for guest users
 - [ ] Root concepts include `swap_count` and `user_swapped` in the root concepts response
+- [ ] Root concept swap votes work between root edges with the same attribute
 - [ ] ⇄ button appears on root concept cards with swap count
-- [ ] SwapModal shows enriched suggestions with concept name, attribute, path, vote count
-- [ ] SwapModal search finds concepts across the database (not limited to siblings)
-- [ ] SwapModal suggestion cards have navigation links that open in new tab
+- [ ] GET /swap/:edgeId returns `{ existingSwaps, otherSiblings, totalSwapVotes }` — two separate lists
+- [ ] `existingSwaps` sorted by voteCount DESC; `otherSiblings` sorted by saveCount DESC
+- [ ] No edge appears in both `existingSwaps` and `otherSiblings`
+- [ ] Source edge does not appear in `otherSiblings` (self-swap prevention)
+- [ ] SwapModal shows two sections: "Existing swap votes" and "Other siblings"
+- [ ] SwapModal "Other siblings" has client-side search field that filters in real time
+- [ ] SwapModal cards show concept name and save count only (no path, attribute badge, or open link)
+- [ ] SwapModal vote buttons use ▲ N format matching ConceptGrid save vote button styling
+- [ ] Auto-save inline note "Also added a vote for [name]" appears for ~3 seconds when applicable
 
 ### Link votes (Flip View)
 - [ ] Link votes can only be added in contextual Flip View (with an `originEdgeId`)

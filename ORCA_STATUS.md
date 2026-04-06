@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 6, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save planned)
+**Last Updated:** April 6, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete)
 
 ---
 
@@ -2413,6 +2413,7 @@ Phase 6: Complete. All four sub-phases implemented:
   - **Phase 42c:** Superconcept Ownership Transfer ✅ COMPLETE
   - **Phase 42d:** Corpus Member Document Removal ✅ COMPLETE
 - **Phase 43:** Tunneling — ✅ COMPLETE (43a: backend infrastructure with `tunnel_links`/`tunnel_votes` tables, bidirectional CRUD, voting, search `?attributeId` filter; 43b: TunnelView.jsx with per-attribute columns, search/add, voting, concept card navigation, right-click "Open in new graph tab", FlipView right-click context menu, FlipView sort label "Links"→"Votes"; 43c: guest read-only access, hidden edge handling, root edge tunnel support, context menu dismiss fix, path array fix for new tab creation)
+- **Phase 44:** Sibling-Only Swap Votes & Auto-Save — ✅ COMPLETE (44a: sibling validation restored in addSwapVote, auto-save destination in transaction, GET /swap/:edgeId returns {existingSwaps, otherSiblings}, cleanup migration for cross-context rows, reverses Phase 38c Architecture Decision #216; 44b: SwapModal.jsx redesigned with two sections, client-side sibling search, simplified cards matching ConceptGrid vote button styling, auto-save inline note; 44c: all 20 verification checklist items passed, no bugs found)
 
 ### Git Commits (Phase 27)
 1. `feat: 27a, two-column concept layout with annotation panel stub, retire links/fliplinks view modes and WebLinksView/FlipLinksView`
@@ -2688,7 +2689,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 
 ---
 
-#### Phase 38c: Expanded Swap Votes — Any Concept via Search — ✅ COMPLETE
+#### Phase 38c: Expanded Swap Votes — Any Concept via Search — ✅ COMPLETE — ⚠️ REVERSED by Phase 44
 
 **Complexity:** High
 
@@ -2712,7 +2713,7 @@ Two bugs related to Flip View display and the annotation creation flow.
 - **Navigation:** Each suggestion card and search result card has a navigation icon/button that opens the concept in a new graph tab (so the user can inspect it without losing their place). This is separate from the vote button.
 - **No sibling/non-sibling distinction:** The suggestions list doesn't differentiate between siblings and non-siblings. All swap suggestions are treated equally.
 
-**Architecture Decision #216 — Swap Votes Expanded Beyond Siblings (Phase 38c):** The sibling-only restriction on swap votes is removed. Any concept-in-context (edge) can be proposed as a replacement for any other. This reflects the reality that better alternatives may exist outside the immediate sibling set — a concept might better belong in a completely different branch of the hierarchy. The `replace_votes` schema is unchanged; only the backend validation and frontend UI expand scope.
+**Architecture Decision #216 — Swap Votes Expanded Beyond Siblings (Phase 38c) — ⚠️ REVERSED by Architecture Decision #256 (Phase 44):** The sibling-only restriction on swap votes was removed in Phase 38c. Any concept-in-context (edge) could be proposed as a replacement for any other. **This was reversed in Phase 44** — swap votes are once again restricted to siblings. Cross-context relevance is now expressed via tunneling (Phase 43). See Architecture Decision #256.
 
 **Files:** `SwapModal.jsx`, `votesController.js`, `api.js`, `ConceptGrid.jsx` (if swap button behavior changes)
 
@@ -3577,7 +3578,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-### Phase 44: Sibling-Only Swap Votes & Auto-Save on Swap — 🔲 PLANNED
+### Phase 44: Sibling-Only Swap Votes & Auto-Save on Swap — ✅ COMPLETE
 
 **Goal:** Reverse the Phase 38c expansion of swap votes to any concept-in-context. Restore the original sibling-only restriction (now that tunneling, Phase 43, handles cross-context "this concept belongs elsewhere" expression). Additionally, make swap votes constructive by auto-saving the destination edge — a swap vote A→B becomes both a vote against A *and* a vote for B at this exact spot.
 
@@ -3585,7 +3586,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 44a: Backend — Sibling Validation, Auto-Save, New Endpoint Shape — 🔲 PLANNED
+#### Phase 44a: Backend — Sibling Validation, Auto-Save, New Endpoint Shape — ✅ COMPLETE
 
 **Complexity:** Medium
 
@@ -3627,7 +3628,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 44b: Frontend — SwapModal UI Redesign — 🔲 PLANNED
+#### Phase 44b: Frontend — SwapModal UI Redesign — ✅ COMPLETE
 
 **Complexity:** Medium
 
@@ -3674,7 +3675,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
-#### Phase 44c: Polish, Edge Cases, Verification — 🔲 PLANNED
+#### Phase 44c: Polish, Edge Cases, Verification — ✅ COMPLETE
 
 **Complexity:** Low
 
@@ -3731,9 +3732,9 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 #### Phase 44 Implementation Priority
 
-1. **44a** — Backend sibling validation, auto-save transaction, new GET response shape, cleanup migration
-2. **44b** — SwapModal UI redesign with two sections, search, simplified cards, auto-save inline note
-3. **44c** — Polish, edge cases (root swaps, cascades, empty states), verification
+1. ~~**44a** — Backend sibling validation, auto-save transaction, new GET response shape, cleanup migration~~ ✅
+2. ~~**44b** — SwapModal UI redesign with two sections, search, simplified cards, auto-save inline note~~ ✅
+3. ~~**44c** — Polish, edge cases (root swaps, cascades, empty states), verification~~ ✅
 
 ---
 
