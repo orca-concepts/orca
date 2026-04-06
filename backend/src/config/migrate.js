@@ -2169,6 +2169,28 @@ const createTables = async () => {
     `);
     console.log('Phase 43a: Created tunnel_links and tunnel_votes tables');
 
+    // ============================================================
+    // Phase 44: Cleanup cross-context swap votes
+    // Per Architecture Decision #256, swap votes must be between
+    // sibling edges. Delete any pre-existing rows that violate this.
+    // ============================================================
+    const crossContextSwaps = await client.query(`
+      DELETE FROM replace_votes rv
+      USING edges src, edges rep
+      WHERE rv.edge_id = src.id
+        AND rv.replacement_edge_id = rep.id
+        AND (
+          src.parent_id IS DISTINCT FROM rep.parent_id
+          OR src.graph_path IS DISTINCT FROM rep.graph_path
+          OR (src.parent_id IS NULL AND rep.parent_id IS NULL AND src.attribute_id != rep.attribute_id)
+        )
+    `);
+    if (crossContextSwaps.rowCount > 0) {
+      console.log(`Phase 44: Deleted ${crossContextSwaps.rowCount} cross-context swap votes`);
+    } else {
+      console.log('Phase 44: No cross-context swap votes to clean up');
+    }
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

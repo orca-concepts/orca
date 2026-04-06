@@ -859,6 +859,7 @@ const votesController = {
   },
 
   // Get all swap votes for a specific edge (for the swap modal)
+  // Phase 44: Returns two lists — existingSwaps (siblings with swap votes) and otherSiblings (siblings without)
   getSwapVotes: async (req, res) => {
     const { edgeId } = req.params;
 
@@ -867,52 +868,102 @@ const votesController = {
         return res.status(400).json({ error: 'Edge ID is required' });
       }
 
-      const userId = req.user.userId;
+      const userId = req.user ? req.user.userId : -1;
 
-      // Get all swap vote replacements for this edge (Phase 38b: no sibling filtering)
-      const result = await pool.query(
+      // Fetch the source edge to determine sibling context
+      const sourceResult = await pool.query(
+        'SELECT id, parent_id, graph_path, attribute_id FROM edges WHERE id = $1',
+        [edgeId]
+      );
+      if (sourceResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Edge not found' });
+      }
+      const sourceEdge = sourceResult.rows[0];
+
+      // Query 1: existingSwaps — siblings that already have swap votes from this edge
+      const existingSwapsResult = await pool.query(
         `SELECT
           rv.replacement_edge_id,
           e.child_id AS replacement_child_id,
           c.name AS replacement_name,
-          a.id AS replacement_attribute_id,
-          a.name AS replacement_attribute_name,
-          e.parent_id AS replacement_parent_id,
-          pc.name AS replacement_parent_name,
-          e.graph_path AS replacement_graph_path,
-          COUNT(rv.id) AS vote_count,
-          BOOL_OR(rv.user_id = $2) AS user_voted
+          COUNT(DISTINCT rv.user_id)::int AS vote_count,
+          BOOL_OR(rv.user_id = $2) AS user_voted,
+          COALESCE((SELECT COUNT(*)::int FROM votes v WHERE v.edge_id = rv.replacement_edge_id), 0) AS save_count
         FROM replace_votes rv
         JOIN edges e ON e.id = rv.replacement_edge_id
         JOIN concepts c ON c.id = e.child_id
-        JOIN attributes a ON a.id = e.attribute_id
-        LEFT JOIN concepts pc ON pc.id = e.parent_id
         WHERE rv.edge_id = $1
-        GROUP BY rv.replacement_edge_id, e.child_id, c.name, a.id, a.name, e.parent_id, pc.name, e.graph_path
-        ORDER BY vote_count DESC, c.name`,
+        GROUP BY rv.replacement_edge_id, e.child_id, c.name
+        ORDER BY vote_count DESC, c.name ASC`,
         [edgeId, userId]
       );
 
-      // Get total swap vote count for this edge (distinct users)
-      const totalResult = await pool.query(
-        'SELECT COUNT(DISTINCT user_id) AS total_swappers FROM replace_votes WHERE edge_id = $1',
-        [edgeId]
-      );
+      // Query 2: otherSiblings — sibling edges with NO swap votes from this edge
+      let otherSiblingsResult;
+      if (sourceEdge.parent_id === null) {
+        // Root siblings: same attribute, parent_id IS NULL
+        otherSiblingsResult = await pool.query(
+          `SELECT
+            e.id AS edge_id,
+            e.child_id,
+            c.name AS child_name,
+            COALESCE((SELECT COUNT(*)::int FROM votes v WHERE v.edge_id = e.id), 0) AS save_count
+          FROM edges e
+          JOIN concepts c ON c.id = e.child_id
+          WHERE e.parent_id IS NULL
+            AND e.attribute_id = $1
+            AND e.id != $2
+            AND e.is_hidden = false
+            AND NOT EXISTS (
+              SELECT 1 FROM replace_votes rv
+              WHERE rv.edge_id = $2 AND rv.replacement_edge_id = e.id
+            )
+          ORDER BY save_count DESC, c.name ASC`,
+          [sourceEdge.attribute_id, edgeId]
+        );
+      } else {
+        // Non-root siblings: same parent_id and graph_path
+        otherSiblingsResult = await pool.query(
+          `SELECT
+            e.id AS edge_id,
+            e.child_id,
+            c.name AS child_name,
+            COALESCE((SELECT COUNT(*)::int FROM votes v WHERE v.edge_id = e.id), 0) AS save_count
+          FROM edges e
+          JOIN concepts c ON c.id = e.child_id
+          WHERE e.parent_id = $1
+            AND e.graph_path = $2
+            AND e.id != $3
+            AND e.is_hidden = false
+            AND NOT EXISTS (
+              SELECT 1 FROM replace_votes rv
+              WHERE rv.edge_id = $3 AND rv.replacement_edge_id = e.id
+            )
+          ORDER BY save_count DESC, c.name ASC`,
+          [sourceEdge.parent_id, sourceEdge.graph_path, edgeId]
+        );
+      }
+
+      const existingSwaps = existingSwapsResult.rows.map(row => ({
+        replacementEdgeId: row.replacement_edge_id,
+        replacementChildId: row.replacement_child_id,
+        replacementName: row.replacement_name,
+        voteCount: row.vote_count,
+        userVoted: row.user_voted,
+        saveCount: row.save_count
+      }));
+
+      const otherSiblings = otherSiblingsResult.rows.map(row => ({
+        edgeId: row.edge_id,
+        childId: row.child_id,
+        childName: row.child_name,
+        saveCount: row.save_count
+      }));
 
       res.json({
-        swapVotes: result.rows.map(row => ({
-          replacementEdgeId: row.replacement_edge_id,
-          replacementChildId: row.replacement_child_id,
-          replacementName: row.replacement_name,
-          replacementAttributeId: row.replacement_attribute_id,
-          replacementAttributeName: row.replacement_attribute_name,
-          parentId: row.replacement_parent_id,
-          parentName: row.replacement_parent_name,
-          graphPath: row.replacement_graph_path,
-          voteCount: parseInt(row.vote_count),
-          userVoted: row.user_voted
-        })),
-        totalSwapVotes: parseInt(totalResult.rows[0].total_swappers)
+        existingSwaps,
+        otherSiblings,
+        totalSwapVotes: existingSwaps.reduce((sum, s) => sum + s.voteCount, 0)
       });
     } catch (error) {
       console.error('Error getting swap votes:', error);
@@ -921,6 +972,7 @@ const votesController = {
   },
 
   // Add a swap vote
+  // Phase 44: Sibling-only validation restored, auto-save destination, transaction-wrapped
   addSwapVote: async (req, res) => {
     const { edgeId, replacementEdgeId } = req.body;
 
@@ -929,15 +981,15 @@ const votesController = {
         return res.status(400).json({ error: 'edgeId and replacementEdgeId are required' });
       }
 
-      if (edgeId === replacementEdgeId) {
+      if (parseInt(edgeId) === parseInt(replacementEdgeId)) {
         return res.status(400).json({ error: 'Cannot swap an edge with itself' });
       }
 
       const userId = req.user.userId;
 
-      // Verify both edges exist (Phase 38b: sibling validation removed — any edge can be a swap target)
+      // Fetch both edges with details for sibling validation
       const edgeCheck = await pool.query(
-        'SELECT id FROM edges WHERE id = ANY($1::integer[])',
+        'SELECT id, parent_id, graph_path, attribute_id, child_id, is_hidden FROM edges WHERE id = ANY($1::integer[])',
         [[edgeId, replacementEdgeId]]
       );
 
@@ -945,54 +997,127 @@ const votesController = {
         return res.status(404).json({ error: 'One or both edges not found' });
       }
 
-      // Phase 20c: Mutual exclusivity — remove any save vote for this edge before swapping.
-      // This mirrors the cascade logic in removeVote: delete the direct vote + all descendant votes.
-      const existingSaveForEdge = await pool.query(
-        'SELECT id FROM votes WHERE user_id = $1 AND edge_id = $2',
-        [userId, edgeId]
-      );
+      const sourceEdge = edgeCheck.rows.find(e => e.id === parseInt(edgeId));
+      const replacementEdge = edgeCheck.rows.find(e => e.id === parseInt(replacementEdgeId));
 
-      if (existingSaveForEdge.rows.length > 0) {
-        // Get the edge details to compute descendant path prefix
-        const swapEdgeData = await pool.query('SELECT * FROM edges WHERE id = $1', [edgeId]);
-        if (swapEdgeData.rows.length > 0) {
-          const swapEdge = swapEdgeData.rows[0];
-          const swapChildId = swapEdge.child_id;
+      // Phase 44: Sibling validation (Architecture Decision #256)
+      const sourceIsRoot = sourceEdge.parent_id === null;
+      const replacementIsRoot = replacementEdge.parent_id === null;
+
+      let isSibling = false;
+      if (sourceIsRoot && replacementIsRoot) {
+        // Both root: must share attribute
+        isSibling = sourceEdge.attribute_id === replacementEdge.attribute_id;
+      } else if (!sourceIsRoot && !replacementIsRoot) {
+        // Both non-root: must share parent_id and graph_path
+        // PostgreSQL arrays returned by pg driver are JS arrays — compare via JSON
+        isSibling = sourceEdge.parent_id === replacementEdge.parent_id
+          && JSON.stringify(sourceEdge.graph_path) === JSON.stringify(replacementEdge.graph_path);
+      }
+      // If one is root and the other isn't, isSibling stays false
+
+      if (!isSibling) {
+        return res.status(400).json({ error: 'Replacement must be a sibling' });
+      }
+
+      // Use a transaction for the swap insert + auto-save
+      const client = await pool.connect();
+      let autoSaved = false;
+      try {
+        await client.query('BEGIN');
+
+        // Phase 20c: Mutual exclusivity — remove any save vote for this edge before swapping.
+        // This mirrors the cascade logic in removeVote: delete the direct vote + all descendant votes.
+        const existingSaveForEdge = await client.query(
+          'SELECT id FROM votes WHERE user_id = $1 AND edge_id = $2',
+          [userId, edgeId]
+        );
+
+        if (existingSaveForEdge.rows.length > 0) {
+          const swapChildId = sourceEdge.child_id;
           let descendantPathPrefix;
-          if (swapEdge.parent_id === null) {
+          if (sourceEdge.parent_id === null) {
             descendantPathPrefix = [swapChildId];
           } else {
-            descendantPathPrefix = [...swapEdge.graph_path, swapChildId];
+            descendantPathPrefix = [...sourceEdge.graph_path, swapChildId];
           }
           const prefixLen = descendantPathPrefix.length;
-          const descendantEdges = await pool.query(
+          const descendantEdges = await client.query(
             `SELECT e.id FROM edges e
              WHERE e.graph_path[1:$1] = $2::integer[]
              AND array_length(e.graph_path, 1) >= $1`,
             [prefixLen, descendantPathPrefix]
           );
           const descendantEdgeIds = descendantEdges.rows.map(r => r.id);
-          const allEdgeIdsToUnsave = [edgeId, ...descendantEdgeIds];
+          const allEdgeIdsToUnsave = [parseInt(edgeId), ...descendantEdgeIds];
 
-          const deletedVotes = await pool.query(
+          await client.query(
             'DELETE FROM votes WHERE user_id = $1 AND edge_id = ANY($2::integer[]) RETURNING edge_id',
             [userId, allEdgeIdsToUnsave]
           );
-          if (deletedVotes.rows.length > 0) {
-            const removedEdgeIds = deletedVotes.rows.map(r => r.edge_id);
-
-          }
         }
-      }
 
-      // Insert swap vote
-      const insertResult = await pool.query(
-        `INSERT INTO replace_votes (user_id, edge_id, replacement_edge_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (user_id, edge_id, replacement_edge_id) DO NOTHING
-         RETURNING id`,
-        [userId, edgeId, replacementEdgeId]
-      );
+        // Insert swap vote
+        const insertResult = await client.query(
+          `INSERT INTO replace_votes (user_id, edge_id, replacement_edge_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, edge_id, replacement_edge_id) DO NOTHING
+           RETURNING id`,
+          [userId, edgeId, replacementEdgeId]
+        );
+
+        // Phase 44: Auto-save the destination edge if the user hasn't already saved it
+        // (Architecture Decision #257)
+        const existingSaveOnDest = await client.query(
+          'SELECT 1 FROM votes WHERE user_id = $1 AND edge_id = $2',
+          [userId, replacementEdgeId]
+        );
+
+        if (existingSaveOnDest.rows.length === 0) {
+          // Phase 20c cascade: if user had a swap vote on the destination, remove it
+          await client.query(
+            'DELETE FROM replace_votes WHERE user_id = $1 AND edge_id = $2',
+            [userId, replacementEdgeId]
+          );
+
+          // Insert the auto-save vote on the destination
+          await client.query(
+            `INSERT INTO votes (user_id, edge_id)
+             VALUES ($1, $2)
+             ON CONFLICT (user_id, edge_id) DO NOTHING`,
+            [userId, replacementEdgeId]
+          );
+
+          // Backwards-compat: link to user's first saved tab if it exists
+          const defaultTab = await client.query(
+            'SELECT id FROM saved_tabs WHERE user_id = $1 ORDER BY display_order ASC LIMIT 1',
+            [userId]
+          );
+          if (defaultTab.rows.length > 0) {
+            const voteRow = await client.query(
+              'SELECT id FROM votes WHERE user_id = $1 AND edge_id = $2',
+              [userId, replacementEdgeId]
+            );
+            if (voteRow.rows.length > 0) {
+              await client.query(
+                `INSERT INTO vote_tab_links (vote_id, saved_tab_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (vote_id, saved_tab_id) DO NOTHING`,
+                [voteRow.rows[0].id, defaultTab.rows[0].id]
+              );
+            }
+          }
+
+          autoSaved = true;
+        }
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
 
       // Get total swap vote count for this edge (distinct users)
       const totalResult = await pool.query(
@@ -1007,9 +1132,10 @@ const votesController = {
       );
 
       res.status(201).json({
-        message: insertResult.rows.length > 0 ? 'Swap vote added' : 'Already voted for this swap',
+        message: 'Swap vote added',
         totalSwapVotes: parseInt(totalResult.rows[0].total_swappers),
-        replacementVoteCount: parseInt(replCountResult.rows[0].repl_count)
+        replacementVoteCount: parseInt(replCountResult.rows[0].repl_count),
+        autoSaved
       });
     } catch (error) {
       console.error('Error adding swap vote:', error);
