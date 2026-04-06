@@ -3738,6 +3738,54 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 ---
 
+## Future Considerations (Unscheduled)
+
+This section captures speculative features that are **not** on the active roadmap but are worth preserving the design thinking for. These should not be implemented until there is real demand and the prerequisites are in place. No phase numbers — these are explicitly outside the numbered phase sequence.
+
+### Federated Ontologies / Cross-App Interoperability
+
+**Motivation:** Orca is AGPL v3 partly to encourage others to build their own collaborative ontology apps with different rules, focuses, and communities. If that ecosystem materializes, it would be valuable for these apps to recognize when they're describing the same concept and let users hop between them. This is a "future of the open ontology web" feature, not a launch feature.
+
+**Three problems to solve separately:**
+1. **Identity** — How do two apps agree that "their concept X" and "our concept Y" are the same thing?
+2. **Discovery** — How does Orca even know other apps exist and have related concepts?
+3. **Navigation** — Once a link exists, how does the user actually jump between apps? (Trivially solved with a stable URL.)
+
+**Constitutional alignment:** All federation features must preserve Orca's "transparent human action" philosophy. AI may *propose* equivalences, but humans (via votes/contestation) create them. External equivalences should be contestable, votable, permanent artifacts just like internal edges. External identifiers (e.g. Wikidata QIDs) should be *informational* rather than *authoritative* — they link out, they don't override Orca's community curation.
+
+**Phased sketch (each phase useful on its own):**
+
+- **Phase A — External Identifiers:** Add an optional `external_id` field to concepts (Wikidata QID, DOI, MeSH ID, etc.). No federation logic yet. Useful even with zero other apps because researchers can ground Orca concepts to canonical entities. Lays the foundation: any other app that adopts the same identifier convention gets interop "for free."
+
+- **Phase B — Manual External Equivalence Edges:** A new edge type `external_equivalence` storing `{target_app_url, target_concept_id, target_concept_name_snapshot, creator, created_at, votes}`. Treated like any other edge — votable, contestable, permanent. Renders as an "Also in:" sidebar on the concept page with click-through links. Works with one other app.
+
+- **Phase C — App Registry & Federation API:** A read-only public REST endpoint (e.g. `/api/v1/federation/concept/:id`) returning a standard JSON shape — concept name, attribute, path, vote counts, recent annotations. A community-maintained registry (could literally be a GitHub repo) lists compliant apps and their base URLs. Builds naturally on the public data API already planned post-launch. Requires an ecosystem to be useful.
+
+- **Phase D — AI-Assisted Equivalence Suggestions:** Background job sends new concepts (name, path, attributes, sample annotations) to an LLM along with candidate matches from registered apps. High-confidence matches surface as suggestions: "We think this might be the same as 'Cognitive Load Theory' on LearnGraph — link it?" The user (or community) accepts or rejects. **AI proposes, humans dispose** — accepted suggestions become normal `external_equivalence` edges through the same vote/contestation mechanisms.
+
+- **Phase E — Cross-App Search & Schema Translation:** "Show me how other apps have organized concepts under 'reinforcement learning'." LLM-assisted mapping between different attribute schemas (Orca's `[action]/[tool]/[value]` vs. another app's `[method]/[domain]/[etc]`). Only worth doing once a federation ecosystem exists.
+
+**Implementation note — ActivityPub-inspired "lite federation":** Phase C should borrow the *ideas* from ActivityPub (the W3C decentralized social protocol behind Mastodon) without implementing the full spec. Specifically worth borrowing:
+1. **Actor addressing** — `@username@instance.org` as a portable identity format. Just a convention; doesn't require the rest of the protocol.
+2. **Activity documents** — Structured JSON with `{actor, verb, object, timestamp}` for events other apps should know about. Orca would extend the standard verbs (Create/Update/Like) with domain-specific ones (Propose, Vote, Annotate, Combo).
+3. **Inbox/outbox pattern** — Each app exposes a public outbox feed; other apps poll or subscribe. Much simpler than ActivityPub's push-delivery model with HTTP signatures, retries, and dead-letter queues.
+4. **Follow/subscription as a federated primitive** — A user on App A subscribes to a concept on App B; App A periodically fetches updates from App B's outbox. Maps cleanly onto Orca's existing subscription model.
+
+Full ActivityPub is rejected as overkill: the spec is dense (Mastodon's implementation is tens of thousands of lines), the vocabulary is designed for social media (Notes/Articles/Likes, not concepts/edges/attributes), push delivery requires reliability infrastructure Orca doesn't need at federation scale, and the Fediverse's moderation/defederation problems are well-documented. The lite-federation model is closer to "RSS with extra verbs" than to Mastodon.
+
+**Open questions to revisit when this becomes relevant:**
+- **Trust & abuse:** Federated systems have spam/poisoning problems. A registered app could deliberately create misleading equivalences. Federation links should carry the same voting/contestation as internal edges, plus a way to mute or de-register bad-actor apps.
+- **Constitutional tension on external IDs:** Even informational external IDs (Wikidata, etc.) are a soft form of deferring to external curation. Worth being explicit in the constitution about whether/how this is allowed before implementing Phase A.
+- **AGPL implications for compatibility:** Forks of Orca will have schema compatibility for free. Independent reimplementations will need a real spec — another reason a federation API spec (Phase C) is valuable even if no one is using it yet.
+- **ORCID precedent:** The existing ORCID integration (Phase 41) is already a small step in this direction — Orca defers to an external authority for researcher identity. Federated concept identity is the same pattern applied to concepts instead of people. Worth treating ORCID as the design precedent when this work begins.
+
+**Prerequisites before any of this is worth starting:**
+- Orca is launched and has real users.
+- The public data API (post-launch roadmap item) is built and stable.
+- At least one other ontology app exists that wants to interoperate, OR researchers are actively asking for Wikidata grounding.
+
+---
+
 ## Design Philosophy
 
 The visual interface pursues minimalism and Zen aesthetics. The background is a soft off-white and text is black in EB Garamond serif font (loaded via Google Fonts, with explicit `fontFamily` set on all interactive elements). The only color comes from the identical vote set swatches and dots; all other buttons use the black-on-off-white theme with neutral borders. No emoji icons in UI chrome — replaced with text labels (only ▲ vote and ⇄ swap retained as geometric symbols; plain Unicode ←→▸▾✕↓ kept as simple shapes). No italics anywhere in the UI. No colored buttons (green, red, blue all converted to transparent/dark with neutral borders in Phase 28a).
