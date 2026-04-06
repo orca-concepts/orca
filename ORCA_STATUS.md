@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 3, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete)
+**Last Updated:** April 6, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save planned)
 
 ---
 
@@ -236,8 +236,9 @@ CREATE INDEX idx_replace_votes_replacement ON replace_votes(replacement_edge_id)
 ```
 
 **Key Points:**
-- **No sibling restriction (Phase 38c):** Any edge can be proposed as a replacement for any other — the original sibling-only restriction was removed. The `replacement_edge_id` can reference any valid edge in any context.
-- Backend validates that both edges exist and are different (can't swap with self)
+- **Sibling-only restriction (Phase 44, reverting Phase 38c):** The replacement edge must be a sibling of the source edge — same `parent_id` and `graph_path`. For root edges, both edges must be root (`parent_id IS NULL`, empty `graph_path`) and share the same attribute. Cross-context "this concept belongs elsewhere" expression is now handled exclusively by tunneling (Phase 43). Architecture Decision #216 (Phase 38c expanded swaps) is reversed by Architecture Decision #256.
+- **Auto-save on swap (Phase 44):** When a user casts a swap vote A→B, the backend automatically inserts a save vote on B if the user has not already saved it. The auto-save runs through the existing `addVote` path so Phase 20c mutual-exclusivity cascades apply normally. See Architecture Decision #257.
+- Backend validates that both edges exist, are different (can't swap with self), and are siblings
 - Multiple users can point to different replacements
 - Visible to all users; purely informational — no automatic removal (append-only model)
 - `edge_id` = the edge being flagged as replaceable
@@ -1480,9 +1481,9 @@ Body: {
 | POST | `/remove-from-tab` | Remove save from a specific tab only — keeps vote if linked to other tabs |
 | POST | `/link/add` | Add a link vote in contextual Flip View |
 | POST | `/link/remove` | Remove a link vote |
-| GET | `/swap/:edgeId` | Get all swap vote replacements for an edge (with vote counts) |
-| POST | `/swap/add` | Add a swap vote (validates sibling relationship) |
-| POST | `/swap/remove` | Remove a swap vote |
+| GET | `/swap/:edgeId` | Get existing swap votes and other siblings for an edge (Phase 44) |
+| POST | `/swap/add` | Add a swap vote (validates sibling relationship; auto-saves destination if not already saved) |
+| POST | `/swap/remove` | Remove a swap vote (does not remove auto-saved destination) |
 | GET | `/graph-tabs` | Get all graph tabs for the current user |
 | POST | `/graph-tabs/create` | Create a new graph tab (type, conceptId, path, viewMode, label) |
 | POST | `/graph-tabs/update` | Update a graph tab's navigation state |
@@ -1571,16 +1572,25 @@ POST /api/votes/link/remove
 Body: { originEdgeId: 10, similarEdgeId: 25 }
 Response: { message, linkCount }
 
-// Get swap votes for an edge
+// Get swap votes and siblings for an edge (Phase 44)
 GET /api/votes/swap/123
-Response: { swapVotes: [{ replacementEdgeId, replacementChildId, replacementName, replacementAttributeId, replacementAttributeName, voteCount, userVoted }], totalSwapVotes }
+Response: {
+  existingSwaps: [
+    { replacementEdgeId, replacementChildId, replacementName, voteCount, userVoted, saveCount }
+  ],  // sorted by voteCount DESC
+  otherSiblings: [
+    { edgeId, childId, childName, saveCount }
+  ],  // siblings with no swap votes from this edge, sorted by saveCount DESC
+  totalSwapVotes
+}
 
 // Add swap vote (replacement must be a sibling — same parent_id and graph_path)
+// Auto-saves the destination edge if the user has not already saved it (Phase 44)
 POST /api/votes/swap/add
 Body: { edgeId: 123, replacementEdgeId: 789 }
-Response: { message, totalSwapVotes, replacementVoteCount }
+Response: { message, totalSwapVotes, replacementVoteCount, autoSaved: true|false }
 
-// Remove swap vote
+// Remove swap vote (does not remove auto-saved destination — Phase 44)
 POST /api/votes/swap/remove
 Body: { edgeId: 123, replacementEdgeId: 789 }
 Response: { message, totalSwapVotes, replacementVoteCount }
@@ -3564,6 +3574,166 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 1. ~~**43a** — Backend tables, endpoints, search attribute filter~~ ✅
 2. ~~**43b** — Tunnel view UI, flip view right-click + sort rename~~ ✅
 3. ~~**43c** — Polish, edge cases, bug fixes, build verification~~ ✅
+
+---
+
+### Phase 44: Sibling-Only Swap Votes & Auto-Save on Swap — 🔲 PLANNED
+
+**Goal:** Reverse the Phase 38c expansion of swap votes to any concept-in-context. Restore the original sibling-only restriction (now that tunneling, Phase 43, handles cross-context "this concept belongs elsewhere" expression). Additionally, make swap votes constructive by auto-saving the destination edge — a swap vote A→B becomes both a vote against A *and* a vote for B at this exact spot.
+
+**Motivation:** Phase 38c's expanded swap votes always sat uneasily with Orca's path+attribute identity principle — swapping a concept for a non-sibling implicitly asserted a relationship across contexts that the data model didn't really support. Tunneling (Phase 43) is the proper primitive for cross-context relevance. With tunneling in place, swap votes can return to their original tighter scope: "this sibling is a better fit at this exact spot." Auto-saving the destination converts swaps from a pure negative signal into a constructive endorsement.
+
+---
+
+#### Phase 44a: Backend — Sibling Validation, Auto-Save, New Endpoint Shape — 🔲 PLANNED
+
+**Complexity:** Medium
+
+**Tasks:**
+
+**1. Re-add sibling validation to `addSwapVote` (`votesController.js`):**
+- Before inserting the `replace_votes` row, fetch both edges and verify:
+  - For non-root: `source.parent_id = replacement.parent_id AND source.graph_path = replacement.graph_path`
+  - For root edges: `source.parent_id IS NULL AND replacement.parent_id IS NULL AND source.attribute_id = replacement.attribute_id`
+- Note: Because each edge has exactly one `attribute_id` and siblings share a parent edge, sibling edges inherently share the same attribute. No separate attribute check is needed for the non-root case.
+- Return `400 Bad Request` with message `"Replacement must be a sibling"` if validation fails.
+
+**2. Auto-save the destination on swap (`votesController.js`):**
+- After the `replace_votes` insert succeeds, check if the user already has a save vote on `replacement_edge_id` (`SELECT 1 FROM votes WHERE user_id = $1 AND edge_id = $2`).
+- If no existing save, call the existing `addVote` logic to insert one. This ensures Phase 20c mutual-exclusivity cascades run normally (e.g., if the user had a swap vote on the destination, it gets cleared by the new save).
+- Wrap the `replace_votes` insert and the auto-save in a single transaction (`BEGIN`/`COMMIT`/`ROLLBACK`) so we don't end up with a swap vote without its auto-save (or vice versa) if one operation fails.
+- Return `autoSaved: true|false` in the response so the frontend can show the inline "Also added a vote for [name]" message.
+
+**3. Reshape `GET /swap/:edgeId` response (`votesController.js`):**
+- Current response: `{ swapVotes: [...], totalSwapVotes }` — flat list of replacement edges with vote counts.
+- New response: `{ existingSwaps: [...], otherSiblings: [...], totalSwapVotes }`.
+- **`existingSwaps`** — Concepts that already have ≥1 swap vote at this edge. Each item: `{ replacementEdgeId, replacementChildId, replacementName, voteCount, userVoted, saveCount }`. Sorted by `voteCount DESC`.
+- **`otherSiblings`** — Sibling edges of `edgeId` that have NOT received any swap vote from this edge. Each item: `{ edgeId, childId, childName, saveCount }`. Sorted by `saveCount DESC`.
+- A sibling already in `existingSwaps` must NOT also appear in `otherSiblings`.
+- Drop `replacementAttributeId`, `replacementAttributeName`, and any parent path data — the modal no longer displays these because all results share the same context.
+- For the root case, "siblings" are all root edges with the same `attribute_id` as the source.
+
+**4. `removeSwapVote` is unchanged.** Removing a swap does NOT remove the auto-saved destination. See Architecture Decision #258.
+
+**5. Pre-launch test data cleanup:**
+- Write a one-time migration script `migrations/044_cleanup_cross_context_swaps.sql` that **deletes** existing `replace_votes` rows where the source and replacement are not siblings under the new rule.
+- Since this is pre-launch test data, deletion (not soft-hide) is fine and avoids any need for filter logic in the new queries. The append-only philosophy applies to production data only.
+- Suggested SQL: delete rows where `source.parent_id IS DISTINCT FROM replacement.parent_id OR source.graph_path IS DISTINCT FROM replacement.graph_path` (with the root case handled by the `IS DISTINCT FROM` semantics of NULL parent_ids matching).
+- Verify the cleanup with a `SELECT COUNT(*)` before and after.
+
+**Files:** `votesController.js`, `migrations/044_cleanup_cross_context_swaps.sql`
+
+**Suggested git commit:** `feat: 44a — sibling-only swap validation, auto-save destination, new GET /swap response shape`
+
+---
+
+#### Phase 44b: Frontend — SwapModal UI Redesign — 🔲 PLANNED
+
+**Complexity:** Medium
+
+**Tasks:**
+
+**1. Update `api.js`:**
+- The existing `getSwapVotes(edgeId)` call now returns the new shape `{ existingSwaps, otherSiblings, totalSwapVotes }`. Update any TypeScript-style JSDoc comments if present.
+- The existing `addSwapVote` response now includes `autoSaved: boolean`.
+
+**2. Redesign `SwapModal.jsx`:**
+
+**Layout:**
+- **Section 1: "Existing swap votes"** — only rendered if `existingSwaps.length > 0`. Header: `Existing swap votes`. Cards listed in the order returned (already sorted by vote count desc).
+- **Section 2: "Other siblings"** — always rendered (unless there are no siblings at all, in which case show "No other siblings"). Header: `Other siblings`. A small inline search input sits directly below the header label, above the card list. Cards listed in the order returned (already sorted by save count desc).
+
+**Card design (both sections — simplified from current):**
+- Concept name on the left (single line, EB Garamond, no italics)
+- Save count next to the name as a small neutral label, e.g. `▲ 12 votes`
+- Vote button on the right with the standard arrow + count format: `▲ N` where N is the swap vote count for this destination from this source edge
+- The vote button shading matches the existing save vote button pattern: dark filled background when `userVoted === true`, transparent with border otherwise
+- For "Other siblings" cards, the swap vote count is always 0 and the button is unshaded — clicking it casts the first swap vote (and triggers the auto-save)
+- **Removed from cards (compared to Phase 38c version):** parent path text, attribute badge, "open in new graph tab" link/button
+
+**Search field:**
+- Placed above the "Other siblings" list only (not above "Existing swap votes")
+- Plain text input with placeholder `Search siblings...`
+- Client-side filter: `sibling.childName.toLowerCase().includes(query.trim().toLowerCase())`
+- No API call, no fuzzy matching, no debouncing needed
+- When the search field is empty, show the full sorted list
+
+**3. Vote action wiring:**
+- Clicking a vote button in either section calls `addSwapVote(edgeId, replacementEdgeId)`.
+- On success, refetch `getSwapVotes(edgeId)` to repopulate both sections (the voted-for sibling moves from `otherSiblings` to `existingSwaps`).
+- If the response includes `autoSaved: true`, display a small inline note below the action area for ~3 seconds: `Also added a vote for [conceptName]`. Use the word "vote" not "save vote" per the user's terminology preference.
+- Clicking a shaded vote button (i.e., the user has already voted) calls `removeSwapVote(edgeId, replacementEdgeId)` and refetches. Note that removing the swap does NOT remove the auto-saved destination (Architecture Decision #258).
+
+**4. Update `ConceptGrid.jsx` swap button:**
+- The ⇄ button on child cards continues to open the modal as before. No changes needed there — the modal handles the new shape.
+- The `swap_count` badge already reflects the new sibling-only count automatically because the cleanup migration removed cross-context rows.
+
+**Files:** `SwapModal.jsx`, `api.js`, possibly `ConceptGrid.jsx` (verify only)
+
+**Suggested git commit:** `feat: 44b — SwapModal UI redesign with siblings-only sections, search, simplified cards, auto-save inline note`
+
+---
+
+#### Phase 44c: Polish, Edge Cases, Verification — 🔲 PLANNED
+
+**Complexity:** Low
+
+**Tasks:**
+- **Guest access:** Verify guest users can see both sections in the modal (read-only), with vote buttons hidden or disabled. The auto-save behavior is irrelevant for guests since they cannot vote.
+- **Empty states:**
+  - No existing swap votes + no other siblings → modal shows `No siblings to swap with`
+  - No existing swap votes + some siblings → "Existing swap votes" section is hidden, only "Other siblings" shows
+  - Some existing swaps + no remaining other siblings → "Other siblings" section shows `No other siblings` (or hides entirely)
+- **Self-swap prevention:** The source edge itself must never appear in the `otherSiblings` list. Backend already filters this via the `WHERE id != $edgeId` condition; verify with a test.
+- **Root edge swaps:** Verify Phase 38b root swap behavior still works — root concepts can swap with other root concepts of the same attribute. The modal opens from the ⇄ button on root concept cards in `Root.jsx`.
+- **Auto-save cascade interaction:** If user swaps A→B and B already had an active swap vote from this user (B→C), the auto-save on B should cascade-clear that swap (Phase 20c mutual exclusivity). Test this scenario explicitly.
+- **Auto-save persistence on swap removal:** Cast swap A→B (auto-saves B), then remove the swap. Verify B is still saved.
+- **Search field behavior:** Empty search shows full list; typing filters in real time; clearing the search restores the full list.
+- **Frontend build verification:** `cd frontend && npm run build` — zero errors.
+- **Backend smoke tests via curl:** Add swap, verify auto-save, get swap response shape, remove swap, verify save persists.
+
+**Files:** `SwapModal.jsx`, `votesController.js` (bug fixes only)
+
+**Suggested git commit:** `fix: 44c — swap modal polish, edge cases, verification`
+
+---
+
+#### Phase 44 Architecture Decisions
+
+- **Architecture Decision #256 — Swap Votes Re-Restricted to Siblings (Phase 44):** Reverses Architecture Decision #216 (Phase 38c). Swap votes now require the replacement edge to be a sibling — same `parent_id` and `graph_path` (and for root edges, both must be root with the same `attribute_id`). Cross-context "this concept belongs elsewhere" expression is now handled exclusively by tunneling (Phase 43), which is the better primitive for cross-graph relationships. Pre-launch `replace_votes` rows that violated the new sibling rule were deleted in a one-time cleanup migration (`044_cleanup_cross_context_swaps.sql`) — acceptable because this is test data; production rollout post-launch will not face this issue.
+
+- **Architecture Decision #257 — Swap Votes Auto-Save the Destination (Phase 44):** Casting a swap vote A→B automatically inserts a save vote on B if the user has not already saved B. This converts swap votes from a pure negative signal ("replace A") into a constructive endorsement ("B belongs here instead of A"). The auto-save runs through the existing `addVote` code path so Phase 20c mutual-exclusivity cascades apply normally — for example, if the user previously had a swap vote on B itself, the new save on B will clear that swap. The two operations (swap insert + auto-save) are wrapped in a single transaction to prevent partial state.
+
+- **Architecture Decision #258 — Removing a Swap Does Not Remove the Auto-Save (Phase 44):** The auto-save on swap creation is a one-time nudge. If a user later removes the swap vote A→B, the save vote on B is preserved — the user must manually unsave B if they want it gone. Rationale: removing the swap may mean "I changed my mind about A being bad" without implying "I no longer think B is good." Automatic save removal would create surprising state changes and conflict with the principle that user actions should be deliberate and visible.
+
+#### Phase 44 Verification Checklist
+
+1. Cast a swap vote between two siblings — succeeds, swap vote count increments
+2. Cast a swap vote between non-siblings — backend returns 400 "Replacement must be a sibling"
+3. Cast a swap vote A→B where the user has not saved B — verify B now has a save vote from this user
+4. Cast a swap vote A→B where the user already saved B — verify no duplicate save row inserted (`autoSaved: false` in response)
+5. Cast a swap vote A→B where the user previously swap-voted B→C — verify the auto-save on B cascade-clears the B→C swap (Phase 20c)
+6. Remove a swap vote A→B (where B was auto-saved) — verify the save on B persists
+7. Modal opens with "Existing swap votes" section sorted by vote count descending
+8. Modal opens with "Other siblings" section sorted by save count descending
+9. A sibling that has any swap vote appears only in "Existing swap votes", not in "Other siblings"
+10. Search field above "Other siblings" filters in real time; case-insensitive substring match
+11. Vote button shading matches save vote button pattern (dark filled when voted, transparent with border otherwise)
+12. Auto-save inline note `Also added a vote for [name]` appears for ~3 seconds when applicable
+13. Cards do NOT display parent path, attribute badge, or open-in-new-tab link
+14. Cards DO display the destination's save count (e.g., `▲ 12 votes`)
+15. Root concept swap votes still work (Phase 38b regression check) — ⇄ button on root cards opens modal with other root siblings of the same attribute
+16. Self-swap is impossible — source edge never appears in `otherSiblings`
+17. Guest users can view the modal read-only; vote buttons hidden or disabled
+18. Cleanup migration deleted any pre-existing cross-context swap rows; swap_count badges on child cards now reflect the cleaned-up data
+19. Clean build: `cd frontend && npm run build` succeeds
+20. ConceptGrid ⇄ button still opens modal; `swap_count` badge and `user_swapped` styling still work
+
+#### Phase 44 Implementation Priority
+
+1. **44a** — Backend sibling validation, auto-save transaction, new GET response shape, cleanup migration
+2. **44b** — SwapModal UI redesign with two sections, search, simplified cards, auto-save inline note
+3. **44c** — Polish, edge cases (root swaps, cascades, empty states), verification
 
 ---
 

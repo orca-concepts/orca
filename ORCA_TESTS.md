@@ -8,6 +8,22 @@
 
 ---
 
+## CRITICAL: Test Result Persistence Rules
+
+**These rules are mandatory. Violating them wastes real money on token usage.**
+
+1. **Every agent that runs tests MUST write its results to a file** in the project root, named `test-results-section-{range}.md` (e.g., `test-results-section-1-4.md`). Results returned only in conversation context WILL be lost to context window compression before they can be compiled. This has already happened once — do not repeat it.
+
+2. **Never defer report compilation.** Do not wait for all agents to finish before compiling. Process each agent's file as soon as it completes, or have the final compilation step read from the files on disk.
+
+3. **The final compiled report MUST also be written to a file** — `test-results-full.md` in the project root — before presenting it to the user. If context compresses mid-summary, the file survives.
+
+4. **After the report is delivered**, delete the intermediate `test-results-section-*.md` files and `test-results-full.md` (they are ephemeral, not part of the codebase). Do NOT commit them to git.
+
+5. **If an agent finishes with "Done" and no file was written, that agent's work is lost.** Re-run it. "Done" does not mean "passed" — it means the agent completed execution. Results only exist if they are on disk.
+
+---
+
 ## Run Levels
 
 There are three run levels. The prompt you receive will tell you which level to use. If it doesn't specify, default to Level 1.
