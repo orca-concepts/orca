@@ -933,7 +933,8 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: '20px',
+    flexWrap: 'wrap',
+    gap: '10px 20px',
   },
   breadcrumbWithBack: {
     display: 'flex',
@@ -955,7 +956,8 @@ const styles = {
   buttonSection: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
+    flexWrap: 'wrap',
+    gap: '8px',
   },
   flipButton: {
     padding: '8px 16px',
@@ -1068,10 +1070,13 @@ const styles = {
     paddingTop: '20px',
     marginTop: '20px',
   },
+  // Phase 46: flex-wrap so sort toggles reflow below the concept name at narrow widths
+  // instead of compressing the name into an unreadable sliver.
   conceptHeader: {
     display: 'flex',
     alignItems: 'baseline',
-    gap: '12px',
+    flexWrap: 'wrap',
+    gap: '8px 12px',
     marginBottom: '20px',
   },
   conceptName: {
