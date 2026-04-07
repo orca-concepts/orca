@@ -730,4 +730,43 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 
 ---
 
+## 31. Annotation Creation Warning Modal (Phase 45)
+
+### Database & Backend
+- [ ] `hide_annotation_warning` column exists on `users` table (BOOLEAN, NOT NULL, default false)
+- [ ] `GET /api/auth/me` returns `hideAnnotationWarning` field (false for users who haven't dismissed)
+- [ ] `POST /api/auth/hide-annotation-warning` with valid JWT returns `{ success: true }` and sets column to true
+- [ ] `POST /api/auth/hide-annotation-warning` without JWT returns 401
+- [ ] After calling the endpoint, `GET /api/auth/me` returns `hideAnnotationWarning: true`
+
+### Frontend — Warning Modal
+- [ ] When a user with `hideAnnotationWarning: false` clicks "Create Annotation", the warning modal appears before the annotation is created
+- [ ] Warning modal shows title "Annotations are permanent" and explains append-only model
+- [ ] Warning modal has a "Don't show this again" checkbox (unchecked by default)
+- [ ] Clicking "Cancel" closes the modal without creating the annotation
+- [ ] Clicking "Create annotation" creates the annotation and closes the modal
+- [ ] If "Don't show again" was checked on confirm, the backend endpoint is called and subsequent annotation creations in the same session skip the modal
+- [ ] A user with `hideAnnotationWarning: true` (already dismissed) skips the modal entirely — annotation creates directly on button click
+- [ ] Guest users never see the modal (they cannot create annotations — existing guards prevent this)
+- [ ] The modal uses inline styles only (no CSS classes), EB Garamond font, black-on-off-white aesthetic
+
+### All annotation creation paths covered
+- [ ] Text selection → "Annotate" button → AnnotationPanel → Create Annotation — goes through modal
+- [ ] "Add as Annotation" from graph view → AnnotationPanel (prefilled) → Create Annotation — goes through modal
+- [ ] No orphaned `createAnnotation` calls exist outside the modal-gated `handleConfirmCreate` path
+
+---
+
+## 32. Responsive Concept Header (Phase 46)
+
+- [ ] At full desktop width (~1440px), the concept header renders normally (breadcrumb + buttons on one row, concept name + sort toggles on one row)
+- [ ] At half-screen width (~720px), action buttons (Flip View, Share, Tunnel, Add as Annotation, Add to Superconcept) wrap to a second row below the breadcrumb instead of squishing
+- [ ] At half-screen width, sort toggles (Graph Votes, Newest, Annotations, Top Annotation) wrap below the concept name instead of squishing
+- [ ] At narrow width (~500px), all elements remain readable — no overlapping or invisible buttons
+- [ ] No buttons were removed or renamed compared to the pre-Phase 46 layout
+- [ ] No CSS files were added (inline styles only)
+- [ ] The combo picker dropdown (Add to Superconcept) still positions correctly when buttons are wrapped
+
+---
+
 **END OF TESTING CHECKLIST**

@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 6, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete)
+**Last Updated:** April 7, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete)
 
 ---
 
@@ -62,6 +62,7 @@ CREATE TABLE users (
   orcid_id VARCHAR(19),
   token_issued_after TIMESTAMP,
   age_verified_at TIMESTAMP,
+  hide_annotation_warning BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX idx_users_orcid ON users(orcid_id) WHERE orcid_id IS NOT NULL;
@@ -77,6 +78,7 @@ CREATE UNIQUE INDEX idx_users_orcid ON users(orcid_id) WHERE orcid_id IS NOT NUL
 - `phone_lookup` — HMAC-SHA256 of normalized phone number, keyed by `PHONE_LOOKUP_KEY` env var (Phase 33e). Deterministic — enables O(1) database lookup via UNIQUE index. Replaces the O(n) bcrypt scan previously used for login and registration uniqueness checks.
 - `token_issued_after` — timestamp used by "Log out everywhere" (Phase 32b). When set, auth middleware rejects any JWT with `iat <= token_issued_after`. Nullable — null means no sessions have been invalidated.
 - `age_verified_at` — timestamp recording when the user confirmed they are at least 18 years old during registration (Phase 36). Set once at account creation, never cleared. Nullable — null for users who registered before Phase 36 (test users backfilled with `NOW()` in migration).
+- `hide_annotation_warning` — boolean flag (Phase 45). When `true`, the annotation creation warning modal is suppressed for this user. Set via `POST /auth/hide-annotation-warning`. Default `false` — new users see the warning on their first annotation creation. NOT NULL.
 - `orcid_id` — verified ORCID iD in the format `0000-0000-0000-0000` (19 chars with dashes). Set via ORCID OAuth `/authenticate` flow (Phase 41a). Nullable — null for users who haven't linked an ORCID. Partial unique index (`WHERE orcid_id IS NOT NULL`) prevents two users from linking the same ORCID. Users can disconnect (set to NULL) at any time via their profile page. **Important:** Per ORCID's integration requirements, iDs must be authenticated via OAuth — users cannot manually type an ORCID iD.
 - **Note:** `last_active` column was originally planned for inactive user filtering. The inactive feature was redesigned to operate at the **corpus tab level on the Saved Page** instead — see Phase 8 (Inactive Corpus Tab Dormancy, now complete). No `last_active` column is needed on the users table.
 
@@ -1354,6 +1356,7 @@ CREATE INDEX idx_tunnel_votes_link ON tunnel_votes(tunnel_link_id);
 | GET | `/orcid/authorize-url` | Yes | Returns the ORCID OAuth authorization URL for the frontend to redirect to. Constructs URL with client_id, /authenticate scope, and redirect_uri. (Phase 41a) |
 | POST | `/orcid/callback` | Yes | Exchanges the ORCID OAuth authorization code for a verified ORCID iD. Stores `orcid_id` on the user row. Returns 409 if ORCID already linked to another account. (Phase 41a) |
 | POST | `/orcid/disconnect` | Yes | Removes the ORCID iD from the user's account (sets `orcid_id = NULL`). (Phase 41a) |
+| POST | `/hide-annotation-warning` | Yes | Sets `hide_annotation_warning = true` for the requesting user. No request body needed. Returns `{ success: true }`. (Phase 45) |
 
 **Request/Response Examples:**
 
@@ -1806,7 +1809,8 @@ orca/
     │   │   ├── AddConceptModal.jsx # Modal for creating concepts (legacy, still available)
     │   │   ├── AcceptInvite.jsx    # Invite acceptance page — /invite/:token route (Phase 7g)
     │   │   ├── AnnotateFromGraphPicker.jsx # Corpus/document picker for "Add as Annotation" from graph view (Phase 38h)
-    │   │   ├── AnnotationPanel.jsx  # Text selection → concept search → annotation creation (Phase 7d, updated 26c, 38h — prefilledConcept/prefilledEdge props)
+    │   │   ├── AnnotationPanel.jsx  # Text selection → concept search → annotation creation (Phase 7d, updated 26c, 38h — prefilledConcept/prefilledEdge props, Phase 45 — warning modal gate)
+    │   │   ├── AnnotationWarningModal.jsx # Permanent annotation warning with "Don't show again" checkbox (Phase 45)
     │   │   ├── AppShell.jsx         # Unified tab bar shell (header + saved tabs + graph tabs + combo tabs + content area)
     │   │   ├── Breadcrumb.jsx      # Navigation breadcrumb (with names)
     │   │   ├── ComboListView.jsx    # Browse Combos overlay — search, sort, subscribe, create (Phase 39b)
@@ -2414,6 +2418,8 @@ Phase 6: Complete. All four sub-phases implemented:
   - **Phase 42d:** Corpus Member Document Removal ✅ COMPLETE
 - **Phase 43:** Tunneling — ✅ COMPLETE (43a: backend infrastructure with `tunnel_links`/`tunnel_votes` tables, bidirectional CRUD, voting, search `?attributeId` filter; 43b: TunnelView.jsx with per-attribute columns, search/add, voting, concept card navigation, right-click "Open in new graph tab", FlipView right-click context menu, FlipView sort label "Links"→"Votes"; 43c: guest read-only access, hidden edge handling, root edge tunnel support, context menu dismiss fix, path array fix for new tab creation)
 - **Phase 44:** Sibling-Only Swap Votes & Auto-Save — ✅ COMPLETE (44a: sibling validation restored in addSwapVote, auto-save destination in transaction, GET /swap/:edgeId returns {existingSwaps, otherSiblings}, cleanup migration for cross-context rows, reverses Phase 38c Architecture Decision #216; 44b: SwapModal.jsx redesigned with two sections, client-side sibling search, simplified cards matching ConceptGrid vote button styling, auto-save inline note; 44c: all 20 verification checklist items passed, no bugs found)
+- **Phase 45:** Annotation Creation Warning Modal — ✅ COMPLETE (new `hide_annotation_warning` column on users, `POST /auth/hide-annotation-warning` endpoint, `AnnotationWarningModal.jsx` with "Don't show again" checkbox, wired into `AnnotationPanel.handleConfirmCreate`, preference persisted per-user in DB and refreshed in AuthContext)
+- **Phase 46:** Responsive Concept Header Layout — ✅ COMPLETE (added `flexWrap: 'wrap'` to `headerContent`, `buttonSection`, and `conceptHeader` styles in `Concept.jsx` — action buttons and sort toggles reflow to second row at narrow widths instead of squishing)
 
 ### Git Commits (Phase 27)
 1. `feat: 27a, two-column concept layout with annotation panel stub, retire links/fliplinks view modes and WebLinksView/FlipLinksView`
@@ -3735,6 +3741,35 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 1. ~~**44a** — Backend sibling validation, auto-save transaction, new GET response shape, cleanup migration~~ ✅
 2. ~~**44b** — SwapModal UI redesign with two sections, search, simplified cards, auto-save inline note~~ ✅
 3. ~~**44c** — Polish, edge cases (root swaps, cascades, empty states), verification~~ ✅
+
+---
+
+### Phase 45: Annotation Creation Warning Modal — ✅ COMPLETE
+
+**Goal:** Add a confirmation modal that warns users annotations are permanent before creating one. Includes a "Don't show this again" checkbox with per-user database persistence.
+
+**Implementation:**
+- New `hide_annotation_warning BOOLEAN NOT NULL DEFAULT false` column on `users` table
+- New `POST /api/auth/hide-annotation-warning` endpoint (sets column to `true`)
+- `GET /api/auth/me` now returns `hideAnnotationWarning` field
+- New `AnnotationWarningModal.jsx` component — title "Annotations are permanent", explains append-only model, "Don't show again" checkbox, Cancel/Create buttons
+- Wired into `AnnotationPanel.jsx` — the single code path for annotation creation (`handleConfirmCreate`). If `user.hideAnnotationWarning === true`, skips modal and creates directly. Otherwise shows modal; on confirm with checkbox checked, calls the dismissal endpoint and `refreshUser()` to update auth context in-session.
+- Guests cannot create annotations (existing guards), so the modal never appears for them.
+
+**Architecture Decision #259 — Annotation Warning Stored Per-User in Database (Phase 45):** The "don't show again" preference is stored in the `users` table rather than `localStorage` because researchers log in from multiple devices. Database storage ensures the preference follows the user everywhere.
+
+---
+
+### Phase 46: Responsive Concept Header Layout — ✅ COMPLETE
+
+**Goal:** Fix the concept header squishing at half-screen widths by making it reflow gracefully.
+
+**Strategy:** `flexWrap: 'wrap'` on three style objects in `Concept.jsx`:
+- `headerContent` — breadcrumb row with action buttons. Buttons wrap below breadcrumb at narrow widths.
+- `buttonSection` — action buttons (Flip View, Share, Tunnel, Add as Annotation, Add to Superconcept). Individual buttons wrap within the group.
+- `conceptHeader` — concept name + vote count + sort toggles. Sort toggles wrap below the name.
+
+**Why flex-wrap over stacked breakpoint:** The header has a moderate number of buttons — wrapping looks clean. No JavaScript resize listener needed; pure CSS flex property with zero visual effect at full desktop width (no regression).
 
 ---
 
