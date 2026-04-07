@@ -685,10 +685,53 @@ const transferOwnership = async (req, res) => {
   }
 };
 
+// Get combos containing a specific edge (Phase 47)
+const getCombosByEdge = async (req, res) => {
+  try {
+    const edgeId = parseInt(req.params.edgeId, 10);
+    if (!edgeId || edgeId < 1 || isNaN(edgeId)) {
+      return res.status(400).json({ error: 'Invalid edgeId' });
+    }
+
+    const result = await pool.query(
+      `SELECT c.id, c.name, c.description, c.created_by, c.created_at,
+              u.username AS created_by_username,
+              u.orcid_id AS created_by_orcid_id,
+              (SELECT COUNT(*) FROM combo_edges ce WHERE ce.combo_id = c.id) AS edge_count,
+              (SELECT COUNT(DISTINCT da.id)
+               FROM combo_edges ce2
+               JOIN document_annotations da ON da.edge_id = ce2.edge_id
+               WHERE ce2.combo_id = c.id) AS annotation_count,
+              (SELECT COUNT(*) FROM combo_subscriptions cs WHERE cs.combo_id = c.id) AS subscriber_count
+       FROM combos c
+       JOIN combo_edges ce_filter ON ce_filter.combo_id = c.id AND ce_filter.edge_id = $1
+       LEFT JOIN users u ON u.id = c.created_by
+       GROUP BY c.id, u.username, u.orcid_id
+       ORDER BY subscriber_count DESC, c.name ASC`,
+      [edgeId]
+    );
+
+    res.json(result.rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      created_by_username: r.created_by_username || null,
+      created_by_orcid_id: r.created_by_orcid_id || null,
+      edge_count: Number(r.edge_count),
+      annotation_count: Number(r.annotation_count),
+      subscriber_count: Number(r.subscriber_count),
+    })));
+  } catch (error) {
+    console.error('Error getting combos by edge:', error);
+    res.status(500).json({ error: 'Failed to get combos for edge' });
+  }
+};
+
 module.exports = {
   listCombos,
   getCombo,
   getComboAnnotations,
+  getCombosByEdge,
   createCombo,
   getMyCombos,
   getComboSubscriptions,

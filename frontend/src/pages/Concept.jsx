@@ -27,6 +27,7 @@ const Concept = ({
   onOpenConceptTab,
   onRequestLogin,
   onAnnotateFromGraph,
+  onNavigateToSuperconcept,
   ownedCombos = [],
   onComboEdgeAdded,
 }) => {
@@ -843,6 +844,7 @@ const Concept = ({
                 viewMode={effectiveViewMode}
                 onOpenCorpusTab={onOpenCorpusTab}
                 onRequestLogin={onRequestLogin}
+                onNavigateToSuperconcept={onNavigateToSuperconcept}
                 collapsible={isNarrow}
               />
             </div>

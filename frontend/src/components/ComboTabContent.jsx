@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { combosAPI, conceptsAPI, usersAPI } from '../services/api';
 import OrcidBadge from './OrcidBadge';
 
-const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDocument, onRequestLogin, refreshKey }) => {
+const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDocument, onRequestLogin, onOpenConceptTab, refreshKey }) => {
   const [combo, setCombo] = useState(null);
   const [edges, setEdges] = useState([]);
   const [annotations, setAnnotations] = useState([]);
@@ -381,36 +381,45 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
       </div>
 
       {/* Owner controls */}
-      {isOwner && (
+      {/* Subconcepts section — list visible to everyone, add/remove owner-only */}
+      {(edges.length > 0 || isOwner) && (
         <div style={styles.ownerSection}>
           <div style={styles.ownerSectionHeader}>
             <span style={styles.ownerSectionTitle}>Subconcepts</span>
-            <button
-              onClick={() => { setShowAddPicker(!showAddPicker); setAddError(''); setSelectedConcept(null); setSearchQuery(''); setSearchResults([]); }}
-              style={styles.addButton}
-            >
-              {showAddPicker ? 'Cancel' : '+ Add Concept'}
-            </button>
+            {isOwner && (
+              <button
+                onClick={() => { setShowAddPicker(!showAddPicker); setAddError(''); setSelectedConcept(null); setSearchQuery(''); setSearchResults([]); }}
+                style={styles.addButton}
+              >
+                {showAddPicker ? 'Cancel' : '+ Add Concept'}
+              </button>
+            )}
           </div>
 
-          {/* Current subconcepts list */}
-          {edges.length === 0 && !showAddPicker && (
+          {edges.length === 0 && isOwner && !showAddPicker && (
             <div style={styles.emptyHint}>No concepts added yet. Click "+ Add Concept" to get started.</div>
           )}
+
           {edges.length > 0 && (
             <div style={styles.subconcepts}>
               {edges.map(edge => (
                 <div key={edge.edge_id} style={styles.subconceptRow}>
                   <div style={styles.subconceptInfo}>
-                    <span style={styles.subconceptName}>{edge.concept_name}</span>
+                    <span
+                      style={{ ...styles.subconceptName, cursor: 'pointer' }}
+                      onClick={() => onOpenConceptTab && onOpenConceptTab(edge.concept_id, edge.graph_path || [], edge.concept_name, edge.attribute_name)}
+                      title="Open in graph tab"
+                    >{edge.concept_name}</span>
                     <span style={styles.attrBadge}>[{edge.attribute_name}]</span>
                     <span style={styles.subconceptPath}>{buildPathString(edge)}</span>
                   </div>
-                  <button
-                    onClick={() => handleRemoveEdge(edge.edge_id)}
-                    style={styles.removeButton}
-                    title="Remove from superconcept"
-                  >{'\u2715'}</button>
+                  {isOwner && (
+                    <button
+                      onClick={() => handleRemoveEdge(edge.edge_id)}
+                      style={styles.removeButton}
+                      title="Remove from superconcept"
+                    >{'\u2715'}</button>
+                  )}
                 </div>
               ))}
             </div>

@@ -612,6 +612,9 @@ export const combosAPI = {
 
   transferOwnership: (comboId, newOwnerId) =>
     api.post(`/combos/${comboId}/transfer-ownership`, { newOwnerId }),
+
+  getCombosByEdge: (edgeId) =>
+    api.get(`/combos/by-edge/${edgeId}`),
 };
 
 // Phase 43a: Tunnel Links

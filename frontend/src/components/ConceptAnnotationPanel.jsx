@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { conceptsAPI, votesAPI, corpusAPI, documentsAPI } from '../services/api';
+import { conceptsAPI, votesAPI, corpusAPI, documentsAPI, combosAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import OrcidBadge from './OrcidBadge';
 
@@ -28,6 +28,7 @@ const ConceptAnnotationPanel = ({
   viewMode,
   onOpenCorpusTab,
   onRequestLogin,
+  onNavigateToSuperconcept,
   collapsible = false,
 }) => {
   const { user } = useAuth();
@@ -59,6 +60,9 @@ const ConceptAnnotationPanel = ({
   const [newLinkTitle, setNewLinkTitle] = useState('');
   const [newLinkComment, setNewLinkComment] = useState('');
   const [addLinkError, setAddLinkError] = useState(null);
+
+  // Superconcepts state (Phase 47)
+  const [superconcepts, setSuperconcepts] = useState([]);
 
   // In children view, scope annotations to the current edge only.
   const isChildrenView = viewMode === 'children';
@@ -173,6 +177,30 @@ const ConceptAnnotationPanel = ({
     }
     return () => { cancelled = true; };
   }, [conceptId, currentEdgeId, isChildrenView, path?.join(',')]);
+
+  // Load superconcepts for the current edge (children view only, Phase 47)
+  useEffect(() => {
+    if (!isChildrenView || !currentEdgeId) {
+      setSuperconcepts([]);
+      return;
+    }
+    let cancelled = false;
+    combosAPI.getCombosByEdge(currentEdgeId)
+      .then(res => {
+        if (!cancelled) setSuperconcepts(res.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setSuperconcepts([]);
+      });
+    return () => { cancelled = true; };
+  }, [currentEdgeId, isChildrenView]);
+
+  // Auto-fallback: if superconcepts tab is active but count drops to 0, switch back
+  useEffect(() => {
+    if (activeTab === 'superconcepts' && superconcepts.length === 0) {
+      setActiveTab('annotations');
+    }
+  }, [superconcepts.length, activeTab]);
 
   const handleAnnotationCardClick = (a) => {
     if (isGuest) {
@@ -630,6 +658,41 @@ const ConceptAnnotationPanel = ({
     })}</>;
   };
 
+  const renderSuperconceptsTab = () => {
+    if (superconcepts.length === 0) {
+      return <div style={{ color: '#999', fontSize: '14px', padding: '8px 0' }}>No superconcepts contain this edge.</div>;
+    }
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {superconcepts.map(sc => {
+          const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+          return (
+            <div key={sc.id} style={styles.superconceptCard}>
+              <span
+                onClick={() => onNavigateToSuperconcept && onNavigateToSuperconcept(sc.id, sc.name)}
+                style={styles.superconceptName}
+              >
+                {sc.name}
+              </span>
+              <div style={styles.superconceptOwner}>
+                by {sc.created_by_username || '[deleted user]'}
+                {sc.created_by_orcid_id && <OrcidBadge orcidId={sc.created_by_orcid_id} />}
+              </div>
+              {sc.description && (
+                <div style={styles.superconceptDescription}>
+                  {sc.description}
+                </div>
+              )}
+              <div style={styles.superconceptStats}>
+                {plural(sc.edge_count, 'edge')} {'\u00b7'} {plural(sc.annotation_count, 'annotation')} {'\u00b7'} {plural(sc.subscriber_count, 'subscriber')}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div style={styles.container}>
       {collapsible && (
@@ -662,9 +725,25 @@ const ConceptAnnotationPanel = ({
             >
               Web Links
             </span>
+            {superconcepts.length > 0 && (
+              <>
+                <span style={styles.tabSeparator}>|</span>
+                <span
+                  onClick={() => setActiveTab('superconcepts')}
+                  style={{
+                    ...styles.tab,
+                    ...(activeTab === 'superconcepts' ? styles.tabActive : {}),
+                  }}
+                >
+                  Superconcepts ({superconcepts.length})
+                </span>
+              </>
+            )}
           </div>
           <div style={styles.content}>
-            {activeTab === 'annotations' ? renderAnnotationsTab() : renderWebLinksTab()}
+            {activeTab === 'annotations' && renderAnnotationsTab()}
+            {activeTab === 'weblinks' && renderWebLinksTab()}
+            {activeTab === 'superconcepts' && renderSuperconceptsTab()}
           </div>
         </>
       )}
@@ -1011,6 +1090,47 @@ const styles = {
   addLinkError: {
     fontSize: '12px',
     color: '#c44',
+  },
+  // Superconcepts tab styles (Phase 47)
+  superconceptCard: {
+    padding: '10px 12px',
+    border: '1px solid #e0d9cf',
+    borderRadius: '4px',
+    backgroundColor: '#faf9f6',
+  },
+  superconceptName: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '15px',
+    color: '#333',
+    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    textAlign: 'left',
+    display: 'block',
+    fontWeight: 'normal',
+  },
+  superconceptOwner: {
+    fontSize: '13px',
+    color: '#888',
+    marginTop: '2px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  superconceptDescription: {
+    fontSize: '13px',
+    color: '#666',
+    marginTop: '4px',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  },
+  superconceptStats: {
+    fontSize: '12px',
+    color: '#999',
+    marginTop: '4px',
   },
 };
 

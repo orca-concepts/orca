@@ -21,6 +21,9 @@ router.post('/subscribe', authenticateToken, comboController.subscribeToCombo);
 // Unsubscribe from a combo (auth required)
 router.post('/unsubscribe', authenticateToken, comboController.unsubscribeFromCombo);
 
+// Get combos containing a specific edge (guest-accessible, Phase 47)
+router.get('/by-edge/:edgeId', optionalAuth, comboController.getCombosByEdge);
+
 // List all combos (guest-accessible)
 router.get('/', optionalAuth, comboController.listCombos);
 

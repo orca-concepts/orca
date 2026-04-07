@@ -836,6 +836,11 @@ const AppShell = () => {
     }
   }, [isGuest, handleRequestLogin]);
 
+  // Phase 47: Navigate to superconcept from annotation panel
+  const handleNavigateToSuperconcept = useCallback((comboId, comboName) => {
+    handleSubscribeToCombo(comboId, comboName || '');
+  }, [handleSubscribeToCombo]);
+
   const handleUnsubscribeFromCombo = useCallback(async (comboId) => {
     try {
       await combosAPI.unsubscribe(comboId);
@@ -1590,6 +1595,7 @@ const AppShell = () => {
                         setComboView(null);
                       }}
                       onRequestLogin={handleRequestLogin}
+                      onOpenConceptTab={handleOpenConceptTab}
                       refreshKey={comboRefreshKey}
                     />
                   </div>
@@ -1655,6 +1661,7 @@ const AppShell = () => {
                         onOpenConceptTab={handleOpenConceptTab}
                         onRequestLogin={handleRequestLogin}
                         onAnnotateFromGraph={handleAnnotateFromGraph}
+                        onNavigateToSuperconcept={handleNavigateToSuperconcept}
                         ownedCombos={ownedCombos}
                         onComboEdgeAdded={() => setComboRefreshKey(k => k + 1)}
                       />
