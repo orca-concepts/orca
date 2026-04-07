@@ -29,7 +29,7 @@ const authController = {
   getCurrentUser: async (req, res) => {
     try {
       const result = await pool.query(
-        'SELECT id, username, email, orcid_id, created_at FROM users WHERE id = $1',
+        'SELECT id, username, email, orcid_id, hide_annotation_warning, created_at FROM users WHERE id = $1',
         [req.user.userId]
       );
 
@@ -38,7 +38,7 @@ const authController = {
       }
 
       const row = result.rows[0];
-      res.json({ user: { id: row.id, username: row.username, email: row.email, orcidId: row.orcid_id, created_at: row.created_at } });
+      res.json({ user: { id: row.id, username: row.username, email: row.email, orcidId: row.orcid_id, hideAnnotationWarning: row.hide_annotation_warning, created_at: row.created_at } });
     } catch (error) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -548,6 +548,20 @@ const authController = {
       res.json({ success: true, orcidId });
     } catch (error) {
       console.error('Dev ORCID connect error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // Phase 45: Hide annotation warning
+  hideAnnotationWarning: async (req, res) => {
+    try {
+      await pool.query(
+        'UPDATE users SET hide_annotation_warning = true WHERE id = $1',
+        [req.user.userId]
+      );
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Hide annotation warning error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }

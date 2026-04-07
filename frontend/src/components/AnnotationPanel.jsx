@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { conceptsAPI, corpusAPI } from '../services/api';
+import { conceptsAPI, corpusAPI, authAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import AnnotationWarningModal from './AnnotationWarningModal';
 
 // Find all occurrences of text in body, return array of { idx, before, match, after }
 const buildOccurrenceItems = (text, body) => {
@@ -42,7 +44,9 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
   const [selectedEdge, setSelectedEdge] = useState(prefilledEdge || null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
+  const [showWarningModal, setShowWarningModal] = useState(false);
 
+  const { user, refreshUser } = useAuth();
   const searchInputRef = useRef(null);
   const debounceRef = useRef(null);
 
@@ -165,7 +169,8 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
     setError(null);
   };
 
-  const handleConfirmCreate = async () => {
+  // Actual creation logic (called after warning is dismissed or skipped)
+  const doCreate = async () => {
     if (!selectedEdge) return;
     try {
       setCreating(true);
@@ -195,10 +200,40 @@ const AnnotationPanel = ({ corpusId, documentId, documentBody, initialQuoteText,
     }
   };
 
+  // Gate creation behind the warning modal (unless user dismissed it)
+  const handleConfirmCreate = () => {
+    if (!selectedEdge) return;
+    if (user?.hideAnnotationWarning) {
+      doCreate();
+    } else {
+      setShowWarningModal(true);
+    }
+  };
+
+  const handleWarningConfirm = async (dontShowAgain) => {
+    setShowWarningModal(false);
+    if (dontShowAgain) {
+      try {
+        await authAPI.hideAnnotationWarning();
+        refreshUser();
+      } catch (err) {
+        // Non-critical — preference just won't persist
+        console.error('Failed to save warning preference:', err);
+      }
+    }
+    doCreate();
+  };
+
   const canCreate = !!selectedEdge && !creating;
 
   return (
     <div style={styles.panel}>
+      {showWarningModal && (
+        <AnnotationWarningModal
+          onConfirm={handleWarningConfirm}
+          onCancel={() => setShowWarningModal(false)}
+        />
+      )}
       <div style={styles.header}>
         <span style={styles.headerTitle}>Annotate</span>
         <button onClick={onClose} style={styles.closeBtn}>✕</button>

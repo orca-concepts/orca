@@ -2191,6 +2191,20 @@ const createTables = async () => {
       console.log('Phase 44: No cross-context swap votes to clean up');
     }
 
+    // ── Phase 45: Annotation warning dismissal ──
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'hide_annotation_warning'
+        ) THEN
+          ALTER TABLE users ADD COLUMN hide_annotation_warning BOOLEAN NOT NULL DEFAULT false;
+        END IF;
+      END $$;
+    `);
+    console.log('Phase 45: Added hide_annotation_warning column to users table');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

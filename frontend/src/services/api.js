@@ -63,6 +63,10 @@ export const authAPI = {
   disconnectOrcid: () =>
     api.post('/auth/orcid/disconnect'),
 
+  // Phase 45: Annotation warning dismissal
+  hideAnnotationWarning: () =>
+    api.post('/auth/hide-annotation-warning'),
+
   devConnectOrcid: (orcidId) =>
     api.post('/auth/orcid/dev-connect', { orcidId }),
 };

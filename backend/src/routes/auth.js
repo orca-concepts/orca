@@ -44,6 +44,9 @@ router.get('/me', authenticateToken, authController.getCurrentUser);
 router.post('/logout-everywhere', authenticateToken, authController.logoutEverywhere);
 router.post('/delete-account', authenticateToken, authController.deleteAccount);
 
+// Phase 45: Annotation warning dismissal
+router.post('/hide-annotation-warning', authenticateToken, authController.hideAnnotationWarning);
+
 // Phase 41a: ORCID OAuth
 router.get('/orcid/authorize-url', authenticateToken, authController.getOrcidAuthorizeUrl);
 router.post('/orcid/callback', authenticateToken, authController.orcidCallback);
