@@ -769,4 +769,35 @@ Run only the specific section(s) Miles names. Example: "Run Section 8 (Messaging
 
 ---
 
+## 33. Superconcepts Tab in Concept Annotation Panel (Phase 47)
+
+### Backend — GET /api/combos/by-edge/:edgeId
+- [ ] Edge in 1+ combos returns non-empty array with all fields: id, name, description, created_by_username, created_by_orcid_id, edge_count, annotation_count, subscriber_count
+- [ ] Edge in zero combos returns `[]` with 200 status (not 404)
+- [ ] Invalid edgeId (non-numeric) returns 400 `{"error":"Invalid edgeId"}`
+- [ ] Guest access (no auth header) returns 200 with results
+- [ ] Results sorted by subscriber_count DESC, then name ASC
+- [ ] Ownerless combos (created_by = NULL) still appear with null username/orcid fields
+
+### Frontend — Superconcepts Tab in ConceptAnnotationPanel
+- [ ] "Superconcepts (N)" tab appears after "Web Links" when the current edge belongs to N > 0 superconcepts
+- [ ] Tab does NOT appear when N = 0
+- [ ] Tab does NOT appear in flip view (only children view)
+- [ ] Tab does NOT appear in tunnel view
+- [ ] Each superconcept card shows: name, owner ("by username" or "by [deleted user]"), OrcidBadge if applicable, description (truncated to 2 lines), stats line with singular/plural
+- [ ] Clicking a superconcept card subscribes and switches to the superconcept tab (sidebar tab appears with correct name)
+- [ ] If already subscribed, clicking switches to the existing tab without error
+- [ ] Navigating to a different edge updates the tab (different superconcepts shown, or tab disappears if none)
+- [ ] If the active tab is "Superconcepts" and the user navigates to an edge with zero superconcepts, tab auto-falls back to "Annotations"
+- [ ] Superconcepts fetch failure does not break annotation or web links loading (Promise.all fault tolerance)
+
+### Frontend — Clickable Subconcepts in ComboTabContent
+- [ ] Subconcept list is visible to ALL users (not just the owner)
+- [ ] Clicking a subconcept name opens a new graph tab navigated to that concept in its context
+- [ ] Owner still sees "+ Add Concept" button and "✕" remove buttons
+- [ ] Non-owner does NOT see "+ Add Concept" button or "✕" remove buttons
+- [ ] Empty state ("No concepts added yet...") only appears for the owner when there are zero edges
+
+---
+
 **END OF TESTING CHECKLIST**

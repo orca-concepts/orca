@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 7, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete)
+**Last Updated:** April 7, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete)
 
 ---
 
@@ -1705,6 +1705,7 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/` | Guest OK | List all combos (with creator username, edge count, annotation count, subscriber count). Supports `?search=` and `?sort=new\|subscribers` (default: subscribers). |
+| GET | `/by-edge/:edgeId` | Guest OK | Get all combos containing a specific edge. Returns combo id, name, description, creator username/ORCID, edge_count, annotation_count, subscriber_count. Sorted by subscriber_count DESC, name ASC. Returns `[]` for edges in zero combos. (Phase 47) |
 | GET | `/:id` | Guest OK | Get combo details + list of member edges with concept names, paths, attributes |
 | GET | `/:id/annotations` | Required | Get all annotations across all edges in the combo. Supports `?sort=combo_votes\|subscribed\|new\|annotation_votes`, `?edgeIds=1,2,3`. Returns both combo and corpus vote counts, plus `subscribed_vote_count`. |
 | POST | `/create` | Required | Create a new combo (name, description). Creator auto-subscribes. Returns 409 for duplicate name. |
@@ -2420,6 +2421,7 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 44:** Sibling-Only Swap Votes & Auto-Save — ✅ COMPLETE (44a: sibling validation restored in addSwapVote, auto-save destination in transaction, GET /swap/:edgeId returns {existingSwaps, otherSiblings}, cleanup migration for cross-context rows, reverses Phase 38c Architecture Decision #216; 44b: SwapModal.jsx redesigned with two sections, client-side sibling search, simplified cards matching ConceptGrid vote button styling, auto-save inline note; 44c: all 20 verification checklist items passed, no bugs found)
 - **Phase 45:** Annotation Creation Warning Modal — ✅ COMPLETE (new `hide_annotation_warning` column on users, `POST /auth/hide-annotation-warning` endpoint, `AnnotationWarningModal.jsx` with "Don't show again" checkbox, wired into `AnnotationPanel.handleConfirmCreate`, preference persisted per-user in DB and refreshed in AuthContext)
 - **Phase 46:** Responsive Concept Header Layout — ✅ COMPLETE (added `flexWrap: 'wrap'` to `headerContent`, `buttonSection`, and `conceptHeader` styles in `Concept.jsx` — action buttons and sort toggles reflow to second row at narrow widths instead of squishing)
+- **Phase 47:** Superconcepts Tab in Concept Annotation Panel — ✅ COMPLETE (new `GET /api/combos/by-edge/:edgeId` endpoint, conditional "Superconcepts (N)" tab in ConceptAnnotationPanel showing combos containing the current edge, click-through subscribes and opens superconcept tab, subconcept list in ComboTabContent now visible to all users with clickable names opening graph tabs)
 
 ### Git Commits (Phase 27)
 1. `feat: 27a, two-column concept layout with annotation panel stub, retire links/fliplinks view modes and WebLinksView/FlipLinksView`
@@ -3770,6 +3772,31 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - `conceptHeader` — concept name + vote count + sort toggles. Sort toggles wrap below the name.
 
 **Why flex-wrap over stacked breakpoint:** The header has a moderate number of buttons — wrapping looks clean. No JavaScript resize listener needed; pure CSS flex property with zero visual effect at full desktop width (no regression).
+
+---
+
+### Phase 47: Superconcepts Tab in Concept Annotation Panel — ✅ COMPLETE
+
+**Goal:** Show which superconcepts (combos) contain the current edge in the concept annotation panel, with click-through navigation to the superconcept tab. Also make subconcept names clickable in the superconcept tab for all users.
+
+**Backend:**
+- New `GET /api/combos/by-edge/:edgeId` — guest-accessible via `optionalAuth`. JOINs `combo_edges` to find combos containing the specified edge. Returns array of combos with id, name, description, `created_by_username`, `created_by_orcid_id`, `edge_count`, `annotation_count`, `subscriber_count`. Sorted by `subscriber_count DESC, name ASC`. Returns `[]` for edges in zero combos. Validates edgeId is a positive integer (400 on invalid). Uses LEFT JOIN users for ownerless combo support.
+
+**Frontend — ConceptAnnotationPanel:**
+- New conditional "Superconcepts (N)" tab after Web Links tab. Only renders when N > 0.
+- Superconcepts fetched in a separate useEffect (children view with valid edgeId only). Uses `.catch(() => [])` fallback to avoid cascading failures.
+- Auto-fallback effect: if active tab is `'superconcepts'` and count drops to 0, switches back to `'annotations'`.
+- Each card shows: clickable name, owner with OrcidBadge, truncated description (2-line clamp), stats line with proper singular/plural.
+- Clicking a card calls `onNavigateToSuperconcept(id, name)` which subscribes and opens the superconcept tab directly (same pattern as corpus auto-subscribe).
+
+**Frontend — ComboTabContent:**
+- Subconcept list moved out of the `isOwner` block — now visible to all users.
+- Subconcept names are clickable for everyone, opening a new graph tab via `onOpenConceptTab(conceptId, graphPath, conceptName, attributeName)`.
+- Owner-only controls (+ Add Concept button, ✕ remove buttons) remain gated by `isOwner`.
+
+**Architecture Decision #260 — Superconcept Tab Is Edge-Scoped, Not Cross-Context (Phase 47):** The "Superconcepts" tab in ConceptAnnotationPanel only appears in children view (where there's a single current edge), not in flip view or tunnel view. This matches the data model — combo membership is per-edge, not per-concept. Different edges for the same concept may belong to different combos.
+
+**Architecture Decision #261 — Superconcept Click-Through Subscribes Directly (Phase 47):** Clicking a superconcept card in the annotation panel auto-subscribes and switches to the superconcept tab (same pattern as annotation card click-through for corpuses). This is more direct than opening the Browse Superconcepts overlay and having the user manually subscribe.
 
 ---
 
