@@ -9,12 +9,6 @@ const PAGE_TITLES = {
 };
 
 // ── Carousel data (using-orca only) ──────────────────────────
-const STEPS = [
-  { title: 'Browse a Corpus', image: '/images/using-orca/step1.png', step: 1 },
-  { title: 'Add an Annotation', image: '/images/using-orca/step2.png', step: 2 },
-  { title: 'Explore the Value Graph', image: '/images/using-orca/step3.png', step: 3 },
-];
-
 const MESSAGE_SLIDES = [
   { image: '/images/using-orca/message1.png' },
   { image: '/images/using-orca/message2.png' },
@@ -24,57 +18,10 @@ const MESSAGE_SLIDES = [
 
 const MESSAGES_CAPTION = 'Send and receive messages attached to specific annotations, organized by document, annotation, and sender/recipient.';
 
-const STEPS_LIGHTBOX = STEPS.map(s => ({
-  image: s.image,
-  caption: `Example Workflow: Step ${s.step} \u2014 ${s.title}`,
-}));
-
 const MESSAGES_LIGHTBOX = MESSAGE_SLIDES.map((s, i) => ({
   image: s.image,
   caption: `Messages (${i + 1} of ${MESSAGE_SLIDES.length}): ${MESSAGES_CAPTION}`,
 }));
-
-const StepsCarousel = ({ onImageClick, compact }) => {
-  const [stepIndex, setStepIndex] = useState(0);
-  const step = STEPS[stepIndex];
-
-  return (
-    <div style={compact ? undefined : carouselStyles.wrapper}>
-      <div style={carouselStyles.stepTitle}>Example Workflow: Step {step.step} {'\u2014'} {step.title}</div>
-      <img
-        src={step.image}
-        alt={step.title}
-        style={{ ...carouselStyles.image, cursor: 'pointer' }}
-        onClick={() => onImageClick({ slides: STEPS_LIGHTBOX, index: stepIndex })}
-      />
-      <div style={carouselStyles.controls}>
-        <button
-          style={{
-            ...carouselStyles.arrowButton,
-            opacity: stepIndex === 0 ? 0.3 : 1,
-          }}
-          onClick={() => setStepIndex(i => Math.max(0, i - 1))}
-          disabled={stepIndex === 0}
-        >
-          {'\u2190'}
-        </button>
-        <span style={carouselStyles.indicator}>
-          {stepIndex + 1} of {STEPS.length}
-        </span>
-        <button
-          style={{
-            ...carouselStyles.arrowButton,
-            opacity: stepIndex === STEPS.length - 1 ? 0.3 : 1,
-          }}
-          onClick={() => setStepIndex(i => Math.min(STEPS.length - 1, i + 1))}
-          disabled={stepIndex === STEPS.length - 1}
-        >
-          {'\u2192'}
-        </button>
-      </div>
-    </div>
-  );
-};
 
 const MessagesCarousel = ({ onImageClick }) => {
   const [slideIndex, setSlideIndex] = useState(0);
@@ -217,33 +164,42 @@ const UsingOrcaContent = ({ onImageClick }) => {
 
       <p style={usingOrcaStyles.useCase}>
         Orca is open source (<a
-          href="https://github.com/TODO"
+          href="https://github.com/orca-concepts/orca"
           target="_blank"
           rel="noopener noreferrer"
           style={usingOrcaStyles.subtleLink}
-        >https://github.com/TODO</a>). Educators and organizations can run their own instance for a controlled environment.
+        >https://github.com/orca-concepts/orca</a>). Educators and organizations can run their own instance for a controlled environment.
       </p>
 
-      <div style={gridStyle}>
-        <div style={cellStyle}>
-          <div style={usingOrcaStyles.sectionTitle}>Value Hierarchy</div>
+      <div style={usingOrcaStyles.heroTitle}>
+        Build collaborative value ontologies, then use them to annotate research documents
+      </div>
+      <div style={usingOrcaStyles.heroRow}>
+        <div style={usingOrcaStyles.heroCell}>
           <img
-            src="/images/using-orca/step3.png"
-            alt="Effect Size Reporting value hierarchy"
-            style={{ ...usingOrcaStyles.screenshot, cursor: 'pointer' }}
+            src="/images/using-orca/children_view.png"
+            alt="Children view showing a value hierarchy"
+            style={usingOrcaStyles.heroImage}
             onClick={() => onImageClick({
-              slides: [{ image: '/images/using-orca/step3.png', caption: '\u201CEffect Size Reporting\u201D is a value nested under Reproducibility > Statistical Rigor. Users have proposed four child values beneath it (Transparency, Standardization, Contextualization, Pre-registration) and voted on which matter most. Documents tagged to these concepts can be discovered through the annotations panel on the right.' }],
+              slides: [{ image: '/images/using-orca/children_view.png', caption: 'Build collaborative value ontologies to organize the principles central to a field of study.' }],
               index: 0,
             })}
           />
-          <p style={usingOrcaStyles.caption}>
-            "Effect Size Reporting" is a value nested under Reproducibility &gt; Statistical Rigor.
-            Users have proposed four child values beneath it (Transparency, Standardization,
-            Contextualization, Pre-registration) and voted on which matter most. Documents tagged to
-            these concepts can be discovered through the annotations panel on the right.
-          </p>
         </div>
+        <div style={usingOrcaStyles.heroCell}>
+          <img
+            src="/images/using-orca/highlighted_annotation_in_doc.png"
+            alt="Annotation highlighted in a research document"
+            style={usingOrcaStyles.heroImage}
+            onClick={() => onImageClick({
+              slides: [{ image: '/images/using-orca/highlighted_annotation_in_doc.png', caption: 'Annotate research documents with concepts from your ontologies to navigate between documents through shared meaning.' }],
+              index: 0,
+            })}
+          />
+        </div>
+      </div>
 
+      <div style={gridStyle}>
         <div style={cellStyle}>
           <div style={usingOrcaStyles.sectionTitle}>Flip View</div>
           <img
@@ -271,7 +227,35 @@ const UsingOrcaContent = ({ onImageClick }) => {
         </div>
 
         <div style={cellStyle}>
-          <StepsCarousel onImageClick={onImageClick} compact />
+          <div style={usingOrcaStyles.sectionTitle}>Tunneling</div>
+          <img
+            src="/images/using-orca/tunnel_view.png"
+            alt="Tunnel view showing pinned concepts across graphs"
+            style={{ ...usingOrcaStyles.screenshot, cursor: 'pointer' }}
+            onClick={() => onImageClick({
+              slides: [{ image: '/images/using-orca/tunnel_view.png', caption: 'Pin concepts from different types of graphs for quick navigation to relevant areas.' }],
+              index: 0,
+            })}
+          />
+          <p style={usingOrcaStyles.caption}>
+            Pin concepts from different types of graphs for quick navigation to relevant areas.
+          </p>
+        </div>
+
+        <div style={cellStyle}>
+          <div style={usingOrcaStyles.sectionTitle}>Superconcepts</div>
+          <img
+            src="/images/using-orca/superconcept.png"
+            alt="Superconcept page showing a curated reading list"
+            style={{ ...usingOrcaStyles.screenshot, cursor: 'pointer' }}
+            onClick={() => onImageClick({
+              slides: [{ image: '/images/using-orca/superconcept.png', caption: 'Create superconcepts to build reading lists based on certain annotations.' }],
+              index: 0,
+            })}
+          />
+          <p style={usingOrcaStyles.caption}>
+            Create superconcepts to build reading lists based on certain annotations.
+          </p>
         </div>
       </div>
     </div>
@@ -374,6 +358,31 @@ const usingOrcaStyles = {
     fontWeight: '600',
     color: '#333',
     marginBottom: '10px',
+  },
+  heroTitle: {
+    fontSize: '1.1em',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontWeight: '600',
+    color: '#333',
+    marginTop: '28px',
+    marginBottom: '10px',
+  },
+  heroRow: {
+    display: 'flex',
+    gap: '16px',
+    marginBottom: '28px',
+    width: '100%',
+  },
+  heroCell: {
+    flex: '1 1 0',
+    minWidth: 0,
+  },
+  heroImage: {
+    width: '100%',
+    height: 'auto',
+    display: 'block',
+    border: '1px solid #e0e0e0',
+    cursor: 'pointer',
   },
   screenshot: {
     maxWidth: '100%',
