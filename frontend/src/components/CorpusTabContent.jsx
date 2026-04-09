@@ -87,6 +87,16 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   const bodyRef = useRef(null);
   const highlightMarkRef = useRef(null);
 
+  // Phase 48: Persistent selected-annotation highlight (amber background that stays
+  // until the user clicks a different annotation's quote or clicks the highlighted
+  // text to deselect). Separate from selectedAnnotation (sidebar detail expansion).
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+  // Override for the occurrence index when the occurrence picker selects a non-default
+  // occurrence. null means "use the annotation's stored quote_occurrence".
+  const [selectedAnnOccurrence, setSelectedAnnOccurrence] = useState(null);
+  const persistentHighlightRef = useRef(null);
+  const prevHighlightSigRef = useRef(null);
+
 
   // Phase 7h: Document versioning state
   const [versionHistory, setVersionHistory] = useState([]);
@@ -187,6 +197,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   }, [pendingDocumentId, loading]);
 
   // Phase 27c: After annotations load, select + scroll to the pending annotation
+  // Phase 48: Apply the persistent amber highlight instead of the fade-out flash.
   useEffect(() => {
     if (!pendingAnnotationId || annotations.length === 0) return;
     const ann = annotations.find(a => a.id === pendingAnnotationId);
@@ -194,11 +205,10 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     // Select the annotation in the sidebar (but do NOT open the creation panel)
     setSelectedAnnotation(ann);
     setShowAnnotationPanel(false);
-    // If it has a quote, navigate to it in the document body
+    // If it has a quote, apply the persistent highlight in the document body.
+    // The highlight effect handles scroll-into-view.
     if (ann.quote_text) {
-      setTimeout(() => {
-        navigateToOccurrence(ann.quote_text, ann.quote_occurrence || 1);
-      }, 300);
+      selectAnnotationHighlight(ann.id);
     }
     if (onPendingAnnotationConsumed) onPendingAnnotationConsumed();
   }, [pendingAnnotationId, annotations]);
@@ -699,7 +709,150 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     return true;
   };
 
-  // Open the occurrence picker, or navigate directly if only one match
+  // ─── Phase 48: Persistent selected-annotation highlight ──────────
+  // Apply a persistent amber background to the selected annotation's quote in the
+  // document body. Unlike navigateToOccurrence (fade-out), this highlight stays
+  // until the user clicks a different annotation or the highlighted text itself.
+
+  const selectAnnotationHighlight = (annotationId, occurrenceOverride = null) => {
+    setSelectedAnnotationId(annotationId);
+    setSelectedAnnOccurrence(occurrenceOverride);
+  };
+
+  const clearAnnotationHighlight = () => {
+    setSelectedAnnotationId(null);
+    setSelectedAnnOccurrence(null);
+  };
+
+  // Remove the persistent highlight wrapper from the DOM (unwrap its children back
+  // into the parent). Called on effect cleanup and before applying a new highlight.
+  // Safe if the wrapper has already been detached (e.g. React replaced the body
+  // content when the document changed) — the parentNode check prevents a crash
+  // and the ref is cleared either way.
+  const unwrapPersistentHighlight = () => {
+    const prev = persistentHighlightRef.current;
+    if (prev && prev.parentNode) {
+      while (prev.firstChild) prev.parentNode.insertBefore(prev.firstChild, prev);
+      prev.remove();
+    }
+    persistentHighlightRef.current = null;
+  };
+
+  // Clear the persistent highlight when the user switches documents.
+  useEffect(() => {
+    setSelectedAnnotationId(null);
+    setSelectedAnnOccurrence(null);
+    prevHighlightSigRef.current = null;
+  }, [document?.id]);
+
+  // Apply / remove the persistent amber highlight whenever the selected annotation
+  // changes. Also re-runs when annotations reload so pending-annotation flows can
+  // find the target annotation once it's loaded.
+  // IMPORTANT: Use window.document.* for DOM APIs — the `document` state variable
+  // shadows the global (see Architecture Decision #159).
+  useEffect(() => {
+    // Always unwrap first so switching selection cleans up the previous wrapper.
+    unwrapPersistentHighlight();
+
+    if (!selectedAnnotationId || !bodyRef.current) {
+      prevHighlightSigRef.current = null;
+      return;
+    }
+    const ann = annotations.find(a => a.id === selectedAnnotationId);
+    if (!ann || !ann.quote_text) {
+      prevHighlightSigRef.current = null;
+      return;
+    }
+
+    const occurrence = selectedAnnOccurrence || ann.quote_occurrence || 1;
+
+    // Walk text nodes inside the body container.
+    const walker = window.document.createTreeWalker(bodyRef.current, NodeFilter.SHOW_TEXT, null);
+    let fullText = '';
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      textNodes.push({ node, start: fullText.length });
+      fullText += node.textContent;
+    }
+
+    // Find the nth occurrence of quote_text (case-sensitive, matching storage).
+    let count = 0;
+    let searchFrom = 0;
+    let matchIdx = -1;
+    while (true) {
+      const pos = fullText.indexOf(ann.quote_text, searchFrom);
+      if (pos === -1) break;
+      count++;
+      if (count === occurrence) { matchIdx = pos; break; }
+      searchFrom = pos + 1;
+    }
+    if (matchIdx === -1) {
+      prevHighlightSigRef.current = null;
+      return;
+    }
+    const matchEnd = matchIdx + ann.quote_text.length;
+
+    // Build a DOM range spanning the match.
+    const range = window.document.createRange();
+    let startSet = false;
+    for (let i = 0; i < textNodes.length; i++) {
+      const tn = textNodes[i];
+      const tnEnd = tn.start + tn.node.textContent.length;
+      if (!startSet && matchIdx < tnEnd) {
+        range.setStart(tn.node, matchIdx - tn.start);
+        startSet = true;
+      }
+      if (startSet && matchEnd <= tnEnd) {
+        range.setEnd(tn.node, matchEnd - tn.start);
+        break;
+      }
+    }
+
+    // Wrap the range in a persistent amber span. Matches Phase 18 shared-path
+    // highlight color for visual consistency (distinct from the brighter gold
+    // fade-out used by concept detection navigation).
+    const sig = `${selectedAnnotationId}:${occurrence}`;
+    try {
+      const wrapper = window.document.createElement('span');
+      wrapper.style.cssText = 'background:rgba(232,217,160,0.5);border-radius:2px;padding:0 1px;cursor:pointer';
+      // Clicking the highlighted text deselects. stopPropagation keeps the click
+      // from bubbling up to any parent click handlers on the body.
+      wrapper.onclick = (e) => {
+        e.stopPropagation();
+        setSelectedAnnotationId(null);
+        setSelectedAnnOccurrence(null);
+      };
+      range.surroundContents(wrapper);
+      persistentHighlightRef.current = wrapper;
+      // Only scroll when the selected annotation/occurrence actually changed —
+      // avoids jarring re-scrolling when annotations array updates for unrelated
+      // reasons (e.g. the user voted on a different annotation).
+      if (prevHighlightSigRef.current !== sig) {
+        wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      prevHighlightSigRef.current = sig;
+    } catch (err) {
+      // surroundContents fails when the range crosses non-text node boundaries.
+      // Fall back to scrolling the range into view without wrapping.
+      try {
+        const rect = range.getBoundingClientRect();
+        if (rect.top !== 0 || rect.bottom !== 0) {
+          if (prevHighlightSigRef.current !== sig) {
+            window.scrollTo({ top: window.scrollY + rect.top - window.innerHeight / 2, behavior: 'smooth' });
+          }
+        }
+      } catch {}
+      prevHighlightSigRef.current = sig;
+    }
+
+    return unwrapPersistentHighlight;
+  }, [selectedAnnotationId, selectedAnnOccurrence, annotations, document?.id]);
+
+  // Open the occurrence picker, or navigate directly if only one match.
+  // Phase 48: Annotation paths now apply the persistent amber highlight instead of
+  // the transient fade-out. openOccurrencePicker is only called from the annotation
+  // quote click handler, so sourceType is always 'annotation' in practice.
   const openOccurrencePicker = (text, sourceId, sourceType, storedOccurrence) => {
     const docBody = document?.body || '';
     const items = buildOccurrenceItems(text, docBody);
@@ -711,12 +864,20 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
       return;
     }
     if (items.length === 1) {
-      navigateToOccurrence(text, 1);
+      if (sourceType === 'annotation') {
+        selectAnnotationHighlight(sourceId, 1);
+      } else {
+        navigateToOccurrence(text, 1);
+      }
       return;
     }
     // Multiple occurrences — auto-navigate to stored occurrence if available, then show picker
     if (storedOccurrence && storedOccurrence <= items.length) {
-      navigateToOccurrence(text, storedOccurrence);
+      if (sourceType === 'annotation') {
+        selectAnnotationHighlight(sourceId, storedOccurrence);
+      } else {
+        navigateToOccurrence(text, storedOccurrence);
+      }
     }
     setOccurrencePicker({ text, sourceId, sourceType, items });
   };
@@ -1858,6 +2019,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               <div style={styles.annotationList}>
                 {sortedAnnotations.map(ann => {
                   const isSelected = selectedAnnotation?.id === ann.id;
+                  const isHighlighted = selectedAnnotationId === ann.id;
                   const quoteNotFound = quoteNotFoundAnnId === ann.id;
                   return (
                     <div
@@ -1865,6 +2027,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                       style={{
                         ...styles.annListItem,
                         ...(isSelected ? styles.annListItemActive : {}),
+                        ...(isHighlighted ? styles.annListItemHighlighted : {}),
                       }}
                       onClick={() => handleAnnotationClick(ann)}
                     >
@@ -1899,6 +2062,9 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                             e.stopPropagation();
                             if (occurrencePicker?.sourceId === ann.id && occurrencePicker?.sourceType === 'annotation') {
                               setOccurrencePicker(null);
+                            } else if (selectedAnnotationId === ann.id) {
+                              // Phase 48: Already highlighted — toggle off
+                              clearAnnotationHighlight();
                             } else {
                               openOccurrencePicker(ann.quote_text, ann.id, 'annotation', ann.quote_occurrence);
                             }
@@ -1922,7 +2088,17 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                             <button
                               key={item.idx}
                               style={styles.occurrenceItemBtn}
-                              onClick={() => { navigateToOccurrence(occurrencePicker.text, item.idx); setOccurrencePicker(null); }}
+                              onClick={() => {
+                                // Phase 48: For annotation picks, apply the persistent amber highlight
+                                // at the chosen occurrence. Concept-path picks (not currently reachable
+                                // via this picker) still fall back to the fade-out.
+                                if (occurrencePicker.sourceType === 'annotation') {
+                                  selectAnnotationHighlight(occurrencePicker.sourceId, item.idx);
+                                } else {
+                                  navigateToOccurrence(occurrencePicker.text, item.idx);
+                                }
+                                setOccurrencePicker(null);
+                              }}
                             >
                               <span style={styles.occurrenceCtxText}>{item.before}</span>
                               <strong style={styles.occurrenceMatchBold}>{item.match}</strong>
@@ -3609,6 +3785,13 @@ const styles = {
   },
   annListItemActive: {
     backgroundColor: '#fafaf5',
+  },
+  // Phase 48: Sidebar card background when this annotation's quote is persistently
+  // highlighted in the document body. Matches the amber wrapper color so the two
+  // highlights read as a single visual pairing. Overrides annListItemActive when
+  // both apply (this style spreads after it in the card's style object).
+  annListItemHighlighted: {
+    backgroundColor: 'rgba(232,217,160,0.5)',
   },
   annItemHeader: {
     display: 'flex',

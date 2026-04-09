@@ -580,8 +580,8 @@ export const combosAPI = {
   getCombo: (id) =>
     api.get(`/combos/${id}`),
 
-  getComboAnnotations: (id, sort, edgeIds) =>
-    api.get(`/combos/${id}/annotations`, { params: { sort, edgeIds } }),
+  getComboAnnotations: (id, sort, edgeIds, mode) =>
+    api.get(`/combos/${id}/annotations`, { params: { sort, edgeIds, mode } }),
 
   createCombo: (name, description) =>
     api.post('/combos/create', { name, description }),

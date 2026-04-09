@@ -9,6 +9,7 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
   const [loading, setLoading] = useState(true);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
   const [sortOption, setSortOption] = useState('combo_votes');
+  const [matchMode, setMatchMode] = useState('any'); // Phase 48: 'any' | 'all'
   const [activeEdgeIds, setActiveEdgeIds] = useState(null); // null = all active
   const [error, setError] = useState(null);
 
@@ -69,14 +70,14 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
     try {
       setAnnotationsLoading(true);
       const edgeIds = activeEdgeIds ? activeEdgeIds.join(',') : undefined;
-      const res = await combosAPI.getComboAnnotations(comboId, sortOption, edgeIds);
+      const res = await combosAPI.getComboAnnotations(comboId, sortOption, edgeIds, matchMode);
       setAnnotations(res.data.annotations || []);
     } catch (err) {
       console.error('Failed to load annotations:', err);
     } finally {
       setAnnotationsLoading(false);
     }
-  }, [comboId, sortOption, activeEdgeIds]);
+  }, [comboId, sortOption, activeEdgeIds, matchMode]);
 
   // Initial load (and reload when refreshKey changes — e.g., after edge added from graph view)
   useEffect(() => {
@@ -89,10 +90,10 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
     return () => { cancelled = true; };
   }, [comboId, loadCombo, refreshKey]);
 
-  // Load annotations when sort or filter changes
+  // Load annotations when sort, filter, or match mode changes
   useEffect(() => {
     if (!loading) loadAnnotations();
-  }, [sortOption, activeEdgeIds, loadAnnotations, loading]);
+  }, [sortOption, activeEdgeIds, matchMode, loadAnnotations, loading]);
 
   // Initial annotation load after combo loads
   useEffect(() => {
@@ -567,26 +568,48 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
         </div>
       )}
 
-      {/* Sort toggle */}
+      {/* Sort toggle + Match toggle (Phase 48) */}
       {edges.length > 0 && (
-        <div style={styles.sortBar}>
-          {[
-            { key: 'combo_votes', label: 'Superconcept Votes' },
-            ...(user ? [{ key: 'subscribed', label: 'Subscribed' }] : []),
-            { key: 'new', label: 'New' },
-            { key: 'annotation_votes', label: 'Annotation Votes' },
-          ].map((opt, i) => (
-            <React.Fragment key={opt.key}>
-              {i > 0 && <span style={styles.sortSep}>{'\u00B7'}</span>}
-              <span
-                onClick={() => setSortOption(opt.key)}
-                style={sortOption === opt.key ? styles.sortOptionActive : styles.sortOption}
-              >
-                {opt.label}
-              </span>
-            </React.Fragment>
-          ))}
-        </div>
+        <>
+          <div style={styles.sortBar}>
+            {[
+              { key: 'combo_votes', label: 'Superconcept Votes' },
+              ...(user ? [{ key: 'subscribed', label: 'Subscribed' }] : []),
+              { key: 'new', label: 'New' },
+              { key: 'annotation_votes', label: 'Annotation Votes' },
+            ].map((opt, i) => (
+              <React.Fragment key={opt.key}>
+                {i > 0 && <span style={styles.sortSep}>{'\u00B7'}</span>}
+                <span
+                  onClick={() => setSortOption(opt.key)}
+                  style={sortOption === opt.key ? styles.sortOptionActive : styles.sortOption}
+                >
+                  {opt.label}
+                </span>
+              </React.Fragment>
+            ))}
+            <span style={styles.matchLabel}>Match:</span>
+            {[
+              { key: 'any', label: 'Any' },
+              { key: 'all', label: 'All' },
+            ].map((opt, i) => (
+              <React.Fragment key={opt.key}>
+                {i > 0 && <span style={styles.sortSep}>{'\u00B7'}</span>}
+                <span
+                  onClick={() => setMatchMode(opt.key)}
+                  style={matchMode === opt.key ? styles.sortOptionActive : styles.sortOption}
+                >
+                  {opt.label}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+          <div style={styles.matchHelper}>
+            {matchMode === 'any'
+              ? 'Showing annotations from documents with any selected subconcept'
+              : 'Showing only annotations from documents that cover every selected subconcept'}
+          </div>
+        </>
       )}
 
       {/* Annotations list */}
@@ -599,9 +622,11 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
         <div style={styles.emptyState}>Loading annotations...</div>
       ) : annotations.length === 0 ? (
         <div style={styles.emptyState}>
-          {activeEdgeIds !== null && activeEdgeIds.length === 0
-            ? 'No annotations match the selected filters.'
-            : "The concepts in this superconcept don't have any annotations yet."}
+          {matchMode === 'all'
+            ? 'No documents cover all of the selected subconcepts. Try Any mode or narrowing the subconcept filter.'
+            : activeEdgeIds !== null && activeEdgeIds.length === 0
+              ? 'No annotations match the selected filters.'
+              : "The concepts in this superconcept don't have any annotations yet."}
         </div>
       ) : (
         <div style={styles.annotationList}>
@@ -992,9 +1017,24 @@ const styles = {
   sortBar: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: '4px',
-    marginBottom: '12px',
+    marginBottom: '6px',
     padding: '4px 0',
+  },
+  matchLabel: {
+    fontSize: '13px',
+    fontFamily: "'EB Garamond', serif",
+    color: '#888',
+    marginLeft: '16px',
+    paddingRight: '2px',
+  },
+  matchHelper: {
+    fontSize: '12px',
+    fontFamily: "'EB Garamond', serif",
+    color: '#888',
+    marginBottom: '12px',
+    padding: '0 0 4px 0',
   },
   sortOption: {
     fontSize: '13px',

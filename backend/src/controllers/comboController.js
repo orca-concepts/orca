@@ -114,7 +114,13 @@ const getComboAnnotations = async (req, res) => {
   try {
     const userId = req.user.userId;
     const comboId = req.params.id;
-    const { sort, edgeIds } = req.query;
+    const { sort, edgeIds, mode } = req.query;
+
+    // Validate mode parameter (Phase 48)
+    const matchMode = mode || 'any';
+    if (matchMode !== 'any' && matchMode !== 'all') {
+      return res.status(400).json({ error: "mode must be 'any' or 'all'" });
+    }
 
     // Verify combo exists
     const comboCheck = await pool.query('SELECT id FROM combos WHERE id = $1', [comboId]);
@@ -131,6 +137,37 @@ const getComboAnnotations = async (req, res) => {
         params.push(ids);
         edgeFilter = `AND da.edge_id = ANY($${params.length})`;
       }
+    }
+
+    // Phase 48: Compute the evaluated edge set for "all" mode — edgeIds
+    // intersected with the combo's actual member edges, or all member edges
+    // if edgeIds is absent/empty.
+    let evaluatedSet = null;
+    if (matchMode === 'all') {
+      const memberEdgesRes = await pool.query(
+        'SELECT edge_id FROM combo_edges WHERE combo_id = $1',
+        [comboId]
+      );
+      const memberSet = new Set(memberEdgesRes.rows.map(r => Number(r.edge_id)));
+
+      let requestedIds = null;
+      if (edgeIds) {
+        const parsed = edgeIds.split(',').map(Number).filter(n => !isNaN(n));
+        if (parsed.length > 0) requestedIds = parsed;
+      }
+
+      if (requestedIds) {
+        evaluatedSet = requestedIds.filter(id => memberSet.has(id));
+      } else {
+        evaluatedSet = Array.from(memberSet);
+      }
+
+      // Edge case: N = 0 → return empty array immediately
+      if (evaluatedSet.length === 0) {
+        return res.json({ annotations: [] });
+      }
+      // Edge case: N = 1 → fall through; the coverage filter is a no-op
+      // relative to the "any" path, so no special-case needed.
     }
 
     const useSubscribed = sort === 'subscribed';
@@ -150,8 +187,10 @@ const getComboAnnotations = async (req, res) => {
         orderBy = 'combo_vote_count DESC, da.created_at DESC';
     }
 
-    const subscribedCte = useSubscribed
-      ? `WITH subscribed_members AS (
+    const cteParts = [];
+
+    if (useSubscribed) {
+      cteParts.push(`subscribed_members AS (
           SELECT DISTINCT member_id AS user_id FROM (
             SELECT c.created_by AS member_id
             FROM corpus_subscriptions cs
@@ -164,14 +203,48 @@ const getComboAnnotations = async (req, res) => {
             JOIN corpus_allowed_users cau ON cau.corpus_id = cs.corpus_id
             WHERE cs.user_id = $2
           ) members
-        )`
-      : '';
+        )`);
+    }
+
+    // Phase 48: CTEs for "all" mode coverage check. Only built when mode='all'
+    // so the default "any" path pays no extra cost.
+    let qualifyingRootsJoin = '';
+    if (matchMode === 'all') {
+      params.push(evaluatedSet);
+      const evalParamIdx = params.length;
+      cteParts.push(`doc_roots AS (
+          WITH RECURSIVE chain AS (
+            SELECT id, source_document_id, id AS root_id
+            FROM documents
+            WHERE source_document_id IS NULL
+            UNION ALL
+            SELECT d.id, d.source_document_id, ch.root_id
+            FROM documents d
+            JOIN chain ch ON d.source_document_id = ch.id
+          )
+          SELECT id, root_id FROM chain
+        )`);
+      cteParts.push(`root_doc_coverage AS (
+          SELECT dr.root_id, COUNT(DISTINCT da2.edge_id) AS covered_edges
+          FROM document_annotations da2
+          JOIN doc_roots dr ON dr.id = da2.document_id
+          WHERE da2.edge_id = ANY($${evalParamIdx})
+          GROUP BY dr.root_id
+        )`);
+      cteParts.push(`qualifying_roots AS (
+          SELECT root_id FROM root_doc_coverage WHERE covered_edges = ${evaluatedSet.length}
+        )`);
+      qualifyingRootsJoin = `JOIN doc_roots dr_filter ON dr_filter.id = da.document_id
+       JOIN qualifying_roots qr ON qr.root_id = dr_filter.root_id`;
+    }
+
+    const cteClause = cteParts.length > 0 ? `WITH ${cteParts.join(', ')}` : '';
     const subscribedCol = useSubscribed
       ? `, (SELECT COUNT(*) FROM annotation_votes av2 WHERE av2.annotation_id = da.id AND av2.user_id IN (SELECT user_id FROM subscribed_members))::int AS subscribed_vote_count`
       : '';
 
     const result = await pool.query(
-      `${subscribedCte}
+      `${cteClause}
        SELECT da.id AS annotation_id,
               da.quote_text,
               da.comment,
@@ -205,6 +278,7 @@ const getComboAnnotations = async (req, res) => {
        LEFT JOIN users creator ON creator.id = da.created_by
        JOIN documents d ON d.id = da.document_id
        JOIN corpuses corp ON corp.id = da.corpus_id
+       ${qualifyingRootsJoin}
        WHERE 1=1 ${edgeFilter}
        ORDER BY ${orderBy}`,
       params
