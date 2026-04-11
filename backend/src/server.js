@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
+const rateLimitStore = require('./utils/pgRateLimitStore');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
@@ -47,20 +47,67 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Phase 49b — Global app-wide safety-net limiter. Keyed by IP (correct now
-// that trust proxy is configured above). 500 requests per 15 minutes per IP
-// is deliberately generous — this is NOT the primary defense for any
-// particular endpoint, it's a blanket floor that catches trivial flood
-// attacks on endpoints the per-route limiters may have missed. Legitimate
-// power-users should never see it.
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 500,
-  message: { error: 'Too many requests. Please slow down and try again in a few minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api', globalLimiter);
+// Phase 49d — Global app-wide safety-net limiter.
+//
+// Keyed by IP (trust proxy is configured above, so req.ip is the real
+// client). 2000 writes per 15 minutes per IP — deliberately generous;
+// this is NOT the primary defense for any particular endpoint, it's a
+// blanket floor that catches trivial flood attacks on endpoints the
+// per-route limiters may have missed. Legitimate power-users should
+// never see it.
+//
+// GET requests are exempt entirely. A safety net for abuse should care
+// about writes (creating concepts, voting, flagging, uploading) and auth
+// attempts, not innocent page loads. React StrictMode in dev doubles every
+// effect, and a normal session can easily rack up 100+ GETs in a few
+// minutes — penalizing that would lock out legitimate users.
+//
+// Counters are stored in Postgres via pgRateLimitStore, so they survive
+// backend restarts and are shared across multi-instance deploys on Railway.
+// The key namespace `global:ip:` is distinct from the `sms:*` keys used by
+// the SMS limiter to prevent collisions.
+//
+// Fail-open on store errors: a transient database hiccup should not lock
+// legitimate users out of the app. The per-route write-endpoint limiters
+// (Phase 49b) and the per-phone SMS limiter (Phase 49a) provide the real
+// defense; this one is just a backstop.
+const GLOBAL_SAFETY_NET_WINDOW_MS = 15 * 60 * 1000;
+const GLOBAL_SAFETY_NET_MAX = 2000;
+
+async function globalSafetyNetLimiter(req, res, next) {
+  // Exempt GETs — reads should never hit this bucket.
+  if (req.method === 'GET') {
+    return next();
+  }
+  try {
+    const key = `global:ip:${req.ip}`;
+    const count = await rateLimitStore.increment(key, GLOBAL_SAFETY_NET_WINDOW_MS);
+    const remaining = Math.max(0, GLOBAL_SAFETY_NET_MAX - count);
+    const windowStart = rateLimitStore.currentWindowStart(GLOBAL_SAFETY_NET_WINDOW_MS);
+    const resetTime = new Date(windowStart.getTime() + GLOBAL_SAFETY_NET_WINDOW_MS);
+    const resetSeconds = Math.max(1, Math.ceil((resetTime.getTime() - Date.now()) / 1000));
+
+    // Standard headers (draft-7 / express-rate-limit `standardHeaders: true`
+    // equivalent). Legacy X-RateLimit-* headers intentionally omitted.
+    res.setHeader('RateLimit-Limit', GLOBAL_SAFETY_NET_MAX);
+    res.setHeader('RateLimit-Remaining', remaining);
+    res.setHeader('RateLimit-Reset', resetSeconds);
+
+    if (count > GLOBAL_SAFETY_NET_MAX) {
+      res.setHeader('Retry-After', resetSeconds);
+      return res.status(429).json({
+        error: 'Too many requests. Please slow down and try again in a few minutes.',
+      });
+    }
+    return next();
+  } catch (err) {
+    console.error('[global safety net] store error:', err.message);
+    // Fail open — do not block legit users on a transient DB error.
+    return next();
+  }
+}
+
+app.use('/api', globalSafetyNetLimiter);
 
 // Request logging middleware
 app.use((req, res, next) => {

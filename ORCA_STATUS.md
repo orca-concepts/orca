@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 11, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete; Phase 48 and/or logic for superconcepts display complete; Phase 49a rate limit foundation complete; Phase 49b write-endpoint limiters + global safety net complete)
+**Last Updated:** April 11, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete; Phase 48 and/or logic for superconcepts display complete; Phase 49a rate limit foundation complete; Phase 49b write-endpoint limiters + global safety net complete; Phase 49d global safety net raised to 2000/15min, GET-exempt, Postgres-backed)
 
 ---
 
@@ -3835,9 +3835,30 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 | `POST /api/concepts/root` | 10/hr | Graph-level vandalism |
 | `POST /api/concepts/child` | 100/hr | Normal usage budget |
 
-**Global safety-net limiter:** `server.js` mounts a 500 req / 15 min / IP limiter on `/api` via `app.use('/api', globalLimiter)` BEFORE any routes. Deliberately generous — this is not the primary defense for any specific endpoint, it's a blanket floor that catches trivial flood attacks on endpoints the per-route limiters miss. Legitimate power-users should never see it.
+**Global safety-net limiter:** `server.js` originally mounted a 500 req / 15 min / IP limiter (in-memory, express-rate-limit) on `/api` BEFORE any routes. This was replaced in Phase 49d — see below — after the original threshold locked Miles out during routine dev use.
 
 **Verification:** Smoke-tested the flag limiter end-to-end — requests 1–20 returned 404 (dummy edge ID), request 21 returned 429 with `Retry-After: 3587` (~1 hour). Confirms per-user keying, rate-limit enforcement, and `standardHeaders` all work correctly. Frontend build passes; backend starts cleanly with no `express-rate-limit` v8 validation warnings.
+
+#### Phase 49d: Global safety net — raised threshold, GET-exempt, Postgres-backed — ✅ COMPLETE
+
+**Problem discovered April 11, 2026:** The Phase 49b global safety net (500 req / 15 min / IP, in-memory) was too aggressive for legitimate browsing. React StrictMode double-invokes effects in dev, doubling every API call, so a normal session opening Orca and navigating a few graphs easily exceeded 500 requests in 15 minutes. A university lab behind a NAT'd IP would trip it almost instantly with multiple users. Miles locked himself out during a favicon work session — `taskkill /f /im node.exe` cleared it instantly, confirming the store was in-memory (no Postgres persistence) and counters silently reset on every backend restart in production.
+
+**Fixes in `server.js`:**
+- **Threshold raised to 2000 req / 15 min / IP.** Deliberately generous; this is not the primary defense for any specific endpoint, it's a blanket floor.
+- **GET requests exempted entirely.** A safety net for abuse should care about writes (creating concepts, voting, flagging, uploading) and auth attempts, not innocent page loads. `skip: (req) => req.method === 'GET'` equivalent is a simple early-return in the middleware.
+- **Moved from express-rate-limit in-memory store to Postgres via `pgRateLimitStore`.** Counters now survive backend restarts and are shared across multi-instance deploys. The existing `rate_limit_counters` table is reused with a distinct key namespace `global:ip:<ip>` so it does not collide with the `sms:*` keys used by the SMS abuse limiter.
+- **Fail-open on store errors.** A transient database hiccup should not lock legitimate users out of the app. The per-route write-endpoint limiters (Phase 49b) and the per-phone SMS limiter (Phase 49a) are the real defenses; this is a backstop.
+- Custom async middleware (not express-rate-limit middleware) because the express-rate-limit Store interface would require writing a full adapter around `pgRateLimitStore`, and the existing store helpers already expose exactly what's needed (`increment`, `currentWindowStart`).
+- Sets `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` headers on all non-GET responses (standardHeaders-equivalent); adds `Retry-After` on 429s. Legacy `X-RateLimit-*` headers intentionally omitted.
+
+**Verification:**
+- `node -c src/server.js` — syntax OK.
+- Backend boots cleanly, no startup errors.
+- 20 bursts of `GET /api/concepts/root` — all 200, zero RateLimit headers (correctly exempt).
+- POST to a 404 route — produces `RateLimit-Limit: 2000`, `RateLimit-Remaining: 1993`, `RateLimit-Reset: <seconds until next window>`.
+- `rate_limit_counters` row written with key `global:ip:::1` incrementing from 1 → 6 across 6 POST requests.
+- Injected `count = 2001` into the counter row by hand — next POST returns `429` with JSON error body and `Retry-After` header; GET simultaneously still returns 200 (exempt path unaffected).
+- Per-user write-endpoint limiters (Phase 49b) untouched — only `server.js` modified.
 
 #### Phase 49c: Polish (post-launch, not yet implemented)
 
@@ -3857,6 +3878,10 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - **Architecture Decision #265 — No IP Fallback in User Key Generator (Phase 49b):** The `perUserHourly` factory's `keyGenerator` directly accesses `req.user.userId` with no fallback. This is safe because all consuming routes mount the limiter AFTER `authenticateToken`, which guarantees `req.user` is populated. An earlier implementation with an IP fallback tripped `express-rate-limit` v8's IPv6-safety validation and produced startup warning spam. The explicit reliance on `authenticateToken` preceding the limiter is documented in the factory's header comment.
 
 - **Architecture Decision #266 — Trust Proxy Set to 2 (Phase 49a):** `app.set('trust proxy', 2)` reflects production topology — traffic passes through Cloudflare → Railway edge → app, which is two proxy hops. Setting this to `1` would still leak the Cloudflare edge IP as `req.ip`; setting it to `2` walks two headers back to get the actual client IP. Must be set before any route or limiter mounts, or the limiters are created with the wrong key function. This finding was the highest-severity item in `RATE_LIMIT_AUDIT.md` because every pre-Phase-49 rate limiter was effectively broken in production without it.
+
+- **Architecture Decision #267 — Global Safety Net Exempts GETs (Phase 49d):** The global safety-net limiter skips GET requests entirely. Reads should never consume the bucket because a safety net for abuse should care about writes (creating concepts, voting, flagging, uploading) and auth attempts, not innocent page loads. React StrictMode in dev double-invokes effects, so a normal session can rack up 100+ GETs in a few minutes — the pre-Phase-49d threshold of 500 req/15min locked Miles out during routine dev work. Exempting reads means the global bucket only meters state-changing traffic, which is the thing the backstop is meant to bound.
+
+- **Architecture Decision #268 — Global Safety Net Uses Postgres Store (Phase 49d):** The global safety net moved from express-rate-limit's in-memory store to the existing `pgRateLimitStore`, with key namespace `global:ip:<ip>` to avoid collision with the SMS limiter's `sms:*` keys. Rationale: on Railway's multi-instance deploys an in-memory store means counters are not shared across instances and silently reset on every restart, so an abuser's counter clears on any deploy. Postgres gives real persistence shared across instances. The implementation is a custom async middleware rather than a full express-rate-limit Store adapter because `pgRateLimitStore`'s helpers already expose exactly what a manual middleware needs, and writing an adapter would add indirection for no benefit. Fails open on store errors — a transient DB hiccup should not lock legit users out, and the per-route write-endpoint limiters (Phase 49b) plus the per-phone SMS limiter (Phase 49a) are the real defenses.
 
 ---
 

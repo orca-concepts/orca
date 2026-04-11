@@ -55,7 +55,7 @@ Delete this file from the repo after launch.
 
 ## 🔒 Rate Limiting
 
-**Phase 49a + 49b complete.** Phase 49d added April 11 as a hard blocker; Phase 49c (polish) remains and is acceptable post-launch.
+**Phase 49a + 49b + 49d complete.** Phase 49c (polish) remains and is acceptable post-launch.
 
 ### Twilio account-level protection
 
@@ -64,22 +64,21 @@ Delete this file from the repo after launch.
 - [ ] **Twilio auto-recharge OFF** + balance kept low (~$25). The only true hard stop — triggers are notifications only.
 - [ ] Document in ORCA_STATUS.md that Twilio is in prepaid mode with auto-recharge off
 
-### 🔒 Phase 49d — Global safety net is too aggressive (LAUNCH BLOCKER)
+### ✅ Phase 49d — Global safety net fixed
 
-**Discovered April 11, 2026** during the favicon work session. The global 500 req/15min/IP safety net locks legitimate users out of read endpoints during normal browsing. Confirmed the limiter is currently **in-memory**, not on the Postgres store, because `taskkill /f /im node.exe` cleared the lockout instantly.
+**Discovered April 11, 2026** during the favicon work session; fixed same day. The old global 500 req/15min/IP safety net was in-memory and locked legitimate users out of read endpoints during normal browsing. Confirmed by `taskkill /f /im node.exe` clearing the lockout instantly.
 
-**Why it triggers on normal usage:**
+**Root causes:**
 - React StrictMode in dev double-invokes effects, doubling every API call
 - A normal session of opening Orca, navigating a few graphs, and using search easily makes 50–100 API calls
 - A university lab behind a NAT'd IP would trip it almost instantly with multiple users
-- Self-inflicted lockout during dev/debug is trivially easy
 
-**Required fixes:**
-- [ ] Raise the global per-IP limit substantially (proposed: 2000/15min, or 10,000/hour with a wider window)
-- [ ] Exempt GET requests to read-only concept/annotation endpoints from the global limiter, OR give them their own much higher bucket separate from write endpoints
-- [ ] Move the global safety net to the Postgres-backed store so a backend restart doesn't silently reset abuse counters in production
-- [ ] Test by hard-refreshing the dev app repeatedly with StrictMode on and confirming you don't lock yourself out
-- [ ] Frontend: when a 429 is received on a read endpoint, show a clearer message than "no concepts" (this overlaps with Phase 49c frontend handling)
+**Fixes applied (see ORCA_STATUS.md Phase 49d for details):**
+- [x] Global per-IP limit raised to 2000 req / 15 min
+- [x] GET requests exempted entirely from the global limiter — the bucket only meters writes (POST/PUT/PATCH/DELETE)
+- [x] Global safety net moved to the Postgres-backed `pgRateLimitStore` with key namespace `global:ip:<ip>`; counters survive restarts and are shared across multi-instance deploys
+- [x] Verified end-to-end: 20 GET bursts return 200 with no RateLimit headers; POSTs produce correct `RateLimit-Limit: 2000` / `Remaining` / `Reset` headers; counter row writes to Postgres and increments correctly; injecting `count = 2001` produces 429 with `Retry-After`; per-user write-endpoint limiters (Phase 49b) untouched
+- [ ] Frontend: when a 429 is received on a read endpoint, show a clearer message than "no concepts" — now a non-issue for GETs (they can no longer 429 from the global limiter); still relevant for write 429s, tracked under Phase 49c frontend handling
 
 ### Phase 49c — Polish (post-launch acceptable)
 
@@ -147,14 +146,13 @@ Delete this file from the repo after launch.
 
 ## Recommended next-session order (no spending required)
 
-1. **Phase 49d — global rate limiter fix** (now a hard blocker; small code change but critical)
-2. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes (after lawyers; structured test script)
-3. **404 page**
-4. **EB Garamond investigation** — find why the brand font isn't rendering live
-5. **Twilio prepaid mode** (auto-recharge off + low balance) — outside code, ~5 min in Twilio console
-6. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
-7. **Phase 49c — rate limiting polish** (post-launch OK)
+1. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes (after lawyers; structured test script)
+2. **404 page**
+3. **EB Garamond investigation** — find why the brand font isn't rendering live
+4. **Twilio prepaid mode** (auto-recharge off + low balance) — outside code, ~5 min in Twilio console
+5. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
+6. **Phase 49c — rate limiting polish** (post-launch OK)
 
 ---
 
-**Last updated:** April 11, 2026 (favicon + SEO complete; Phase 49d added as launch blocker after self-inflicted rate limit lockout exposed it; EB Garamond rendering issue noted)
+**Last updated:** April 11, 2026 (favicon + SEO complete; Phase 49d global rate limiter fix complete — raised to 2000/15min, GET-exempt, Postgres-backed; EB Garamond rendering issue noted)
