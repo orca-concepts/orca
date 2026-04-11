@@ -4,6 +4,11 @@ const multer = require('multer');
 const corpusController = require('../controllers/corpusController');
 const authenticateToken = require('../middleware/auth');
 const optionalAuth = authenticateToken.optionalAuth;
+const {
+  annotationCreateLimiter,
+  documentUploadLimiter,
+  versionCreateLimiter,
+} = require('../utils/userRateLimiter');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -38,7 +43,8 @@ router.post('/unsubscribe', authenticateToken, corpusController.unsubscribe);
 // These must come BEFORE /:id to avoid 'annotations' being treated as :id
 
 // Create an annotation (auth required — permission checked server-side based on corpus mode)
-router.post('/annotations/create', authenticateToken, corpusController.createAnnotation);
+// Phase 49b: per-user rate limited — annotations are permanent and public.
+router.post('/annotations/create', authenticateToken, annotationCreateLimiter, corpusController.createAnnotation);
 
 // Delete an annotation (auth required — permission checked server-side)
 router.post('/annotations/delete', authenticateToken, corpusController.deleteAnnotation);
@@ -106,7 +112,8 @@ router.post('/documents/:documentId/invite-author', authenticateToken, corpusCon
 router.post('/documents/favorite/toggle', authenticateToken, corpusController.toggleDocumentFavorite);
 
 // Create a new version of a document within a corpus (allowed users only) — multipart
-router.post('/versions/create', authenticateToken, upload.single('file'), corpusController.createVersion);
+// Phase 49b: per-user rate limited — storage cost + CPU extraction cost.
+router.post('/versions/create', authenticateToken, versionCreateLimiter, upload.single('file'), corpusController.createVersion);
 
 // Get version history for a document (guest OK)
 router.get('/versions/:documentId/history', optionalAuth, corpusController.getVersionHistory);
@@ -140,7 +147,8 @@ router.post('/:id/delete', authenticateToken, corpusController.deleteCorpus);
 router.post('/:id/transfer-ownership', authenticateToken, corpusController.transferOwnership);
 
 // Upload a new document into a corpus (auth required) — multipart
-router.post('/:id/documents/upload', authenticateToken, upload.single('file'), corpusController.uploadDocument);
+// Phase 49b: per-user rate limited — storage cost + CPU extraction cost.
+router.post('/:id/documents/upload', authenticateToken, documentUploadLimiter, upload.single('file'), corpusController.uploadDocument);
 
 // Add an existing document to a corpus (owner only)
 router.post('/:id/documents/add', authenticateToken, corpusController.addDocumentToCorpus);

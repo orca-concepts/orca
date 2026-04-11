@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const votesController = require('../controllers/votesController');
 const authenticateToken = require('../middleware/auth');
+const { webLinkAddLimiter } = require('../utils/userRateLimiter');
 
 // optionalAuth: same as authenticateToken but doesn't reject if no token
 // (sets req.user = null for guests). Used for read-only endpoints.
@@ -25,7 +26,8 @@ const optionalAuth = (req, res, next) => {
 // Web Links (Phase 6) — GET is guest-accessible (read-only), write ops require auth
 router.get('/web-links/all/:conceptId', optionalAuth, votesController.getAllWebLinksForConcept);
 router.get('/web-links/:edgeId', optionalAuth, votesController.getWebLinks);
-router.post('/web-links/add', authenticateToken, votesController.addWebLink);
+// Phase 49b: per-user rate limited — adds arbitrary URLs, attractive to link spammers.
+router.post('/web-links/add', authenticateToken, webLinkAddLimiter, votesController.addWebLink);
 router.post('/web-links/remove', authenticateToken, votesController.removeWebLink);
 router.post('/web-links/upvote', authenticateToken, votesController.upvoteWebLink);
 router.post('/web-links/unvote', authenticateToken, votesController.removeWebLinkVote);

@@ -1252,6 +1252,23 @@ const createTables = async () => {
       ALTER TABLE corpus_subscriptions DROP COLUMN IF EXISTS group_id;
     `);
 
+    // Phase 49a: Postgres-backed rate limit counters. Survives restarts and
+    // deploys (unlike express-rate-limit's default in-memory store). Used for
+    // the per-phone SMS limiter and the global daily SMS cap. Keyed by an
+    // arbitrary bucket string (e.g. `sms:phone:<hmac>` or `sms:global`) plus
+    // the window_start timestamp, so multiple windows can coexist.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rate_limit_counters (
+        key TEXT NOT NULL,
+        window_start TIMESTAMPTZ NOT NULL,
+        count INT NOT NULL DEFAULT 0,
+        PRIMARY KEY (key, window_start)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_rlc_window ON rate_limit_counters(window_start);
+    `);
+
     await client.query('COMMIT');
 
     // ============================================================

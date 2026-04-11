@@ -2,9 +2,12 @@ const express = require('express');
 const router = express.Router();
 const moderationController = require('../controllers/moderationController');
 const authenticateToken = require('../middleware/auth');
+const { flagLimiter } = require('../utils/userRateLimiter');
 
 // All moderation routes require authentication
-router.post('/flag', authenticateToken, moderationController.flagEdge);
+// Phase 49b: flag endpoint is per-user rate limited (20/hr) — it's weaponizable
+// for coordinated hiding (10 flags hides an edge).
+router.post('/flag', authenticateToken, flagLimiter, moderationController.flagEdge);
 router.post('/unflag', authenticateToken, moderationController.unflagEdge);
 router.get('/hidden/:parentId', authenticateToken, moderationController.getHiddenChildren);
 router.post('/vote', authenticateToken, moderationController.voteOnHidden);

@@ -3,7 +3,77 @@ const jwt = require('jsonwebtoken');
 const zxcvbn = require('zxcvbn');
 const pool = require('../config/database');
 const { normalizePhone, sendVerificationCode, checkVerificationCode, computePhoneLookup } = require('../utils/phoneAuth');
+const rateLimitStore = require('../utils/pgRateLimitStore');
 require('dotenv').config();
+
+// Phase 49a — SMS abuse limits (per-phone + global daily cap).
+// Checked BEFORE calling Twilio in both send-code endpoints, after we've
+// already computed the phone_lookup HMAC. Uses the Postgres-backed store so
+// counters survive deploys and restarts. Returns { ok: true } to proceed,
+// or { ok: false, status, error, retryAfterSeconds } to short-circuit with
+// a 429/503 response.
+const SMS_PER_PHONE_HOURLY_LIMIT = 2;
+const SMS_PER_PHONE_DAILY_LIMIT = 5;
+const SMS_GLOBAL_DAILY_LIMIT = 200;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+async function checkSmsRateLimits(phoneLookup) {
+  // Global daily cap — if this is already at the limit, fail hard (503).
+  try {
+    const globalCount = await rateLimitStore.getCountSince('sms:global', ONE_DAY_MS);
+    if (globalCount >= SMS_GLOBAL_DAILY_LIMIT) {
+      console.error('[SMS CAP] Daily SMS limit reached');
+      return {
+        ok: false,
+        status: 503,
+        error: 'Verification is temporarily unavailable. Please try again later.',
+        retryAfterSeconds: Math.ceil(ONE_DAY_MS / 1000),
+      };
+    }
+
+    // Per-phone hourly and daily limits.
+    const phoneHourKey = `sms:phone:${phoneLookup}:h`;
+    const phoneDayKey = `sms:phone:${phoneLookup}:d`;
+    const hourlyCount = await rateLimitStore.getCountSince(phoneHourKey, ONE_HOUR_MS);
+    if (hourlyCount >= SMS_PER_PHONE_HOURLY_LIMIT) {
+      return {
+        ok: false,
+        status: 429,
+        error: 'Too many verification attempts to this phone number. Please wait before requesting another code.',
+        retryAfterSeconds: Math.ceil(ONE_HOUR_MS / 1000),
+      };
+    }
+    const dailyCount = await rateLimitStore.getCountSince(phoneDayKey, ONE_DAY_MS);
+    if (dailyCount >= SMS_PER_PHONE_DAILY_LIMIT) {
+      return {
+        ok: false,
+        status: 429,
+        error: 'Too many verification attempts to this phone number today. Please try again tomorrow.',
+        retryAfterSeconds: Math.ceil(ONE_DAY_MS / 1000),
+      };
+    }
+
+    return { ok: true, phoneHourKey, phoneDayKey };
+  } catch (err) {
+    console.error('[SMS rate limit] store error:', err);
+    // Fail open on store errors rather than blocking legit users — SMS
+    // spending is still backstopped by the Twilio console spend cap.
+    return { ok: true, phoneHourKey: `sms:phone:${phoneLookup}:h`, phoneDayKey: `sms:phone:${phoneLookup}:d` };
+  }
+}
+
+// After a successful Twilio send, record the consumption in all three
+// buckets. Non-fatal — log and continue if the store errors.
+async function recordSmsSend(phoneHourKey, phoneDayKey) {
+  try {
+    await rateLimitStore.increment(phoneHourKey, ONE_HOUR_MS);
+    await rateLimitStore.increment(phoneDayKey, ONE_DAY_MS);
+    await rateLimitStore.increment('sms:global', ONE_DAY_MS);
+  } catch (err) {
+    console.error('[SMS rate limit] record error:', err);
+  }
+}
 
 // Password validation helper (NIST SP 800-63B)
 function validatePassword(password, userInputs = []) {
@@ -102,9 +172,10 @@ const authController = {
     }
 
     // Pre-check phone uniqueness/existence before calling Twilio
+    let phoneLookup;
     try {
       const normalized = normalizePhone(phoneNumber);
-      const phoneLookup = computePhoneLookup(normalized);
+      phoneLookup = computePhoneLookup(normalized);
 
       if (intent === 'register') {
         // Registration: reject if phone already exists
@@ -122,9 +193,19 @@ const authController = {
       return res.status(500).json({ error: 'Internal server error' });
     }
 
+    // Phase 49a — per-phone and global SMS rate limits (checked before Twilio).
+    const limitCheck = await checkSmsRateLimits(phoneLookup);
+    if (!limitCheck.ok) {
+      res.set('Retry-After', String(limitCheck.retryAfterSeconds));
+      return res.status(limitCheck.status).json({ error: limitCheck.error });
+    }
+
     try {
       const result = await sendVerificationCode(phoneNumber);
       if (result.success) {
+        // Record consumption only on successful send so failed Twilio calls
+        // do not eat into the user's quota.
+        await recordSmsSend(limitCheck.phoneHourKey, limitCheck.phoneDayKey);
         return res.json({ message: 'Verification code sent' });
       }
       return res.status(500).json({ error: result.error });
@@ -271,8 +352,16 @@ const authController = {
       );
 
       if (!result.rows[0]) {
-        // Generic response — don't reveal whether account exists
+        // Generic response — don't reveal whether account exists.
+        // Also skip SMS rate-limit consumption (no SMS will be sent).
         return res.json({ message: 'If an account exists with this phone number, a verification code has been sent' });
+      }
+
+      // Phase 49a — per-phone and global SMS rate limits (checked before Twilio).
+      const limitCheck = await checkSmsRateLimits(lookupHash);
+      if (!limitCheck.ok) {
+        res.set('Retry-After', String(limitCheck.retryAfterSeconds));
+        return res.status(limitCheck.status).json({ error: limitCheck.error });
       }
 
       // Send OTP via Twilio
@@ -280,6 +369,9 @@ const authController = {
       if (!sendResult.success) {
         return res.status(500).json({ error: 'Failed to send verification code' });
       }
+
+      // Record consumption only on successful send
+      await recordSmsSend(limitCheck.phoneHourKey, limitCheck.phoneDayKey);
 
       res.json({ message: 'If an account exists with this phone number, a verification code has been sent' });
     } catch (error) {

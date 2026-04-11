@@ -1,115 +1,155 @@
 # Orca Pre-Launch Checklist
 
-This is a working checklist of everything that should be verified, configured, or completed before Orca's public launch. Items are organized by category and grouped by priority.
+**Priority key:** 🔒 Hard blocker · ⚠️ Should do · 💡 Nice to have
 
-**Priority key:**
-- 🔒 **Hard blocker** — cannot launch without this
-- ⚠️ **Should do** — launching without this creates real risk or pain
-- 💡 **Nice to have** — launching without this is survivable but worth considering
-
-Delete this file from the repo after launch. It is not part of the long-term project documentation.
+Delete this file from the repo after launch.
 
 ---
 
-## 🔒 Legal & Entity
+## ✅ Recently completed
 
-- [ ] **LLC formation complete** (Murphy Desmond engagement in progress). Blocks several items below.
-- [ ] **Terms of Service finalized and published.** Being drafted by Lane Rideout at Murphy Desmond. Must be linked from the app footer and shown at sign-up.
-- [ ] **Privacy Policy finalized and published.** Same source. Must cover: email collection, phone hashing (both `phone_hash` and `phone_lookup`), ORCID linkage, what Twilio touches, document text extraction, annotation permanence, and cookies/sessions.
-- [ ] **DMCA agent registered with the US Copyright Office** under the LLC name (~$6 filing fee). Required for safe harbor.
-- [ ] **Update Constitution page** to match Murphy Desmond's Privacy Policy language. Current bullet about phone storage is incomplete (says "hashed phone numbers" but doesn't mention email collection, ORCID, or the HMAC `phone_lookup` mechanism added in Phase 33e).
-- [ ] **Verify copyright confirmation checkbox at upload** is still in place (implemented Phase 36).
-- [ ] **Verify age verification (18+) checkbox at registration** is still in place (implemented Phase 36).
-- [ ] **Repeat infringer policy** documented (typically inside the ToS — confirm Lane includes it).
-- [ ] **Takedown and counter-notice process** documented in a user-facing location, pointing at the DMCA agent's contact info.
+- [x] **Using Orca page redesign** — hero image pair, Tunneling + Superconcepts cells, GitHub URL fixed.
+- [x] **README.md added** at repo root.
+- [x] **`pg_trgm` migration fix** — `CREATE EXTENSION` and concept-name indexes now in `migrate.js`. Manual deploy step removed; ORCA_STATUS.md Known Issue #5 updated.
+- [x] **Verified test data cleanup is a non-issue** — no seed scripts run on deploy.
+- [x] **Verified phone storage architecture** — raw phones never stored; `phone_hash` (bcrypt, legacy) + `phone_lookup` (HMAC-SHA256, current).
+- [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings broken into Phases 44a/44b/44c below.
+
+---
+
+## 🔒 Legal & Entity (blocked on Murphy Desmond)
+
+- [ ] LLC formation complete
+- [ ] Terms of Service finalized and published
+- [ ] Privacy Policy finalized and published (must cover email, phone hashing, ORCID, Twilio, document text, annotation permanence, cookies)
+- [ ] DMCA agent registered with US Copyright Office (~$6)
+- [ ] Update Constitution page to match Privacy Policy language (wait for Lane's draft)
+- [ ] Verify copyright confirmation checkbox at upload still in place
+- [ ] Verify age verification (18+) checkbox at registration still in place
+- [ ] Repeat infringer policy documented in ToS
+- [ ] Takedown / counter-notice process documented user-facing
 
 ---
 
 ## 🔒 Operational & Infrastructure
 
-- [ ] **Audit all production environment variables on Railway.** Open the Railway Variables tab and confirm none are still at placeholder values. Critical ones to check:
-  - [ ] `PHONE_LOOKUP_KEY` — must be a real random hex string (`.env.example` line 1888 still says `change_me_to_a_random_hex_string`)
-  - [ ] `ADMIN_USER_ID` — set to your production user ID
-  - [ ] `ENABLED_ATTRIBUTES` — `value,action,tool,question`
-  - [ ] `ENABLED_DOCUMENT_TAGS` — production tag list
-  - [ ] Twilio credentials (Account SID, Auth Token, Verify Service SID)
-  - [ ] ORCID production credentials (client ID, client secret, redirect URI)
-  - [ ] `DATABASE_URL`
-  - [ ] Cloudflare R2 credentials
-  - [ ] JWT secret
-- [ ] **Database backups configured on Railway.** Verify whether the Hobby plan includes automated backups; if not, set up a weekly `pg_dump` to R2 or another destination.
-- [ ] **Pre-launch test data cleanup migration written and ready to run.** Targets: test users (alice–frank), `ZDiff_` and `ZFlip_` seeded concepts, personal test annotations. Per ORCA_STATUS.md line 3629, hard deletion is fine pre-launch — not soft-hide. Order matters; write carefully so cascades don't surprise you.
-- [ ] **Error monitoring set up** (Sentry free tier or equivalent). Without this, you'll only learn about bugs when users report them.
-- [ ] **Uptime monitoring set up** (UptimeRobot free tier or equivalent — pings every 5 minutes, emails on outage).
-- [ ] **SSL cert verified** on orcaconcepts.org. Visit in incognito and confirm the padlock icon.
-- [ ] **Domain email working** (e.g. `hello@orcaconcepts.org` or `legal@orcaconcepts.org`). Needed for DMCA agent registration and Contact info in ToS/Privacy.
+- [ ] **Audit Railway env vars** — `PHONE_LOOKUP_KEY` (currently placeholder), `ADMIN_USER_ID`, `ENABLED_ATTRIBUTES`, `ENABLED_DOCUMENT_TAGS`, Twilio creds, ORCID prod creds, `DATABASE_URL`, R2 creds, JWT secret
+- [ ] **Verify `pg_trgm` works on Railway Postgres** on first deploy — if extension creation fails, migration halts and app won't start
+- [ ] Database backups configured on Railway
+- [ ] Error monitoring set up (Sentry free tier)
+- [ ] Uptime monitoring set up (UptimeRobot free tier)
+- [ ] SSL cert verified on orcaconcepts.org
+- [ ] Domain email working (for DMCA / ToS contact)
+
+---
+
+## 🔒 Rate Limiting (from RATE_LIMIT_AUDIT.md)
+
+**Critical context:** The existing IP-based limiters in `auth.js` are effectively broken because `trust proxy` is not configured — behind Railway's edge, all requests appear to come from the same handful of IPs. Every other endpoint in the app has zero rate limiting. Full findings in `RATE_LIMIT_AUDIT.md`.
+
+### Twilio account-level protection (do FIRST, outside code)
+
+- [ ] **Twilio Usage Trigger: warning at $10/month** (`Orca SMS warning - $10`, recurring monthly)
+- [ ] **Twilio Usage Trigger: hard-cap warning at $20/month** (`Orca SMS hard cap - $20`, recurring monthly)
+- [ ] **Twilio auto-recharge OFF** + balance kept low (~$25). This is the only true hard stop — triggers are notifications only, not enforcement.
+- [ ] Document in ORCA_STATUS.md that Twilio is in prepaid mode with auto-recharge off
+
+### Phase 44a — Foundation (must-fix before launch)
+
+- [ ] Configure `app.set('trust proxy', 1)` in `server.js` (validate against Railway docs; may need `2` if Cloudflare is in front)
+- [ ] Add per-phone-number limiter to `sendCode` keyed on `phone_lookup` HMAC: 2 SMS/hour, 5 SMS/24hr per phone
+- [ ] Add global daily SMS cap: 200 SMS/24hr total across both send-code endpoints; return 503 + loud log on breach
+- [ ] Move `sendCode` limiter to Postgres-backed store (counters survive deploys)
+
+### Phase 44b — Write-endpoint limiters (should-fix before launch)
+
+- [ ] Per-user limiter on `/api/moderation/flag` (20/hr per user)
+- [ ] Per-user limiter on `/api/corpuses/annotations/create` (60/hr per user)
+- [ ] Per-user limiter on `/api/corpuses/:id/documents/upload` (10/hr per user)
+- [ ] Per-user limiter on `/api/corpuses/versions/create` (10/hr per user)
+- [ ] Per-user limiter on `/api/pages/:slug/comments` (10/hr per user)
+- [ ] Per-user limiter on `/api/messages/threads` (20/hr per user starts, 120/hr per user replies)
+- [ ] Per-user limiter on `/api/votes/web-links/add` (30/hr per user)
+- [ ] Per-user limiter on `/api/concepts/root` (10/hr per user) and `/api/concepts/child` (100/hr per user)
+- [ ] Global app-wide safety net: 500 req / 15 min / IP in `server.js`
+
+### Phase 44c — Polish (post-launch acceptable)
+
+- [ ] Frontend 429 handling: parse `RateLimit-Reset`, disable button, show countdown (start with `LoginModal.jsx`)
+- [ ] Per-account login lockout: 5 failed attempts on same identifier → 15 min lock (mitigates credential stuffing)
+- [ ] Move all remaining limiters to persistent Postgres store
+- [ ] CAPTCHA decision (hCaptcha free tier in front of `sendCode`)
 
 ---
 
 ## ⚠️ Security & Abuse Prevention
 
-- [ ] **Rate limiting audit on all public endpoints.** Especially:
-  - [ ] `sendCode` (registration phone OTP — biggest Twilio cost risk)
-  - [ ] Concept creation
-  - [ ] Annotation creation
-  - [ ] Flag/moderation endpoints
-  - [ ] Forgot-password (already has 5 req/IP/15min per ORCA_STATUS line 1351 — confirm still active)
-- [ ] **Twilio spending cap configured** in the Twilio console. Hard cap on SMS spending so abuse can't bankrupt you.
-- [ ] **Admin unhide queue workflow tested in production.** Confirm `HiddenConceptsView.jsx` works and you know how to reach it. Document the workflow for yourself.
-- [ ] **Decide on CAPTCHA for registration.** Phone verification does most anti-bot work, but a lightweight challenge (hCaptcha free tier) in front of `sendCode` is cheap insurance against Twilio cost attacks.
+- [ ] Admin unhide queue tested in production; workflow documented for self
+- [ ] Decide on CAPTCHA for registration (now tracked in Phase 44c above)
 
 ---
 
 ## ⚠️ User-Facing Polish
 
-- [ ] **Using Orca page redesign complete** (in progress today).
-- [ ] **Forgot password flow walked through end-to-end.** Click "Forgot password?" → enter phone → get OTP → set new password → log in with new password.
-- [ ] **Orphan document cleanup dry run.** Upload, add to corpus, remove from corpus, verify orphan rescue path works.
-- [ ] **Age verification flow tested.** Sign up as a brand-new user and confirm the 18+ checkbox blocks progression if unchecked.
-- [ ] **Copyright confirmation flow tested.** Upload a document and confirm the checkbox is required and gets a `copyright_confirmed_at` timestamp.
-- [ ] **All four attributes render correctly** in production: `[value]`, `[action]`, `[tool]`, `[question]`. Bracketed display, picker, filter, etc.
-- [ ] **Email deliverability resolved.** Phase 36 added email collection "for legal notifications." Decide: is there an SMTP configured to actually send them, or are these notifications manual-only? If manual-only, document that as an explicit decision.
-- [ ] **Browser compatibility spot check.** Chrome, Firefox, Safari (desktop), mobile Safari, mobile Chrome. At minimum: load homepage, log in, create an annotation, view a graph.
-- [ ] **Favicon and basic SEO meta tags** on the landing page: `<title>`, `<meta name="description">`, Open Graph tags (so links render nicely when pasted into Bluesky, Slack, etc.). Bluesky outreach plan depends on this.
-- [ ] **404 page exists and looks reasonable.**
-- [ ] **Decide on admin profile presentation.** When you, Miles, appear as the first user / 10-flag moderator, what does your profile look like? Personal account or generic "Orca Admin"?
+- [ ] Forgot password flow walked through end-to-end
+- [ ] Orphan document cleanup dry run
+- [ ] Age verification flow tested with fresh user
+- [ ] Copyright confirmation flow tested (checkbox + `copyright_confirmed_at` timestamp)
+- [ ] All four attributes render correctly: `[value]`, `[action]`, `[tool]`, `[question]`
+- [ ] Email deliverability resolved (SMTP wired up, or document manual-only decision)
+- [ ] Browser compatibility spot check (Chrome, Firefox, Safari, mobile Safari, mobile Chrome)
+- [ ] Favicon + SEO meta tags (`<title>`, `<meta description>`, OG tags for Bluesky link previews)
+- [ ] 404 page exists and looks reasonable
+- [ ] Decide on admin profile presentation (personal account vs generic "Orca Admin")
 
 ---
 
 ## ⚠️ Repository & Open Source Housekeeping
 
-The repo is public at `github.com/orca-concepts/orca` under AGPL v3.
-
-- [ ] **`README.md`** at repo root: what Orca is, screenshot, link to live site, how to run locally, how to contribute, license notice.
-- [ ] **`LICENSE` file** with full AGPL v3 text. Verify GitHub auto-generated this when license was set.
-- [ ] **`CONTRIBUTING.md`** (can be one paragraph: "open an issue first before a PR").
-- [ ] **`CODE_OF_CONDUCT.md`** — Contributor Covenant is the standard. GitHub has a one-click template for this.
-- [ ] **GitHub issue templates** (bug report, feature request).
-- [ ] **Secrets audit on the public repo.** Run `gitleaks` or equivalent once to scan history for accidentally committed `.env` files, API keys, or passwords.
+- [ ] `LICENSE` file with full AGPL v3 text — verify GitHub auto-generated it
+- [ ] `CONTRIBUTING.md` (one paragraph: open issue before PR). README already links it as forward reference.
+- [ ] `CODE_OF_CONDUCT.md` (Contributor Covenant via GitHub one-click template)
+- [ ] GitHub issue templates (bug report, feature request)
+- [ ] Secrets audit on public repo (`gitleaks` once)
+- [ ] Delete duplicate `backend/seed-test-data.js` (root copy of `backend/src/config/` version)
 
 ---
 
 ## 💡 Financial & Sustainability
 
-- [ ] **Open Collective setup** complete (planned funding path). Doesn't block launch, but the "Donate" info page should point somewhere real before users find it broken.
-- [ ] **6-month budget written down.** Railway (~$5/mo), Cloudflare domain (~$10/yr), Twilio (variable), R2 (variable). What's the cap if things go sideways?
+- [ ] Open Collective setup (Donate page should point somewhere real)
+- [ ] 6-month budget written down
 
 ---
 
-## 💡 Post-Launch Monitoring Plan
+## 💡 Post-Launch Monitoring
 
-Not strictly pre-launch, but should exist on Day 1.
-
-- [ ] **Daily metrics list defined** for the first week: registrations, concept creations, annotation creations, flag count, Twilio spend, Railway CPU.
-- [ ] **2am moderation emergency plan written.** What do you do if someone uploads something genuinely illegal at 2am?
-- [ ] **Rollback plan written.** If a recent feature breaks something critical with real users on the system, what's the recovery path?
+- [ ] Daily metrics list defined (registrations, concepts, annotations, flags, Twilio spend, Railway CPU)
+- [ ] 2am moderation emergency plan written
+- [ ] Rollback plan written
 
 ---
 
 ## Outside review
 
-- [ ] **One trusted outside reviewer has spent ~1 hour on the live app** specifically looking for things that would embarrass you. Ideally someone with some security or web ops background. An outside pair of eyes catches what you've stopped seeing.
+- [ ] One trusted outside reviewer has spent ~1 hour on the live app
 
 ---
 
-**Last updated:** [date when you make your first edit]
+## Recommended next-session order (no spending required)
+
+1. **Twilio account-level protection** (triggers + prepaid mode) — do this TODAY, outside code
+2. **Phase 44a — rate limiting foundation** (trust proxy, per-phone limiter, daily cap, persistent store) — fresh Claude Code session
+3. **Phase 44b — write-endpoint limiters + global safety net**
+4. **CONTRIBUTING.md + CODE_OF_CONDUCT.md + issue templates** — batch in one session
+5. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes
+6. **Favicon + SEO meta tags**
+7. **404 page**
+8. **Delete duplicate `seed-test-data.js`** (30 seconds)
+9. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
+10. **Verify `LICENSE` file** on GitHub (30 seconds)
+11. **Phase 44c — rate limiting polish** (post-launch OK)
+
+---
+
+**Last updated:** April 11, 2026 (rate limit audit findings added)

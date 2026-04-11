@@ -4,14 +4,11 @@ const authController = require('../controllers/authController');
 const authenticateToken = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
 
-const sendCodeLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: { error: 'Too many code requests. Please try again in 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
+// Phase 49a — The old IP-keyed sendCodeLimiter was removed. SMS abuse
+// protection now lives inside the controller (per-phone_lookup buckets
+// backed by Postgres, plus a global daily cap). See checkSmsRateLimits()
+// in authController.js. Login and verify-code limiters remain — they are
+// IP-keyed and now correct because trust proxy is configured in server.js.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -32,11 +29,11 @@ const verifyCodeLimiter = rateLimit({
 router.post('/login', loginLimiter, authController.login);
 
 // Phone OTP routes (registration only, Phase 40b)
-router.post('/send-code', sendCodeLimiter, authController.sendCode);
+router.post('/send-code', authController.sendCode);
 router.post('/verify-register', verifyCodeLimiter, authController.verifyRegister);
 
 // Forgot password (Phase 40b)
-router.post('/forgot-password/send-code', sendCodeLimiter, authController.forgotPasswordSendCode);
+router.post('/forgot-password/send-code', authController.forgotPasswordSendCode);
 router.post('/forgot-password/reset', verifyCodeLimiter, authController.forgotPasswordReset);
 
 // Protected routes

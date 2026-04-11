@@ -3,6 +3,7 @@ const router = express.Router();
 const conceptsController = require('../controllers/conceptsController');
 const authenticateToken = require('../middleware/auth');
 const { optionalAuth } = require('../middleware/auth');
+const { rootConceptCreateLimiter, childConceptCreateLimiter } = require('../utils/userRateLimiter');
 
 // GET routes use optionalAuth — guests can browse read-only
 // POST routes use authenticateToken — must be logged in to create
@@ -40,10 +41,10 @@ router.post('/batch-children-for-diff', optionalAuth, conceptsController.getBatc
 // Get cached concept links for a finalized document (Phase 7i-5)
 router.get('/document-links/:documentId', optionalAuth, conceptsController.getDocumentConceptLinks);
 
-// Create root concept (requires login)
-router.post('/root', authenticateToken, conceptsController.createRootConcept);
+// Create root concept (requires login) — Phase 49b: per-user rate limited
+router.post('/root', authenticateToken, rootConceptCreateLimiter, conceptsController.createRootConcept);
 
-// Create child concept (requires login)
-router.post('/child', authenticateToken, conceptsController.createChildConcept);
+// Create child concept (requires login) — Phase 49b: per-user rate limited
+router.post('/child', authenticateToken, childConceptCreateLimiter, conceptsController.createChildConcept);
 
 module.exports = router;

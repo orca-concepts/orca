@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
@@ -20,6 +21,12 @@ const pool = require('./config/database');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy (Phase 49a) — Cloudflare → Railway = 2 hops.
+// Required so req.ip resolves to the real client IP (not the proxy),
+// which makes IP-keyed rate limiters work correctly in production.
+// Must be set before any rate limiter or route mounts.
+app.set('trust proxy', 2);
+
 // CORS configuration
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
@@ -39,6 +46,21 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Phase 49b — Global app-wide safety-net limiter. Keyed by IP (correct now
+// that trust proxy is configured above). 500 requests per 15 minutes per IP
+// is deliberately generous — this is NOT the primary defense for any
+// particular endpoint, it's a blanket floor that catches trivial flood
+// attacks on endpoints the per-route limiters may have missed. Legitimate
+// power-users should never see it.
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  message: { error: 'Too many requests. Please slow down and try again in a few minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', globalLimiter);
 
 // Request logging middleware
 app.use((req, res, next) => {
