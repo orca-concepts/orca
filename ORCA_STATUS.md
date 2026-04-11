@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 7, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete)
+**Last Updated:** April 11, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete; Phase 48 and/or logic for superconcepts display complete; Phase 49a rate limit foundation complete; Phase 49b write-endpoint limiters + global safety net complete)
 
 ---
 
@@ -3791,6 +3791,72 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 **Architecture Decision #260 — Superconcept Tab Is Edge-Scoped, Not Cross-Context (Phase 47):** The "Superconcepts" tab in ConceptAnnotationPanel only appears in children view (where there's a single current edge), not in flip view or tunnel view. This matches the data model — combo membership is per-edge, not per-concept. Different edges for the same concept may belong to different combos.
 
 **Architecture Decision #261 — Superconcept Click-Through Subscribes Directly (Phase 47):** Clicking a superconcept card in the annotation panel auto-subscribes and switches to the superconcept tab (same pattern as annotation card click-through for corpuses). This is more direct than opening the Browse Superconcepts overlay and having the user manually subscribe.
+
+---
+
+### Phase 49: Rate Limiting Hardening — ✅ 49a/49b COMPLETE
+
+**Goal:** Close the rate-limiting gaps identified in `RATE_LIMIT_AUDIT.md`. The existing IP-only limiters in `auth.js` were effectively broken in production because trust proxy was not configured, and every write endpoint outside of auth had zero rate limiting. Twilio SMS abuse was the primary concern.
+
+#### Phase 49a: Foundation (trust proxy + SMS abuse protection) — ✅ COMPLETE
+
+**Trust proxy:** `app.set('trust proxy', 2)` in `server.js` before any route or limiter mounts. Set to `2` because production traffic passes through Cloudflare → Railway (two hops). Without this, `req.ip` resolved to the proxy's IP and every IP-keyed limiter collapsed into a single global bucket. Also silences the `express-rate-limit` v8 startup validation warning.
+
+**Postgres-backed rate limit store:** New `backend/src/utils/pgRateLimitStore.js` and `rate_limit_counters` table (key, window_start, count). Fixed-window bucketing keyed to `floor(now / windowMs) * windowMs`. Atomic increments via `INSERT ... ON CONFLICT DO UPDATE`. Opportunistic cleanup of rows older than 7 days on every increment (non-blocking). Exports `increment`, `getCount`, `getCountSince`, `currentWindowStart`. Used for limiters where counter persistence across deploys matters — currently only the SMS abuse limits.
+
+**Per-phone SMS limiter:** Keyed on the `phone_lookup` HMAC, not IP. Two buckets: 2 SMS/hour/phone, 5 SMS/24hr/phone. Implemented inside the controller (not as Express middleware) because the phone_lookup hash isn't computed until after the request body parsing and phone normalization. `checkSmsRateLimits()` runs BEFORE calling Twilio; `recordSmsSend()` runs AFTER a successful Twilio response so that failed sends do not eat into the user's quota. Applied to both `POST /auth/send-code` (registration) and `POST /auth/forgot-password/send-code`.
+
+**Global daily SMS cap:** 200 SMS/24hr across both send-code endpoints, keyed on the fixed string `sms:global`. Returns 503 "Verification is temporarily unavailable" with a loud `[SMS CAP]` log line when breached. This is the blast-radius bound — worst case, a total bypass of per-phone/per-IP protections is still capped at ~200 Twilio messages per day.
+
+**Retired limiter:** The old `sendCodeLimiter` (in-memory, IP-keyed, 5/15min) is deleted. Comments in `routes/auth.js` point to the new controller-level limits. `loginLimiter` and `verifyCodeLimiter` remain — they are still IP-keyed but now correct because trust proxy is configured.
+
+**Fail-open on store errors:** If the Postgres store throws during `checkSmsRateLimits`, the controller logs the error and allows the request through. The rationale is that Twilio spending is still backstopped by the Twilio console spend cap (an out-of-code defense documented in PRELAUNCH.md), and failing closed on a database hiccup would lock legitimate users out of registration/password reset.
+
+#### Phase 49b: Write-endpoint limiters + global safety net — ✅ COMPLETE
+
+**Per-user hourly limiter factory:** New `backend/src/utils/userRateLimiter.js`. Exports a `perUserHourly(max, label)` factory plus ten pre-configured limiters. Keyed by `req.user.userId` (NOT IP) via a custom `keyGenerator`. Uses `express-rate-limit`'s default in-memory store — persistent storage is unnecessary here because these limits bound damage rather than dollar cost, and a counter reset on deploy just clears the attacker's counter (minor inconvenience at most). SMS limits are the ones that must survive deploys.
+
+**Why user-keyed, not IP-keyed:** An authenticated attacker has already proven they can create accounts, so IP limits just push them to use a second account. Legitimate users behind NAT/proxy share an IP and should have independent budgets. JWT auth is required for all these endpoints anyway, so `req.user.userId` is always present by the time the limiter runs.
+
+**Critical: limiters must be mounted AFTER `authenticateToken`** so `req.user.userId` is populated by the time `keyGenerator` fires. The factory has no IP fallback — if an unauthenticated request ever reached the limiter it would throw, which is preferable to silently IP-keying (and would also trip `express-rate-limit` v8's IPv6-safety validation, which was the cause of a startup-warning spam during initial implementation).
+
+**Applied to 10 write endpoints:**
+
+| Endpoint | Limit | Rationale |
+|---|---|---|
+| `POST /api/moderation/flag` | 20/hr | Weaponizable — 10 flags hides an edge |
+| `POST /api/corpuses/annotations/create` | 60/hr | Annotations are permanent and public |
+| `POST /api/corpuses/:id/documents/upload` | 10/hr | R2 storage + PDF/DOCX extraction CPU |
+| `POST /api/corpuses/versions/create` | 10/hr | Same cost profile as uploads |
+| `POST /api/pages/:slug/comments` | 10/hr | Public-facing spam target |
+| `POST /api/messages/threads/create` | 20/hr | Unsolicited-message vector |
+| `POST /api/messages/threads/:id/reply` | 120/hr | Replies are mutual, higher budget |
+| `POST /api/votes/web-links/add` | 30/hr | Attractive to link spammers |
+| `POST /api/concepts/root` | 10/hr | Graph-level vandalism |
+| `POST /api/concepts/child` | 100/hr | Normal usage budget |
+
+**Global safety-net limiter:** `server.js` mounts a 500 req / 15 min / IP limiter on `/api` via `app.use('/api', globalLimiter)` BEFORE any routes. Deliberately generous — this is not the primary defense for any specific endpoint, it's a blanket floor that catches trivial flood attacks on endpoints the per-route limiters miss. Legitimate power-users should never see it.
+
+**Verification:** Smoke-tested the flag limiter end-to-end — requests 1–20 returned 404 (dummy edge ID), request 21 returned 429 with `Retry-After: 3587` (~1 hour). Confirms per-user keying, rate-limit enforcement, and `standardHeaders` all work correctly. Frontend build passes; backend starts cleanly with no `express-rate-limit` v8 validation warnings.
+
+#### Phase 49c: Polish (post-launch, not yet implemented)
+
+- Frontend 429 handling: parse `RateLimit-Reset` header, disable the submit button, show a countdown (start with `LoginModal.jsx`).
+- Per-account login lockout: 5 failed attempts on same identifier → 15 min lock (mitigates credential stuffing).
+- Move `loginLimiter` and `verifyCodeLimiter` from in-memory to the Postgres store so they also survive deploys.
+- CAPTCHA decision (hCaptcha free tier in front of `sendCode`).
+
+#### Phase 49 Architecture Decisions
+
+- **Architecture Decision #262 — SMS Limiters Live in the Controller, Not Middleware (Phase 49a):** Per-phone SMS limits are checked inside `authController.sendCode` / `forgotPasswordSendCode`, not as Express middleware. The reason is that the `phone_lookup` HMAC isn't computed until after request body parsing and phone normalization — by the time the key is available, the request is already inside the controller. A middleware approach would require duplicating the normalization logic. `checkSmsRateLimits` runs before the Twilio call, `recordSmsSend` runs after success. Failed Twilio sends do not consume quota.
+
+- **Architecture Decision #263 — Rate Limit Store Fails Open (Phase 49a):** If the Postgres rate-limit store throws during `checkSmsRateLimits`, the controller logs and allows the request. Rationale: the Twilio console spend cap is the last-resort dollar-cost backstop, and failing closed on transient database errors would lock legitimate users out of registration and password reset. This is a deliberate availability-over-security tradeoff for one specific failure mode.
+
+- **Architecture Decision #264 — Write Limiters Are User-Keyed, Not IP-Keyed (Phase 49b):** Per-user limiters on write endpoints key on `req.user.userId`, not `req.ip`. An authenticated attacker has already paid the account-creation cost, so IP limits just encourage them to create a second account. Legitimate users behind NAT/proxy share an IP and should have independent budgets. The in-memory store is fine here because these limits bound damage (not dollar cost) and a counter reset on deploy is an acceptable tradeoff.
+
+- **Architecture Decision #265 — No IP Fallback in User Key Generator (Phase 49b):** The `perUserHourly` factory's `keyGenerator` directly accesses `req.user.userId` with no fallback. This is safe because all consuming routes mount the limiter AFTER `authenticateToken`, which guarantees `req.user` is populated. An earlier implementation with an IP fallback tripped `express-rate-limit` v8's IPv6-safety validation and produced startup warning spam. The explicit reliance on `authenticateToken` preceding the limiter is documented in the factory's header comment.
+
+- **Architecture Decision #266 — Trust Proxy Set to 2 (Phase 49a):** `app.set('trust proxy', 2)` reflects production topology — traffic passes through Cloudflare → Railway edge → app, which is two proxy hops. Setting this to `1` would still leak the Cloudflare edge IP as `req.ip`; setting it to `2` walks two headers back to get the actual client IP. Must be set before any route or limiter mounts, or the limiters are created with the wrong key function. This finding was the highest-severity item in `RATE_LIMIT_AUDIT.md` because every pre-Phase-49 rate limiter was effectively broken in production without it.
 
 ---
 

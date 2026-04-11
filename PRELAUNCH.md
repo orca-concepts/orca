@@ -13,7 +13,9 @@ Delete this file from the repo after launch.
 - [x] **`pg_trgm` migration fix** — `CREATE EXTENSION` and concept-name indexes now in `migrate.js`. Manual deploy step removed; ORCA_STATUS.md Known Issue #5 updated.
 - [x] **Verified test data cleanup is a non-issue** — no seed scripts run on deploy.
 - [x] **Verified phone storage architecture** — raw phones never stored; `phone_hash` (bcrypt, legacy) + `phone_lookup` (HMAC-SHA256, current).
-- [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings broken into Phases 44a/44b/44c below.
+- [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings implemented as Phase 49 (49a foundation, 49b write-endpoint limiters + global safety net). See ORCA_STATUS.md for details.
+- [x] **Phase 49a — Rate limit foundation** — `trust proxy` configured, per-phone + global daily SMS limiters (Postgres-backed store), `sendCodeLimiter` retired.
+- [x] **Phase 49b — Write-endpoint limiters + global safety net** — per-user hourly limiters on 10 write endpoints (flag, annotations, document/version upload, page comments, messages, web links, root/child concepts), plus global 500 req / 15 min / IP limiter on `/api`.
 
 ---
 
@@ -45,7 +47,7 @@ Delete this file from the repo after launch.
 
 ## 🔒 Rate Limiting (from RATE_LIMIT_AUDIT.md)
 
-**Critical context:** The existing IP-based limiters in `auth.js` are effectively broken because `trust proxy` is not configured — behind Railway's edge, all requests appear to come from the same handful of IPs. Every other endpoint in the app has zero rate limiting. Full findings in `RATE_LIMIT_AUDIT.md`.
+**Status:** Phases 49a and 49b are complete (committed). Phase 49c (polish) is post-launch acceptable.
 
 ### Twilio account-level protection (do FIRST, outside code)
 
@@ -54,30 +56,31 @@ Delete this file from the repo after launch.
 - [ ] **Twilio auto-recharge OFF** + balance kept low (~$25). This is the only true hard stop — triggers are notifications only, not enforcement.
 - [ ] Document in ORCA_STATUS.md that Twilio is in prepaid mode with auto-recharge off
 
-### Phase 44a — Foundation (must-fix before launch)
+### Phase 49a — Foundation ✅ COMPLETE
 
-- [ ] Configure `app.set('trust proxy', 1)` in `server.js` (validate against Railway docs; may need `2` if Cloudflare is in front)
-- [ ] Add per-phone-number limiter to `sendCode` keyed on `phone_lookup` HMAC: 2 SMS/hour, 5 SMS/24hr per phone
-- [ ] Add global daily SMS cap: 200 SMS/24hr total across both send-code endpoints; return 503 + loud log on breach
-- [ ] Move `sendCode` limiter to Postgres-backed store (counters survive deploys)
+- [x] Configure `app.set('trust proxy', 2)` in `server.js` (Cloudflare → Railway = 2 hops)
+- [x] Add per-phone-number limiter on `sendCode` keyed on `phone_lookup` HMAC: 2 SMS/hour, 5 SMS/24hr per phone
+- [x] Add global daily SMS cap: 200 SMS/24hr total across both send-code endpoints; returns 503 + loud log on breach
+- [x] Move `sendCode` limiter to Postgres-backed store via `backend/src/utils/pgRateLimitStore.js` — counters survive deploys. Old IP-keyed `sendCodeLimiter` retired.
 
-### Phase 44b — Write-endpoint limiters (should-fix before launch)
+### Phase 49b — Write-endpoint limiters ✅ COMPLETE
 
-- [ ] Per-user limiter on `/api/moderation/flag` (20/hr per user)
-- [ ] Per-user limiter on `/api/corpuses/annotations/create` (60/hr per user)
-- [ ] Per-user limiter on `/api/corpuses/:id/documents/upload` (10/hr per user)
-- [ ] Per-user limiter on `/api/corpuses/versions/create` (10/hr per user)
-- [ ] Per-user limiter on `/api/pages/:slug/comments` (10/hr per user)
-- [ ] Per-user limiter on `/api/messages/threads` (20/hr per user starts, 120/hr per user replies)
-- [ ] Per-user limiter on `/api/votes/web-links/add` (30/hr per user)
-- [ ] Per-user limiter on `/api/concepts/root` (10/hr per user) and `/api/concepts/child` (100/hr per user)
-- [ ] Global app-wide safety net: 500 req / 15 min / IP in `server.js`
+- [x] Shared `backend/src/utils/userRateLimiter.js` factory (per-user hourly, keyed on `req.user.userId`)
+- [x] Per-user limiter on `/api/moderation/flag` (20/hr per user)
+- [x] Per-user limiter on `/api/corpuses/annotations/create` (60/hr per user)
+- [x] Per-user limiter on `/api/corpuses/:id/documents/upload` (10/hr per user)
+- [x] Per-user limiter on `/api/corpuses/versions/create` (10/hr per user)
+- [x] Per-user limiter on `/api/pages/:slug/comments` (10/hr per user)
+- [x] Per-user limiter on `/api/messages/threads/create` (20/hr per user) and `/api/messages/threads/:threadId/reply` (120/hr per user)
+- [x] Per-user limiter on `/api/votes/web-links/add` (30/hr per user)
+- [x] Per-user limiter on `/api/concepts/root` (10/hr per user) and `/api/concepts/child` (100/hr per user)
+- [x] Global app-wide safety net: 500 req / 15 min / IP on `/api` in `server.js`
 
-### Phase 44c — Polish (post-launch acceptable)
+### Phase 49c — Polish (post-launch acceptable)
 
 - [ ] Frontend 429 handling: parse `RateLimit-Reset`, disable button, show countdown (start with `LoginModal.jsx`)
 - [ ] Per-account login lockout: 5 failed attempts on same identifier → 15 min lock (mitigates credential stuffing)
-- [ ] Move all remaining limiters to persistent Postgres store
+- [ ] Move the two IP-keyed auth limiters (`loginLimiter`, `verifyCodeLimiter`) to the Postgres store for deploy-survivability
 - [ ] CAPTCHA decision (hCaptcha free tier in front of `sendCode`)
 
 ---
@@ -85,7 +88,7 @@ Delete this file from the repo after launch.
 ## ⚠️ Security & Abuse Prevention
 
 - [ ] Admin unhide queue tested in production; workflow documented for self
-- [ ] Decide on CAPTCHA for registration (now tracked in Phase 44c above)
+- [ ] Decide on CAPTCHA for registration (now tracked in Phase 49c above)
 
 ---
 
@@ -139,17 +142,14 @@ Delete this file from the repo after launch.
 ## Recommended next-session order (no spending required)
 
 1. **Twilio account-level protection** (triggers + prepaid mode) — do this TODAY, outside code
-2. **Phase 44a — rate limiting foundation** (trust proxy, per-phone limiter, daily cap, persistent store) — fresh Claude Code session
-3. **Phase 44b — write-endpoint limiters + global safety net**
-4. **CONTRIBUTING.md + CODE_OF_CONDUCT.md + issue templates** — batch in one session
-5. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes
-6. **Favicon + SEO meta tags**
-7. **404 page**
-8. **Delete duplicate `seed-test-data.js`** (30 seconds)
-9. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
-10. **Verify `LICENSE` file** on GitHub (30 seconds)
-11. **Phase 44c — rate limiting polish** (post-launch OK)
+2. **CONTRIBUTING.md + CODE_OF_CONDUCT.md + issue templates** — batch in one session
+3. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes
+4. **Favicon + SEO meta tags**
+5. **404 page**
+6. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
+7. **Verify `LICENSE` file** on GitHub (30 seconds)
+8. **Phase 49c — rate limiting polish** (post-launch OK)
 
 ---
 
-**Last updated:** April 11, 2026 (rate limit audit findings added)
+**Last updated:** April 11, 2026 (Phase 49a/b rate limiting complete)
