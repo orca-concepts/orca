@@ -13,9 +13,16 @@ Delete this file from the repo after launch.
 - [x] **`pg_trgm` migration fix** — `CREATE EXTENSION` and concept-name indexes now in `migrate.js`. Manual deploy step removed; ORCA_STATUS.md Known Issue #5 updated.
 - [x] **Verified test data cleanup is a non-issue** — no seed scripts run on deploy.
 - [x] **Verified phone storage architecture** — raw phones never stored; `phone_hash` (bcrypt, legacy) + `phone_lookup` (HMAC-SHA256, current).
-- [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings implemented as Phase 49 (49a foundation, 49b write-endpoint limiters + global safety net). See ORCA_STATUS.md for details.
-- [x] **Phase 49a — Rate limit foundation** — `trust proxy` configured, per-phone + global daily SMS limiters (Postgres-backed store), `sendCodeLimiter` retired.
-- [x] **Phase 49b — Write-endpoint limiters + global safety net** — per-user hourly limiters on 10 write endpoints (flag, annotations, document/version upload, page comments, messages, web links, root/child concepts), plus global 500 req / 15 min / IP limiter on `/api`.
+- [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings broken into Phases 49a/49b/49c below.
+- [x] **Twilio account-level protection** — usage triggers configured ($10 warning, $20 hard-cap warning). Prepaid mode setup deferred.
+- [x] **Phase 49 — Rate limiting (foundation + write-endpoint limiters + global safety net)** complete. Trust proxy configured, per-phone SMS limiter + global daily SMS cap on Postgres-backed store, all write-endpoint limiters in place, global 500 req/15min/IP safety net active. Old broken IP-based limiters in `auth.js` ripped out.
+- [x] **CONTRIBUTING.md** added.
+- [x] **CODE_OF_CONDUCT.md** added (Contributor Covenant v2.1; contact email needs update once domain email is live).
+- [x] **GitHub issue templates** added (`bug_report.md`, `feature_request.md`).
+- [x] **LICENSE file verified** — full AGPL v3 text present at repo root.
+- [x] **Gitleaks secrets audit** — 76 commits scanned, no leaks found.
+- [x] **Deleted duplicate `backend/seed-test-data.js`** at repo root.
+- [x] **Favicon + SEO meta tags** — favicon.svg + PNG fallbacks (16/32/180/192/512), 1200×630 og-image.png, site.webmanifest, all in `frontend/public/`. `<title>`, `<meta description>`, Open Graph, and Twitter Card tags wired into `frontend/index.html`. EB Garamond used for OG image and PNG icons. Verify OG preview post-launch via cards-dev.twitter.com/validator.
 
 ---
 
@@ -41,46 +48,44 @@ Delete this file from the repo after launch.
 - [ ] Error monitoring set up (Sentry free tier)
 - [ ] Uptime monitoring set up (UptimeRobot free tier)
 - [ ] SSL cert verified on orcaconcepts.org
-- [ ] Domain email working (for DMCA / ToS contact)
+- [ ] Domain email working (for DMCA / ToS contact) — also update CODE_OF_CONDUCT.md contact email once live
+- [ ] **Investigate EB Garamond rendering** — coding convention says EB Garamond on all interactive elements, but live app is currently rendering in default sans-serif. Discovered April 11 during favicon work. Likely a missing `<link>` to Google Fonts in `index.html` or a broken local font import. Not a launch blocker but inconsistent with stated brand.
 
 ---
 
-## 🔒 Rate Limiting (from RATE_LIMIT_AUDIT.md)
+## 🔒 Rate Limiting
 
-**Status:** Phases 49a and 49b are complete (committed). Phase 49c (polish) is post-launch acceptable.
+**Phase 49a + 49b complete.** Phase 49d added April 11 as a hard blocker; Phase 49c (polish) remains and is acceptable post-launch.
 
-### Twilio account-level protection (do FIRST, outside code)
+### Twilio account-level protection
 
-- [ ] **Twilio Usage Trigger: warning at $10/month** (`Orca SMS warning - $10`, recurring monthly)
-- [ ] **Twilio Usage Trigger: hard-cap warning at $20/month** (`Orca SMS hard cap - $20`, recurring monthly)
-- [ ] **Twilio auto-recharge OFF** + balance kept low (~$25). This is the only true hard stop — triggers are notifications only, not enforcement.
+- [x] **Twilio Usage Trigger: warning at $10/month**
+- [x] **Twilio Usage Trigger: hard-cap warning at $20/month**
+- [ ] **Twilio auto-recharge OFF** + balance kept low (~$25). The only true hard stop — triggers are notifications only.
 - [ ] Document in ORCA_STATUS.md that Twilio is in prepaid mode with auto-recharge off
 
-### Phase 49a — Foundation ✅ COMPLETE
+### 🔒 Phase 49d — Global safety net is too aggressive (LAUNCH BLOCKER)
 
-- [x] Configure `app.set('trust proxy', 2)` in `server.js` (Cloudflare → Railway = 2 hops)
-- [x] Add per-phone-number limiter on `sendCode` keyed on `phone_lookup` HMAC: 2 SMS/hour, 5 SMS/24hr per phone
-- [x] Add global daily SMS cap: 200 SMS/24hr total across both send-code endpoints; returns 503 + loud log on breach
-- [x] Move `sendCode` limiter to Postgres-backed store via `backend/src/utils/pgRateLimitStore.js` — counters survive deploys. Old IP-keyed `sendCodeLimiter` retired.
+**Discovered April 11, 2026** during the favicon work session. The global 500 req/15min/IP safety net locks legitimate users out of read endpoints during normal browsing. Confirmed the limiter is currently **in-memory**, not on the Postgres store, because `taskkill /f /im node.exe` cleared the lockout instantly.
 
-### Phase 49b — Write-endpoint limiters ✅ COMPLETE
+**Why it triggers on normal usage:**
+- React StrictMode in dev double-invokes effects, doubling every API call
+- A normal session of opening Orca, navigating a few graphs, and using search easily makes 50–100 API calls
+- A university lab behind a NAT'd IP would trip it almost instantly with multiple users
+- Self-inflicted lockout during dev/debug is trivially easy
 
-- [x] Shared `backend/src/utils/userRateLimiter.js` factory (per-user hourly, keyed on `req.user.userId`)
-- [x] Per-user limiter on `/api/moderation/flag` (20/hr per user)
-- [x] Per-user limiter on `/api/corpuses/annotations/create` (60/hr per user)
-- [x] Per-user limiter on `/api/corpuses/:id/documents/upload` (10/hr per user)
-- [x] Per-user limiter on `/api/corpuses/versions/create` (10/hr per user)
-- [x] Per-user limiter on `/api/pages/:slug/comments` (10/hr per user)
-- [x] Per-user limiter on `/api/messages/threads/create` (20/hr per user) and `/api/messages/threads/:threadId/reply` (120/hr per user)
-- [x] Per-user limiter on `/api/votes/web-links/add` (30/hr per user)
-- [x] Per-user limiter on `/api/concepts/root` (10/hr per user) and `/api/concepts/child` (100/hr per user)
-- [x] Global app-wide safety net: 500 req / 15 min / IP on `/api` in `server.js`
+**Required fixes:**
+- [ ] Raise the global per-IP limit substantially (proposed: 2000/15min, or 10,000/hour with a wider window)
+- [ ] Exempt GET requests to read-only concept/annotation endpoints from the global limiter, OR give them their own much higher bucket separate from write endpoints
+- [ ] Move the global safety net to the Postgres-backed store so a backend restart doesn't silently reset abuse counters in production
+- [ ] Test by hard-refreshing the dev app repeatedly with StrictMode on and confirming you don't lock yourself out
+- [ ] Frontend: when a 429 is received on a read endpoint, show a clearer message than "no concepts" (this overlaps with Phase 49c frontend handling)
 
 ### Phase 49c — Polish (post-launch acceptable)
 
 - [ ] Frontend 429 handling: parse `RateLimit-Reset`, disable button, show countdown (start with `LoginModal.jsx`)
 - [ ] Per-account login lockout: 5 failed attempts on same identifier → 15 min lock (mitigates credential stuffing)
-- [ ] Move the two IP-keyed auth limiters (`loginLimiter`, `verifyCodeLimiter`) to the Postgres store for deploy-survivability
+- [ ] Move all remaining limiters to persistent Postgres store
 - [ ] CAPTCHA decision (hCaptcha free tier in front of `sendCode`)
 
 ---
@@ -101,7 +106,7 @@ Delete this file from the repo after launch.
 - [ ] All four attributes render correctly: `[value]`, `[action]`, `[tool]`, `[question]`
 - [ ] Email deliverability resolved (SMTP wired up, or document manual-only decision)
 - [ ] Browser compatibility spot check (Chrome, Firefox, Safari, mobile Safari, mobile Chrome)
-- [ ] Favicon + SEO meta tags (`<title>`, `<meta description>`, OG tags for Bluesky link previews)
+- [x] Favicon + SEO meta tags (`<title>`, `<meta description>`, OG tags for Bluesky link previews)
 - [ ] 404 page exists and looks reasonable
 - [ ] Decide on admin profile presentation (personal account vs generic "Orca Admin")
 
@@ -109,12 +114,13 @@ Delete this file from the repo after launch.
 
 ## ⚠️ Repository & Open Source Housekeeping
 
-- [ ] `LICENSE` file with full AGPL v3 text — verify GitHub auto-generated it
-- [ ] `CONTRIBUTING.md` (one paragraph: open issue before PR). README already links it as forward reference.
-- [ ] `CODE_OF_CONDUCT.md` (Contributor Covenant via GitHub one-click template)
-- [ ] GitHub issue templates (bug report, feature request)
-- [ ] Secrets audit on public repo (`gitleaks` once)
-- [ ] Delete duplicate `backend/seed-test-data.js` (root copy of `backend/src/config/` version)
+- [x] `LICENSE` file with full AGPL v3 text — verified
+- [x] `CONTRIBUTING.md`
+- [x] `CODE_OF_CONDUCT.md` (Contributor Covenant)
+- [x] GitHub issue templates (bug report, feature request)
+- [x] Secrets audit on public repo (`gitleaks` once) — clean
+- [x] Delete duplicate `backend/seed-test-data.js`
+- [ ] **Flip repo from private back to public** (do once Murphy Desmond gives legal greenlight; repo currently private pending ToS/Privacy Policy)
 
 ---
 
@@ -141,15 +147,14 @@ Delete this file from the repo after launch.
 
 ## Recommended next-session order (no spending required)
 
-1. **Twilio account-level protection** (triggers + prepaid mode) — do this TODAY, outside code
-2. **CONTRIBUTING.md + CODE_OF_CONDUCT.md + issue templates** — batch in one session
-3. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes
-4. **Favicon + SEO meta tags**
-5. **404 page**
+1. **Phase 49d — global rate limiter fix** (now a hard blocker; small code change but critical)
+2. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes (after lawyers; structured test script)
+3. **404 page**
+4. **EB Garamond investigation** — find why the brand font isn't rendering live
+5. **Twilio prepaid mode** (auto-recharge off + low balance) — outside code, ~5 min in Twilio console
 6. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
-7. **Verify `LICENSE` file** on GitHub (30 seconds)
-8. **Phase 49c — rate limiting polish** (post-launch OK)
+7. **Phase 49c — rate limiting polish** (post-launch OK)
 
 ---
 
-**Last updated:** April 11, 2026 (Phase 49a/b rate limiting complete)
+**Last updated:** April 11, 2026 (favicon + SEO complete; Phase 49d added as launch blocker after self-inflicted rate limit lockout exposed it; EB Garamond rendering issue noted)
