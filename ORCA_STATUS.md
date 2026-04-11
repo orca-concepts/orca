@@ -1975,7 +1975,10 @@ WHERE c.id NOT IN (SELECT DISTINCT child_id FROM edges);
 ```
 New root concepts created after this feature automatically get root edges.
 
-### 5. pg_trgm Extension Required for Search
+### 5. pg_trgm Extension Required for Search — ✅ RESOLVED
+**Previously:** The Combined Add/Search field uses PostgreSQL's `pg_trgm` extension for fuzzy matching. If the extension was not enabled (and the supporting indexes not created), search queries failed with a database error, and operators had to run `CREATE EXTENSION IF NOT EXISTS pg_trgm` plus the concept-name indexes manually.
+
+**Resolution:** `backend/src/config/migrate.js` now runs `CREATE EXTENSION IF NOT EXISTS pg_trgm` at the top of the migration, and creates `idx_concepts_name_trgm` and `idx_concepts_name_lower` immediately after the `concepts` table. All three statements use `IF NOT EXISTS` so the migration is idempotent. `npm run migrate` against a fresh database now sets up everything search needs, with no manual SQL required. The Railway Postgres role must have permission to create extensions (standard on Railway Postgres).
 
 ### 6. Vite Restart Required After Adding New Files
 **Issue:** When a brand new `.jsx` file is added to the project (e.g., `Saved.jsx`), Vite's hot module replacement may not pick it up. Navigating to the new route redirects to `/` instead.
@@ -1986,15 +1989,6 @@ cd frontend
 npm run dev
 ```
 This only needs to be done once per new file. Edits to existing files are picked up automatically.
-**Issue:** The Combined Add/Search field uses PostgreSQL's `pg_trgm` extension for fuzzy matching. If this extension is not enabled, search queries will fail with a database error.
-
-**Solution:** Run this SQL once against your database (requires superuser privileges):
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX IF NOT EXISTS idx_concepts_name_trgm ON concepts USING GIN (name gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_concepts_name_lower ON concepts (LOWER(name));
-```
-This only needs to be done once per database. If you drop and recreate the database, you'll need to run it again.
 
 ### 7. Edge Browser Mini Menu Blocks Annotation Text Selection
 **Issue:** Microsoft Edge's built-in "mini menu" (Ask Copilot, Copy, Search) pops up whenever text is selected, overlapping Orca's annotation toolbar. This makes it difficult to click the "Annotate" button after selecting text. Chrome does not have this issue.

@@ -8,6 +8,13 @@ const createTables = async () => {
   try {
     await client.query('BEGIN');
 
+    // Enable pg_trgm extension for fuzzy text search (concept name search
+    // in conceptsController.searchConcepts and document duplicate detection
+    // in corpusController.checkDuplicates). Must run before any index that
+    // uses gin_trgm_ops — idx_concepts_name_trgm below and
+    // idx_documents_body_trgm further down.
+    await client.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm;`);
+
     // Users table
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -27,6 +34,18 @@ const createTables = async () => {
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Trigram and lowercase indexes on concepts.name — used by
+    // conceptsController.searchConcepts for fuzzy and exact-prefix matching.
+    // Requires the pg_trgm extension enabled above.
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_concepts_name_trgm
+        ON concepts USING GIN (name gin_trgm_ops);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_concepts_name_lower
+        ON concepts (LOWER(name));
     `);
 
     // Attributes table - stores reusable attribute tags (action, tool, value)
