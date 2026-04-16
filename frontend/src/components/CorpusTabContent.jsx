@@ -89,6 +89,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   // { loading, error, items }. Cleared when the document changes.
   const [citedByMap, setCitedByMap] = useState({});
 
+  // Collapsible section state for the doc-viewer right panel.
+  // Both sections default open so existing behavior is unchanged.
+  const [annotationsCollapsed, setAnnotationsCollapsed] = useState(false);
+  const [citedCollapsed, setCitedCollapsed] = useState(false);
+
   const bodyRef = useRef(null);
   const highlightMarkRef = useRef(null);
 
@@ -1995,8 +2000,19 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
 
           {/* Annotation sidebar — always visible */}
           <div style={styles.annotationSidebar}>
+            {/* Annotations section — gets its own scroll container so the
+                Cited Annotations section stays visible without scrolling. */}
+            <div style={{
+              ...styles.annotationsSection,
+              ...(annotationsCollapsed ? styles.annotationsSectionCollapsed : {}),
+            }}>
             <div style={styles.annotationSidebarHeader}>
-              <span style={styles.annotationSidebarTitle}>
+              <span
+                style={{ ...styles.annotationSidebarTitle, ...styles.collapsibleSectionTitle }}
+                onClick={() => setAnnotationsCollapsed(prev => !prev)}
+                title={annotationsCollapsed ? 'Expand' : 'Collapse'}
+              >
+                {annotationsCollapsed ? '▸' : '▾'}{' '}
                 Annotations{annotations.length > 0
                   ? attributeFilter !== 'all'
                     ? ` (${annotations.filter(a => a.attribute_name === attributeFilter).length}/${annotations.length})`
@@ -2018,6 +2034,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               )}
             </div>
 
+            {!annotationsCollapsed && (
+            <div style={styles.annotationsScroll}>
             {(() => {
               const source = annotationsWithPositions || annotations;
               const filteredAnnotations = attributeFilter === 'all'
@@ -2470,12 +2488,27 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
               </div>
             );
             })()}
+            </div>
+            )}
+            </div>{/* /annotationsSection */}
 
-            {/* Phase 38j: Cited Annotations section */}
+            {/* Phase 38j: Cited Annotations section (Phase 50b polish: collapsible.
+                The wrapper itself is the scroll container — capped at 40% of the
+                sidebar so a long citation list won't crowd out the annotations
+                above. Header scrolls with content (the section is short by design). */}
             {citations.length > 0 && (
-              <div style={styles.citedSection}>
-                <div style={styles.citedSectionHeader}>Cited Annotations</div>
-                {citations.map(cit => (
+              <div style={{
+                ...styles.citedSectionWrapper,
+                ...(citedCollapsed ? styles.citedSectionWrapperCollapsed : {}),
+              }}>
+                <div
+                  style={{ ...styles.citedSectionHeader, ...styles.collapsibleSectionTitle }}
+                  onClick={() => setCitedCollapsed(prev => !prev)}
+                  title={citedCollapsed ? 'Expand' : 'Collapse'}
+                >
+                  {citedCollapsed ? '▸' : '▾'} Cited Annotations ({citations.length})
+                </div>
+                {!citedCollapsed && citations.map(cit => (
                   <div key={cit.id} style={styles.citedCard}>
                     <div style={styles.citedCardHeader}>
                       <span style={styles.citedConceptName}>{cit.conceptName || 'Unknown concept'}</span>
@@ -3803,10 +3836,31 @@ const styles = {
     borderRadius: '6px',
     position: 'sticky',
     top: '20px',
-    maxHeight: '80vh',
-    overflowY: 'auto',
+    // Phase 50b polish: explicit height (not maxHeight) so the inner flex
+    // sections have a determinate space to divide. Without this, flex: 1 1 0
+    // children collapse to zero because the sticky parent shrink-wraps to
+    // content. Trade-off: short sidebars now show some trailing empty space.
+    height: '80vh',
+    overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
+  },
+  // Phase 50b polish: Annotations section. Takes available space when expanded
+  // (so its body scrolls), shrinks to header height when collapsed.
+  annotationsSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  annotationsSectionCollapsed: {
+    flex: '0 0 auto',
+  },
+  annotationsScroll: {
+    flex: '1 1 0',
+    minHeight: 0,
+    overflowY: 'auto',
   },
   annotationSidebarHeader: {
     display: 'flex',
@@ -4348,8 +4402,7 @@ const styles = {
     fontSize: '13px',
     fontWeight: 'bold',
     color: '#555',
-    marginBottom: '8px',
-    paddingLeft: '4px',
+    padding: '10px 12px 6px',
   },
   citedCard: {
     padding: '8px 12px',
@@ -4441,6 +4494,27 @@ const styles = {
     fontSize: '12px',
     color: '#999',
     paddingLeft: '4px',
+  },
+  // Shared by collapsible section headers (Annotations, Cited Annotations)
+  collapsibleSectionTitle: {
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  // Phase 50b polish: Cited Annotations gets its own scroll container so
+  // it remains visible alongside Annotations without sharing one big scrollbar.
+  // The wrapper itself scrolls — sized to its content, capped at 40% of the
+  // sidebar so a long citation list won't crowd out the annotations above.
+  // (Avoids nested-flex pitfalls — see "millimeter tall" bug.)
+  citedSectionWrapper: {
+    flex: '0 0 auto',
+    maxHeight: '40%',
+    overflowY: 'auto',
+    borderTop: '1px solid #e0e0e0',
+    paddingBottom: '6px',
+  },
+  citedSectionWrapperCollapsed: {
+    maxHeight: 'none',
+    overflowY: 'visible',
   },
 };
 
