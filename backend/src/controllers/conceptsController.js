@@ -1311,6 +1311,7 @@ const conceptsController = {
                   att.name AS attribute_name,
                   COUNT(av.id)::int AS vote_count,
                   ${userParamIdx ? `BOOL_OR(av.user_id = $${userParamIdx})` : 'false'} AS user_voted,
+                  COALESCE(MAX(dcl.cited_by_count), 0)::int AS cited_by_count,
                   r.root_document_id,
                   ROW_NUMBER() OVER (
                     PARTITION BY r.root_document_id, da.corpus_id, da.created_by, da.edge_id, COALESCE(da.quote_text, '')
@@ -1326,6 +1327,13 @@ const conceptsController = {
            LEFT JOIN attributes att ON att.id = e.attribute_id
            LEFT JOIN annotation_votes av ON av.annotation_id = da.id
            LEFT JOIN document_tags dt ON dt.id = d.tag_id
+           LEFT JOIN (
+             SELECT cited_annotation_id, COUNT(*)::int AS cited_by_count
+             FROM document_citation_links
+             WHERE cited_annotation_id IS NOT NULL
+               AND citing_document_id IS NOT NULL
+             GROUP BY cited_annotation_id
+           ) dcl ON dcl.cited_annotation_id = da.id
            WHERE e.child_id = $1
              AND e.is_hidden = false
              ${extraFilters}
@@ -1341,7 +1349,7 @@ const conceptsController = {
                document_id, document_title, tag_id, tag_name,
                corpus_id, corpus_name, edge_id, parent_id, graph_path,
                attribute_id, parent_name, attribute_name,
-               vote_count, user_voted
+               vote_count, user_voted, cited_by_count
                ${subscribedOuterCol}
         FROM all_anns aa WHERE rn = 1
         ${orderClause}`,
@@ -1387,6 +1395,7 @@ const conceptsController = {
           corpusName: row.corpus_name,
           voteCount: row.vote_count,
           userVoted: row.user_voted || false,
+          citedByCount: row.cited_by_count || 0,
           ...(row.subscribed_vote_count !== undefined ? { subscribedVoteCount: row.subscribed_vote_count } : {}),
           context: {
             edgeId: row.edge_id,

@@ -681,6 +681,12 @@ const ComboTabContent = ({ comboId, user, isGuest, onUnsubscribe, onNavigateToDo
                   <span style={styles.corpusVoteCount}>
                     {Number(a.annotation_vote_count) || 0} corpus vote{Number(a.annotation_vote_count) != 1 ? 's' : ''}
                   </span>
+                  {/* Phase 50b: Reverse citation count (read-only) */}
+                  {Number(a.cited_by_count) > 0 && (
+                    <span style={styles.corpusVoteCount}>
+                      Cited by {Number(a.cited_by_count)}
+                    </span>
+                  )}
                 </div>
                 <span style={styles.meta}>
                   by {a.creator_username || '[deleted user]'}<OrcidBadge orcidId={a.creator_orcid_id} /> {'\u00B7'} {relativeTime(a.created_at)}

@@ -368,7 +368,12 @@ const ConceptAnnotationPanel = ({
                 <div style={styles.commentBlock}>{a.comment}</div>
               )}
               <div style={styles.bottomRow}>
-                <span style={styles.voteCount}>&uarr; {a.voteCount}</span>
+                <span style={styles.voteCount}>
+                  &uarr; {a.voteCount}
+                  {a.citedByCount > 0 && (
+                    <span style={styles.citedByInline}> &middot; Cited by {a.citedByCount}</span>
+                  )}
+                </span>
                 <span style={styles.meta}>
                   {a.creatorUsername}<OrcidBadge orcidId={a.creatorOrcidId} /> &middot; {relativeTime(a.createdAt)}
                 </span>
@@ -970,6 +975,11 @@ const styles = {
     marginTop: '6px',
   },
   voteCount: {
+    fontSize: '12px',
+    color: '#888',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  citedByInline: {
     fontSize: '12px',
     color: '#888',
     fontFamily: '"EB Garamond", Georgia, serif',

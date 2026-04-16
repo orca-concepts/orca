@@ -15,6 +15,7 @@ const citationRoutes = require('./routes/citations');
 const comboRoutes = require('./routes/combos');
 const tunnelRoutes = require('./routes/tunnels');
 const userRoutes = require('./routes/users');
+const annotationRoutes = require('./routes/annotations');
 
 const pool = require('./config/database');
 
@@ -128,6 +129,7 @@ app.use('/api/citations', citationRoutes);
 app.use('/api/combos', comboRoutes);
 app.use('/api/tunnels', tunnelRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/annotations', annotationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

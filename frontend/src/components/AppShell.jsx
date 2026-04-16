@@ -689,6 +689,18 @@ const AppShell = () => {
       handleRequestLogin();
       return;
     }
+    // Short-circuit: if we already have a tab for this corpus, the user is
+    // already subscribed. Skip the API call (which would 409) and just navigate.
+    // This keeps the browser console clean during normal annotation/citation
+    // click-through where the user typically already subscribes to corpuses
+    // they're exploring.
+    const alreadySubscribed = corpusTabs.some(t => t.id === corpusId);
+    if (alreadySubscribed) {
+      if (documentId) setPendingCorpusDocumentId(documentId);
+      if (annotationId) setPendingAnnotationId(annotationId);
+      setActiveTab({ type: 'corpus', id: corpusId });
+      return;
+    }
     try {
       await corpusAPI.subscribe(corpusId);
       const newTab = {
@@ -704,7 +716,9 @@ const AppShell = () => {
       await refreshSidebarItems();
     } catch (err) {
       if (err.response?.status === 409) {
-        // Already subscribed — ensure the tab is in local state and switch to it
+        // Backstop: the local corpusTabs check above missed (race condition
+        // between two pending subscribe calls, or stale local state). Recover
+        // gracefully — same handling as the success path.
         setCorpusTabs(prev => {
           if (prev.some(t => t.id === corpusId)) return prev;
           return [...prev, { id: corpusId, corpus_id: corpusId, name: corpusName, group_id: null }];
@@ -719,7 +733,7 @@ const AppShell = () => {
         alert(err.response?.data?.error || 'Failed to subscribe');
       }
     }
-  }, [isGuest, handleRequestLogin]);
+  }, [isGuest, handleRequestLogin, corpusTabs]);
 
   // Phase 38h: Navigate to a corpus tab doc viewer with annotation creation pre-filled
   const handleAnnotateFromGraph = useCallback(async (corpusId, documentId, annotationInfo) => {
@@ -727,27 +741,31 @@ const AppShell = () => {
       handleRequestLogin();
       return;
     }
-    // Subscribe if needed (handles 409 for already-subscribed)
-    try {
-      await corpusAPI.subscribe(corpusId);
-      setCorpusTabs(prev => {
-        if (prev.some(t => t.id === corpusId)) return prev;
-        return [...prev, { id: corpusId, corpus_id: corpusId, name: '', group_id: null }];
-      });
-      await refreshSidebarItems();
-    } catch (err) {
-      if (err.response?.status === 409) {
-        // Already subscribed — ensure tab exists
+    // Short-circuit when we already have a tab for this corpus — same console-cleanup
+    // rationale as handleSubscribeToCorpus.
+    const alreadySubscribed = corpusTabs.some(t => t.id === corpusId);
+    if (!alreadySubscribed) {
+      try {
+        await corpusAPI.subscribe(corpusId);
         setCorpusTabs(prev => {
           if (prev.some(t => t.id === corpusId)) return prev;
           return [...prev, { id: corpusId, corpus_id: corpusId, name: '', group_id: null }];
         });
-      } else if (err.response?.status === 401) {
-        handleRequestLogin();
-        return;
-      } else {
-        alert(err.response?.data?.error || 'Failed to subscribe');
-        return;
+        await refreshSidebarItems();
+      } catch (err) {
+        if (err.response?.status === 409) {
+          // Race-condition backstop (local state was stale).
+          setCorpusTabs(prev => {
+            if (prev.some(t => t.id === corpusId)) return prev;
+            return [...prev, { id: corpusId, corpus_id: corpusId, name: '', group_id: null }];
+          });
+        } else if (err.response?.status === 401) {
+          handleRequestLogin();
+          return;
+        } else {
+          alert(err.response?.data?.error || 'Failed to subscribe');
+          return;
+        }
       }
     }
     // Set pending states and switch to corpus tab
@@ -758,7 +776,7 @@ const AppShell = () => {
     setCorpusView(null);
     setComboView(null);
     setMessagesPageOpen(false);
-  }, [isGuest, handleRequestLogin]);
+  }, [isGuest, handleRequestLogin, corpusTabs]);
 
   const handleUnsubscribeFromCorpus = useCallback(async (corpusId) => {
     try {

@@ -1394,7 +1394,7 @@ const createAnnotation = async (req, res) => {
 
       await client.query('COMMIT');
 
-      res.status(201).json({ annotation: { ...result.rows[0], vote_count: 1, user_voted: true } });
+      res.status(201).json({ annotation: { ...result.rows[0], vote_count: 1, user_voted: true, cited_by_count: 0 } });
     } catch (txError) {
       await client.query('ROLLBACK');
       throw txError;
@@ -1527,7 +1527,8 @@ const getDocumentAnnotations = async (req, res) => {
               a.name AS attribute_name,
               c_parent.name AS parent_name,
               (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count,
-              EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $3) AS user_voted
+              EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $3) AS user_voted,
+              COALESCE(dcl.cited_by_count, 0) AS cited_by_count
               ${subscribedCol}
               ${badgeColumns}
        FROM document_annotations da
@@ -1536,6 +1537,13 @@ const getDocumentAnnotations = async (req, res) => {
        JOIN concepts c_child ON c_child.id = e.child_id
        JOIN attributes a ON a.id = e.attribute_id
        LEFT JOIN concepts c_parent ON c_parent.id = e.parent_id
+       LEFT JOIN (
+         SELECT cited_annotation_id, COUNT(*)::int AS cited_by_count
+         FROM document_citation_links
+         WHERE cited_annotation_id IS NOT NULL
+           AND citing_document_id IS NOT NULL
+         GROUP BY cited_annotation_id
+       ) dcl ON dcl.cited_annotation_id = da.id
        WHERE da.corpus_id = $1 AND da.document_id = $2
        ${filterClause}
        ${orderClause}`,
@@ -1598,7 +1606,8 @@ const getAllDocumentAnnotations = async (req, res) => {
               c.annotation_mode AS corpus_annotation_mode,
               c_owner.username AS corpus_owner_username,
               (SELECT COUNT(*) FROM corpus_subscriptions cs WHERE cs.corpus_id = c.id) AS corpus_subscriber_count,
-              (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count
+              (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count,
+              COALESCE(dcl.cited_by_count, 0) AS cited_by_count
        FROM document_annotations da
        JOIN users u ON u.id = da.created_by
        JOIN edges e ON e.id = da.edge_id
@@ -1607,6 +1616,13 @@ const getAllDocumentAnnotations = async (req, res) => {
        LEFT JOIN concepts c_parent ON c_parent.id = e.parent_id
        JOIN corpuses c ON c.id = da.corpus_id
        JOIN users c_owner ON c_owner.id = c.created_by
+       LEFT JOIN (
+         SELECT cited_annotation_id, COUNT(*)::int AS cited_by_count
+         FROM document_citation_links
+         WHERE cited_annotation_id IS NOT NULL
+           AND citing_document_id IS NOT NULL
+         GROUP BY cited_annotation_id
+       ) dcl ON dcl.cited_annotation_id = da.id
        WHERE da.document_id = $1
        ORDER BY da.created_at ASC, c.name ASC`,
       [documentId]
@@ -1622,8 +1638,15 @@ const getAllDocumentAnnotations = async (req, res) => {
       const mergeKey = `${row.quote_text || ''}-${row.edge_id}`;
 
       if (mergeKeyMap[mergeKey] !== undefined) {
-        // Duplicate — add this corpus to the existing annotation's corpus list
+        // Duplicate — add this corpus to the existing annotation's corpus list.
+        // cited_by_count is keyed per annotation row (da.id), so duplicates in
+        // different corpuses have independent counts. Take the max so a merged
+        // entry reflects the most-cited member.
         mergedAnnotations[mergeKeyMap[mergeKey]].vote_count += parseInt(row.vote_count);
+        mergedAnnotations[mergeKeyMap[mergeKey]].cited_by_count = Math.max(
+          mergedAnnotations[mergeKeyMap[mergeKey]].cited_by_count,
+          parseInt(row.cited_by_count) || 0
+        );
         mergedAnnotations[mergeKeyMap[mergeKey]].corpuses.push({
           corpusId: row.corpus_id,
           corpusName: row.corpus_name,
@@ -1646,6 +1669,7 @@ const getAllDocumentAnnotations = async (req, res) => {
           comment: row.comment,
           quote_occurrence: row.quote_occurrence,
           vote_count: parseInt(row.vote_count),
+          cited_by_count: parseInt(row.cited_by_count) || 0,
           parent_id: row.parent_id,
           child_id: row.child_id,
           graph_path: row.graph_path,
@@ -1715,6 +1739,7 @@ const getAnnotationsForEdge = async (req, res) => {
                c.id AS c_id, c.name AS corpus_name, c.annotation_mode,
                c_owner.username AS corpus_owner_username,
                (SELECT COUNT(*) FROM corpus_subscriptions cs WHERE cs.corpus_id = c.id) AS corpus_subscriber_count,
+               COALESCE(dcl.cited_by_count, 0) AS cited_by_count,
                r.root_document_id,
                ROW_NUMBER() OVER (
                  PARTITION BY r.root_document_id, da.corpus_id, da.created_by, COALESCE(da.quote_text, '')
@@ -1726,6 +1751,13 @@ const getAnnotationsForEdge = async (req, res) => {
         JOIN corpuses c ON c.id = da.corpus_id
         JOIN users c_owner ON c_owner.id = c.created_by
         JOIN roots r ON r.doc_id = da.document_id
+        LEFT JOIN (
+          SELECT cited_annotation_id, COUNT(*)::int AS cited_by_count
+          FROM document_citation_links
+          WHERE cited_annotation_id IS NOT NULL
+            AND citing_document_id IS NOT NULL
+          GROUP BY cited_annotation_id
+        ) dcl ON dcl.cited_annotation_id = da.id
         WHERE da.edge_id = $1
       )
       SELECT id, corpus_id, document_id, edge_id,
@@ -1734,7 +1766,8 @@ const getAnnotationsForEdge = async (req, res) => {
              creator_username,
              document_title, document_format, document_version_number, document_uploaded_by,
              c_id AS corpus_id, corpus_name, annotation_mode,
-             corpus_owner_username, corpus_subscriber_count
+             corpus_owner_username, corpus_subscriber_count,
+             cited_by_count
       FROM ranked WHERE rn = 1
       ORDER BY corpus_name ASC, document_title ASC, created_at ASC`,
       [edgeId]
@@ -1772,7 +1805,8 @@ const getAnnotationsForEdge = async (req, res) => {
         comment: row.comment,
         quoteOccurrence: row.quote_occurrence,
         creatorUsername: row.creator_username,
-        createdAt: row.created_at
+        createdAt: row.created_at,
+        citedByCount: parseInt(row.cited_by_count) || 0
       });
     }
 
@@ -3326,12 +3360,20 @@ const getAnnotationsForConceptOnDocument = async (req, res) => {
               u.username AS created_by_username,
               u.orcid_id AS created_by_orcid_id,
               (SELECT COUNT(*) FROM annotation_votes av WHERE av.annotation_id = da.id) AS vote_count,
-              EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $4) AS user_voted
+              EXISTS(SELECT 1 FROM annotation_votes av WHERE av.annotation_id = da.id AND av.user_id = $4) AS user_voted,
+              COALESCE(dcl.cited_by_count, 0) AS cited_by_count
        FROM document_annotations da
        JOIN edges e ON da.edge_id = e.id
        JOIN attributes a ON e.attribute_id = a.id
        LEFT JOIN concepts c_parent ON e.parent_id = c_parent.id
        LEFT JOIN users u ON da.created_by = u.id
+       LEFT JOIN (
+         SELECT cited_annotation_id, COUNT(*)::int AS cited_by_count
+         FROM document_citation_links
+         WHERE cited_annotation_id IS NOT NULL
+           AND citing_document_id IS NOT NULL
+         GROUP BY cited_annotation_id
+       ) dcl ON dcl.cited_annotation_id = da.id
        WHERE da.corpus_id = $1
          AND da.document_id = $2
          AND e.child_id = $3
@@ -3510,6 +3552,65 @@ const resolveCitation = async (req, res) => {
   } catch (error) {
     console.error('Error resolving citation:', error);
     res.status(500).json({ error: 'Failed to resolve citation' });
+  }
+};
+
+// Phase 50a: Reverse citations — list documents citing this annotation.
+// Only returns rows where citing_document_id IS NOT NULL (cascade-deleted
+// citing docs are hidden entirely — design decision: dead links are hidden,
+// not shown as snapshots on the reverse side).
+// A citing document may belong to multiple corpuses; we pick one
+// deterministically (lowest corpus id) to provide navigation context.
+const getAnnotationCitedBy = async (req, res) => {
+  try {
+    const annotationId = parseInt(req.params.id);
+    if (isNaN(annotationId)) {
+      return res.status(400).json({ error: 'Invalid annotation ID' });
+    }
+
+    const result = await pool.query(`
+      SELECT
+        dcl.id AS link_id,
+        dcl.created_at,
+        d.id AS citing_document_id,
+        d.title AS citing_document_title,
+        d.uploaded_by,
+        u.username AS uploaded_by_username,
+        u.orcid_id AS uploaded_by_orcid,
+        ctx.corpus_id AS citing_corpus_id,
+        ctx.corpus_name AS citing_corpus_name
+      FROM document_citation_links dcl
+      JOIN documents d ON d.id = dcl.citing_document_id
+      LEFT JOIN users u ON u.id = d.uploaded_by
+      LEFT JOIN LATERAL (
+        SELECT cd.corpus_id, c.name AS corpus_name
+        FROM corpus_documents cd
+        JOIN corpuses c ON c.id = cd.corpus_id
+        WHERE cd.document_id = d.id
+        ORDER BY cd.corpus_id ASC
+        LIMIT 1
+      ) ctx ON true
+      WHERE dcl.cited_annotation_id = $1
+        AND dcl.citing_document_id IS NOT NULL
+      ORDER BY dcl.created_at DESC
+    `, [annotationId]);
+
+    const citedBy = result.rows.map(row => ({
+      linkId: row.link_id,
+      citingDocumentId: row.citing_document_id,
+      citingDocumentTitle: row.citing_document_title,
+      citingCorpusId: row.citing_corpus_id,
+      citingCorpusName: row.citing_corpus_name,
+      uploadedBy: row.uploaded_by,
+      uploadedByUsername: row.uploaded_by_username,
+      uploadedByOrcid: row.uploaded_by_orcid,
+      createdAt: row.created_at,
+    }));
+
+    res.json({ citedBy });
+  } catch (error) {
+    console.error('Error getting reverse citations:', error);
+    res.status(500).json({ error: 'Failed to get cited-by list' });
   }
 };
 
@@ -3729,6 +3830,8 @@ module.exports = {
   // Phase 38j: Citation links
   getDocumentCitations,
   resolveCitation,
+  // Phase 50a: Reverse citations (which documents cite this annotation)
+  getAnnotationCitedBy,
   // Phase 41c: Document external links
   getDocumentExternalLinks,
   addDocumentExternalLink,

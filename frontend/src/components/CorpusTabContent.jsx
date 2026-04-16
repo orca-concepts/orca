@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI, citationsAPI, usersAPI } from '../services/api';
+import { corpusAPI, documentsAPI, conceptsAPI, messagesAPI, citationsAPI, usersAPI, annotationsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import AnnotationPanel from './AnnotationPanel';
 import CorpusDocumentList from './CorpusDocumentList';
@@ -83,6 +83,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
   // Phase 38j: Citation links state
   const [citations, setCitations] = useState([]);
   const [copiedAnnotationId, setCopiedAnnotationId] = useState(null);
+
+  // Phase 50b: Reverse citations (which docs cite a given annotation).
+  // Lazy-loaded per annotation, keyed by ann.id. Each value is an object
+  // { loading, error, items }. Cleared when the document changes.
+  const [citedByMap, setCitedByMap] = useState({});
 
   const bodyRef = useRef(null);
   const highlightMarkRef = useRef(null);
@@ -528,6 +533,8 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
     setConceptLinks([]);
     // Phase 38j: Clear citations
     setCitations([]);
+    // Phase 50b: Clear reverse-citation cache (per-document)
+    setCitedByMap({});
   };
 
   // Phase 7i-5: Load concept links using cached endpoint (for finalized documents)
@@ -943,6 +950,29 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
         .catch(() => {});
     }
   };
+
+  // Phase 50b: Lazy-fetch reverse citations whenever a selected annotation has citations
+  // and we haven't fetched them yet. Driven by useEffect (rather than the click handler)
+  // so React owns the lifecycle — avoids stale-closure / batching issues.
+  useEffect(() => {
+    if (!selectedAnnotation) return;
+    const annId = selectedAnnotation.id;
+    if (parseInt(selectedAnnotation.cited_by_count) <= 0) return;
+    if (citedByMap[annId]) return; // already loading or loaded
+    setCitedByMap(prev => ({ ...prev, [annId]: { loading: true, error: false, items: [] } }));
+    let cancelled = false;
+    annotationsAPI.getCitedBy(annId)
+      .then(res => {
+        if (cancelled) return;
+        const items = res.data?.citedBy || [];
+        setCitedByMap(prev => ({ ...prev, [annId]: { loading: false, error: false, items } }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCitedByMap(prev => ({ ...prev, [annId]: { loading: false, error: true, items: [] } }));
+      });
+    return () => { cancelled = true; };
+  }, [selectedAnnotation]);
 
   // Phase 31c: Create a message thread from an annotation card
   const handleCreateThread = async (annotationId, threadType) => {
@@ -2040,6 +2070,9 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                         {parseInt(ann.vote_count) > 0 && (
                           <span style={styles.annVoteCount}>▲{ann.vote_count}</span>
                         )}
+                        {parseInt(ann.cited_by_count) > 0 && (
+                          <span style={styles.annCitedByCount}>Cited by {ann.cited_by_count}</span>
+                        )}
                       </div>
                       {/* Provenance badges — context-dependent on active filter */}
                       {(ann.addedByAuthor || ann.votedByAuthor || ann.addedByCorpusMember || ann.votedByCorpusMember) && (
@@ -2381,6 +2414,48 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                                     }}
                                     style={styles.msgActionBtn}
                                   >Message annotator</button>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Phase 50b: Reverse citations — documents that cite this annotation */}
+                          {parseInt(ann.cited_by_count) > 0 && (() => {
+                            const cb = citedByMap[ann.id];
+                            return (
+                              <div style={styles.citedBySection}>
+                                <div style={styles.citedBySectionHeader}>
+                                  Cited by {ann.cited_by_count}
+                                </div>
+                                {!cb || cb.loading ? (
+                                  <div style={styles.citedByPlaceholder}>Loading…</div>
+                                ) : cb.error ? (
+                                  <div style={styles.citedByPlaceholder}>Unable to load citing documents.</div>
+                                ) : (
+                                  cb.items.map(item => (
+                                    <div
+                                      key={item.linkId}
+                                      style={styles.citedByCard}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onOpenCorpusTab) {
+                                          onOpenCorpusTab(item.citingCorpusId, item.citingCorpusName, item.citingDocumentId);
+                                        }
+                                      }}
+                                      title="Open citing document"
+                                    >
+                                      <div style={styles.citedByDocTitle}>{item.citingDocumentTitle}</div>
+                                      {item.citingCorpusName && (
+                                        <div style={styles.citedBySource}>
+                                          ({item.citingCorpusName})
+                                        </div>
+                                      )}
+                                      <div style={styles.citedBySource}>
+                                        by {item.uploadedByUsername || '[deleted user]'}
+                                        <OrcidBadge orcidId={item.uploadedByOrcid} />
+                                      </div>
+                                    </div>
+                                  ))
                                 )}
                               </div>
                             );
@@ -3830,6 +3905,11 @@ const styles = {
     color: '#999',
     marginLeft: 'auto',
   },
+  annCitedByCount: {
+    fontSize: '11px',
+    color: '#999',
+    marginLeft: '8px',
+  },
   annQuote: {
     fontSize: '12px',
     color: '#666',
@@ -4324,6 +4404,43 @@ const styles = {
     textDecoration: 'underline',
     cursor: 'pointer',
     fontFamily: 'inherit',
+  },
+  // Phase 50b: Reverse citations section inside expanded annotation card
+  citedBySection: {
+    marginTop: '12px',
+    paddingTop: '8px',
+    borderTop: '1px dashed #ddd',
+  },
+  citedBySectionHeader: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#777',
+    marginBottom: '6px',
+  },
+  citedByCard: {
+    padding: '6px 10px',
+    marginBottom: '4px',
+    border: '1px solid #eee',
+    borderRadius: '3px',
+    backgroundColor: '#faf9f7',
+    cursor: 'pointer',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  citedByDocTitle: {
+    fontSize: '13px',
+    color: '#333',
+    fontWeight: 'bold',
+  },
+  citedBySource: {
+    fontSize: '11px',
+    color: '#888',
+    marginTop: '2px',
+  },
+  citedByPlaceholder: {
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontSize: '12px',
+    color: '#999',
+    paddingLeft: '4px',
   },
 };
 

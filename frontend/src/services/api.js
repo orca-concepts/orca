@@ -501,6 +501,15 @@ export const citationsAPI = {
     api.get(`/citations/resolve/${annotationId}`),
 };
 
+// Phase 50b: Reverse citations — guest-OK
+export const annotationsAPI = {
+  // Returns { citedBy: [{ linkId, citingDocumentId, citingDocumentTitle,
+  //   citingCorpusId, citingCorpusName, uploadedBy, uploadedByUsername,
+  //   uploadedByOrcid, createdAt }, ...] }
+  getCitedBy: (annotationId) =>
+    api.get(`/annotations/${annotationId}/cited-by`),
+};
+
 // Moderation endpoints (Phase 16a)
 export const moderationAPI = {
   // Flag an edge as spam/vandalism (hides after 10 flags)

@@ -267,7 +267,8 @@ const getComboAnnotations = async (req, res) => {
               (SELECT COUNT(*) FROM annotation_votes av
                WHERE av.annotation_id = da.id) AS annotation_vote_count,
               EXISTS(SELECT 1 FROM combo_annotation_votes cav2
-                     WHERE cav2.combo_id = $1 AND cav2.annotation_id = da.id AND cav2.user_id = $2) AS user_combo_voted
+                     WHERE cav2.combo_id = $1 AND cav2.annotation_id = da.id AND cav2.user_id = $2) AS user_combo_voted,
+              COALESCE(dcl.cited_by_count, 0) AS cited_by_count
               ${subscribedCol}
        FROM document_annotations da
        JOIN combo_edges ce ON ce.edge_id = da.edge_id AND ce.combo_id = $1
@@ -278,6 +279,13 @@ const getComboAnnotations = async (req, res) => {
        LEFT JOIN users creator ON creator.id = da.created_by
        JOIN documents d ON d.id = da.document_id
        JOIN corpuses corp ON corp.id = da.corpus_id
+       LEFT JOIN (
+         SELECT cited_annotation_id, COUNT(*)::int AS cited_by_count
+         FROM document_citation_links
+         WHERE cited_annotation_id IS NOT NULL
+           AND citing_document_id IS NOT NULL
+         GROUP BY cited_annotation_id
+       ) dcl ON dcl.cited_annotation_id = da.id
        ${qualifyingRootsJoin}
        WHERE 1=1 ${edgeFilter}
        ORDER BY ${orderBy}`,
@@ -289,6 +297,7 @@ const getComboAnnotations = async (req, res) => {
         ...r,
         combo_vote_count: Number(r.combo_vote_count),
         annotation_vote_count: Number(r.annotation_vote_count),
+        cited_by_count: Number(r.cited_by_count) || 0,
         ...(r.subscribed_vote_count !== undefined ? { subscribed_vote_count: Number(r.subscribed_vote_count) } : {}),
       })),
     });
