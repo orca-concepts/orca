@@ -1271,75 +1271,10 @@ const createTables = async () => {
 
     await client.query('COMMIT');
 
-    // ============================================================
-    // Phase 20a: Single-attribute graphs — normalize all edges in
-    // each graph to share the attribute of their root edge.
-    // Wrapped in try/catch — safe to skip if already applied.
-    // ============================================================
-    try {
-      // Get all root concepts
-      const rootsResult = await pool.query(
-        'SELECT DISTINCT child_id FROM edges WHERE parent_id IS NULL'
-      );
-      const rootIds = rootsResult.rows.map(r => r.child_id);
-      console.log(`Phase 20a: Processing ${rootIds.length} root graphs...`);
-
-      for (const rootId of rootIds) {
-        const edgesResult = await pool.query(`
-          SELECT id, attribute_id FROM edges
-          WHERE (parent_id IS NULL AND child_id = $1)
-             OR (parent_id IS NOT NULL AND graph_path[1] = $1)
-        `, [rootId]);
-
-        if (edgesResult.rows.length === 0) continue;
-
-        const attrCounts = {};
-        for (const row of edgesResult.rows) {
-          const aid = row.attribute_id;
-          attrCounts[aid] = (attrCounts[aid] || 0) + 1;
-        }
-
-        let winnerAttrId = null;
-        let winnerCount = 0;
-        for (const [aid, count] of Object.entries(attrCounts)) {
-          if (count > winnerCount || (count === winnerCount && parseInt(aid) < parseInt(winnerAttrId))) {
-            winnerAttrId = parseInt(aid);
-            winnerCount = count;
-          }
-        }
-
-        if (winnerAttrId === null) continue;
-
-        // Check if already uniform (skip if all edges already have winner attribute)
-        const nonWinner = edgesResult.rows.filter(r => r.attribute_id !== winnerAttrId);
-        if (nonWinner.length === 0) continue;
-
-        // Delete edges that would cause duplicates after attribute update
-        await pool.query(`
-          DELETE FROM edges
-          WHERE id = ANY($1::int[])
-            AND EXISTS (
-              SELECT 1 FROM edges e2
-              WHERE e2.attribute_id = $2
-                AND e2.parent_id IS NOT DISTINCT FROM edges.parent_id
-                AND e2.child_id = edges.child_id
-                AND e2.graph_path = edges.graph_path
-                AND e2.id != edges.id
-            )
-        `, [nonWinner.map(r => r.id), winnerAttrId]);
-
-        // Update remaining edges to the winning attribute
-        await pool.query(`
-          UPDATE edges
-          SET attribute_id = $1
-          WHERE (parent_id IS NULL AND child_id = $2)
-             OR (parent_id IS NOT NULL AND graph_path[1] = $2)
-        `, [winnerAttrId, rootId]);
-      }
-      console.log('Phase 20a: Graph attribute normalization complete.');
-    } catch (phase20aErr) {
-      console.log('Phase 20a: Skipped (already applied or no-op):', phase20aErr.message);
-    }
+    // Phase 20a migration REMOVED — it destructively normalized all edges
+    // in each graph to the most common attribute, overwriting intentional
+    // attribute assignments. Single-attribute-per-graph is now enforced at
+    // write time in createChildConcept (graph_path[0] root edge lookup).
     // ─── Phase 10a: Rename 'private' layer to 'editorial' ───
     // Update document_annotations.layer from 'private' to 'editorial'
     await client.query(`
@@ -1580,56 +1515,11 @@ const createTables = async () => {
 
     console.log('Phase 25a: Migrated tags to documents.tag_id, dropped document_tag_links');
 
-    // Phase 25e: Set all edges to "value" attribute (value-only launch mode)
-    // First, deduplicate edges that share (parent_id, child_id, graph_path) but differ
-    // only by attribute_id — keep the one with the most votes (then oldest by created_at).
-    const valueAttrRow = await client.query(`SELECT id FROM attributes WHERE name = 'value'`);
-    const valueAttrId = valueAttrRow.rows[0].id;
-
-    // Find groups that would collide when all attribute_ids become 'value'
-    const dupes = await client.query(`
-      SELECT parent_id, child_id, graph_path
-      FROM edges
-      GROUP BY parent_id, child_id, graph_path
-      HAVING COUNT(*) > 1
-    `);
-
-    for (const group of dupes.rows) {
-      // For each collision group, keep the edge with the most votes (ties: oldest)
-      // and reassign any votes/saves from deleted edges to the keeper
-      const edgesInGroup = await client.query(`
-        SELECT e.id,
-          (SELECT COUNT(*) FROM votes v WHERE v.edge_id = e.id) as vote_count
-        FROM edges e
-        WHERE e.parent_id IS NOT DISTINCT FROM $1
-          AND e.child_id = $2
-          AND e.graph_path = $3
-        ORDER BY vote_count DESC, e.created_at ASC
-      `, [group.parent_id, group.child_id, group.graph_path]);
-
-      const keepId = edgesInGroup.rows[0].id;
-      const removeIds = edgesInGroup.rows.slice(1).map(r => r.id);
-
-      // Reassign votes from removed edges to keeper (skip duplicates)
-      for (const rid of removeIds) {
-        await client.query(`
-          UPDATE votes SET edge_id = $1
-          WHERE edge_id = $2
-            AND user_id NOT IN (SELECT user_id FROM votes WHERE edge_id = $1)
-        `, [keepId, rid]);
-        // Delete any remaining votes on the removed edge (duplicates)
-        await client.query(`DELETE FROM votes WHERE edge_id = $1`, [rid]);
-        // Delete the duplicate edge
-        await client.query(`DELETE FROM edges WHERE id = $1`, [rid]);
-      }
-    }
-
-    // Now safe to update all edges to the value attribute
-    await client.query(`
-      UPDATE edges SET attribute_id = $1 WHERE attribute_id != $1
-    `, [valueAttrId]);
-
-    console.log('Phase 25e: Deduplicated and updated all edges to value attribute');
+    // Phase 25e migration REMOVED — it destructively forced all edges to
+    // the "value" attribute. This was intended for a value-only launch mode
+    // that is no longer the plan. All four attributes (value, action, tool,
+    // question) are now enabled via ENABLED_ATTRIBUTES env var, and edges
+    // should retain whatever attribute they were created with.
 
     // ── Phase 26a: Co-author infrastructure tables ──
 

@@ -2008,6 +2008,27 @@ This only needs to be done once per new file. Edits to existing files are picked
 
 **Note:** This affects all Edge users. Consider mentioning this in onboarding documentation or a help tooltip if Edge users report annotation difficulty.
 
+### 8. Destructive Migrations in migrate.js Corrupted Edge Attributes (April 2026)
+**Issue:** All 216 edges in the database had their `attribute_id` silently overwritten to "value" — concepts that were created as `[question]`, `[action]`, or `[tool]` all became `[value]`. The corruption was irrecoverable because the original attribute assignments were overwritten in place.
+
+**Root cause:** Two migrations in `migrate.js` ran destructively on every `npm run migrate` call:
+- **Phase 20a** normalized all edges in each graph to the most common attribute, deleting edges that would collide
+- **Phase 25e** force-converted every edge to the "value" attribute (`UPDATE edges SET attribute_id = $1 WHERE attribute_id != $1`)
+
+These were one-time data transformations that should have been removed after their initial run, but they remained in `migrate.js` as live code. Because Orca's migration system re-runs all migrations on every call (no tracking of which migrations have been applied), they silently re-executed every time the backend was restarted with `npm run migrate`, destroying any attribute diversity created since the last migration run.
+
+**Fix:** Both migrations were removed from `migrate.js` in April 2026. Single-attribute-per-graph consistency is enforced at write time by `createChildConcept`, which looks up the root edge's attribute via `graph_path[0]` — no migration needed.
+
+**Prevention rule — CRITICAL for all future migrate.js changes:**
+> **Never add an UPDATE or DELETE statement to migrate.js that modifies existing user data.** Orca's migration system has no "already applied" tracking — every statement in `migrate.js` runs on every call. Migrations must be **idempotent and non-destructive**:
+> - `CREATE TABLE IF NOT EXISTS` — safe (no-op if table exists)
+> - `ALTER TABLE ADD COLUMN` wrapped in `IF NOT EXISTS` — safe
+> - `INSERT ... ON CONFLICT DO NOTHING` for seed data — safe
+> - `UPDATE edges SET attribute_id = ...` — **DANGEROUS, will re-run and corrupt data**
+> - `DELETE FROM` — **DANGEROUS, will re-run and destroy data**
+>
+> If a one-time data transformation is needed, run it as a standalone script (not in migrate.js), verify the result, and do not leave the script wired into the migration pipeline.
+
 ---
 
 
@@ -3931,6 +3952,8 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - `feat: 50b, reverse citations frontend — Cited by N on annotation cards with expand-to-list and click-through navigation`
 - `fix: 50b, silence 409 console noise on subscribe click-through via local tab short-circuit`
 - `fix: 50b, move cited-by lazy fetch into useEffect to fix stuck-on-Loading after expand`
+
+- **Architecture Decision #271 — No Destructive Migrations in migrate.js (April 2026 incident):** Orca's `migrate.js` has no "already applied" tracking — every statement runs on every `npm run migrate` call. This means `UPDATE` and `DELETE` statements that modify existing user data will silently re-run and corrupt data. The Phase 20a and Phase 25e attribute migrations destroyed all non-value edge attributes across the entire database because they ran on every migration call. **Rule:** migrate.js must contain only idempotent, non-destructive statements (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ADD COLUMN` with `IF NOT EXISTS` guards, `INSERT ... ON CONFLICT DO NOTHING` for seed data). One-time data transformations must be run as standalone scripts, verified, and not left in the migration pipeline.
 
 ---
 
