@@ -233,6 +233,10 @@ export const votesAPI = {
   reorderSidebarItems: (items) =>
     api.post('/votes/sidebar-items/reorder', { items }),
 
+  // Phase 51a: Annotation Votes — user's voted-for annotations grouped by corpus/document
+  getMyAnnotationVotes: () =>
+    api.get('/votes/my-annotation-votes'),
+
   // Web Links (Phase 6)
   getWebLinks: (edgeId) =>
     api.get(`/votes/web-links/${edgeId}`),

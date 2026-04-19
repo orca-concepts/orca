@@ -645,6 +645,7 @@ const Concept = ({
                 onClick={handleToggleView}
                 style={styles.flipButton}
                 disabled={loadingFlip}
+                title="View and vote on alternative parent contexts that exist for this concept; vote for contexts helpful to explore from this one"
               >
                 {loadingFlip ? 'Loading...' : effectiveViewMode === 'children' ? 'Flip View' : effectiveViewMode === 'tunnel' ? 'Children View' : 'Children View'}
               </button>
@@ -662,6 +663,7 @@ const Concept = ({
               <button
                 onClick={handleEnterTunnel}
                 style={styles.flipButton}
+                title="Attach concepts from other graphs/attributes to this one, to help with graph exploration"
               >
                 Tunnel
               </button>

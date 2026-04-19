@@ -2332,7 +2332,7 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                             <button
                               onClick={(e) => { e.stopPropagation(); handleCiteAnnotation(ann.id); }}
                               style={styles.citeBtn}
-                              title="Copy citation URL to clipboard"
+                              title="Copy citation URL to clipboard; paste this into future documents to link back to this document + annotation"
                             >
                               {copiedAnnotationId === ann.id ? 'Copied!' : 'Cite'}
                             </button>

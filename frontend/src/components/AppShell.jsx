@@ -19,6 +19,7 @@ import InfoPage from '../components/InfoPage';
 import MessagesPage from '../components/MessagesPage';
 import ComboListView from '../components/ComboListView';
 import ComboTabContent from '../components/ComboTabContent';
+import AnnotationVotesOverlay from '../components/AnnotationVotesOverlay';
 
 const AppShell = () => {
   const { logout, logoutEverywhere, user, isGuest, loading: authLoading } = useAuth();
@@ -101,6 +102,9 @@ const AppShell = () => {
 
   // Phase 39e: Refresh key to signal ComboTabContent to reload after edge added from graph
   const [comboRefreshKey, setComboRefreshKey] = useState(0);
+
+  // Phase 51a: Annotation Votes overlay state
+  const [annotationVotesOpen, setAnnotationVotesOpen] = useState(false);
 
   // Phase 31b: Messages page state
   const [messagesPageOpen, setMessagesPageOpen] = useState(false);
@@ -776,6 +780,7 @@ const AppShell = () => {
     setCorpusView(null);
     setComboView(null);
     setMessagesPageOpen(false);
+    setAnnotationVotesOpen(false);
   }, [isGuest, handleRequestLogin, corpusTabs]);
 
   const handleUnsubscribeFromCorpus = useCallback(async (corpusId) => {
@@ -837,6 +842,7 @@ const AppShell = () => {
       setCorpusView(null);
       setSavedPageOpen(false);
       setMessagesPageOpen(false);
+      setAnnotationVotesOpen(false);
       await refreshSidebarItems();
     } catch (err) {
       if (err.response?.status === 409) {
@@ -846,6 +852,7 @@ const AppShell = () => {
         setCorpusView(null);
         setSavedPageOpen(false);
         setMessagesPageOpen(false);
+        setAnnotationVotesOpen(false);
       } else if (err.response?.status === 401) {
         handleRequestLogin();
       } else {
@@ -1149,6 +1156,7 @@ const AppShell = () => {
           setComboView(null);
           setSavedPageOpen(false);
           setMessagesPageOpen(false);
+          setAnnotationVotesOpen(false);
         }}
         onContextMenu={(e) => handleTabContextMenu(e, 'corpus', tab.id)}
         title={`${tab.name} — right-click for options`}
@@ -1176,6 +1184,7 @@ const AppShell = () => {
           setComboView(null);
           setSavedPageOpen(false);
           setMessagesPageOpen(false);
+          setAnnotationVotesOpen(false);
         }}
         onContextMenu={(e) => handleTabContextMenu(e, 'combo', combo.id)}
         title={`${combo.name} — right-click for options`}
@@ -1198,7 +1207,7 @@ const AppShell = () => {
           paddingLeft: `${12 + depth * 16}px`,
           ...(isActive ? styles.sidebarItemActive : {}),
         }}
-        onClick={() => { setActiveTab({ type: 'graph', id: tab.id }); setCorpusView(null); setComboView(null); setSavedPageOpen(false); setMessagesPageOpen(false); }}
+        onClick={() => { setActiveTab({ type: 'graph', id: tab.id }); setCorpusView(null); setComboView(null); setSavedPageOpen(false); setMessagesPageOpen(false); setAnnotationVotesOpen(false); }}
         onContextMenu={(e) => handleTabContextMenu(e, 'graph', tab.id)}
         title={`${tab.label} — right-click for options`}
       >
@@ -1393,25 +1402,32 @@ const AppShell = () => {
             <div style={styles.sidebarActions}>
               {!isGuest && (
                 <button
-                  onClick={() => { setCorpusView(null); setComboView(null); setSavedPageOpen(true); setMessagesPageOpen(false); }}
+                  onClick={() => { setCorpusView(null); setComboView(null); setSavedPageOpen(true); setMessagesPageOpen(false); setAnnotationVotesOpen(false); }}
                   style={styles.sidebarActionButton}
                   title="View your graph votes"
                 >Graph Votes</button>
               )}
+              {!isGuest && (
+                <button
+                  onClick={() => { setCorpusView(null); setComboView(null); setSavedPageOpen(false); setMessagesPageOpen(false); setAnnotationVotesOpen(true); }}
+                  style={styles.sidebarActionButton}
+                  title="View annotations you have voted for"
+                >Annotation Votes</button>
+              )}
               <button
-                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setComboView(null); setCorpusView({ view: 'list' }); }}
+                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setComboView(null); setAnnotationVotesOpen(false); setCorpusView({ view: 'list' }); }}
                 style={styles.sidebarActionButton}
                 title="Browse and manage corpuses"
               >Browse Corpuses</button>
               <button
-                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setCorpusView(null); setComboView({ view: 'list' }); }}
+                onClick={() => { setSavedPageOpen(false); setMessagesPageOpen(false); setCorpusView(null); setAnnotationVotesOpen(false); setComboView({ view: 'list' }); }}
                 style={styles.sidebarActionButton}
                 title="Browse and manage superconcepts"
               >Browse Superconcepts</button>
               {!isGuest && (
                 <button
                   data-messages-btn
-                  onClick={() => { setSavedPageOpen(false); setCorpusView(null); setComboView(null); setMessagesPageOpen(true); }}
+                  onClick={() => { setSavedPageOpen(false); setCorpusView(null); setComboView(null); setAnnotationVotesOpen(false); setMessagesPageOpen(true); }}
                   style={styles.sidebarActionButton}
                   title="View your message threads"
                 >Messages{messagesUnreadCount > 0 ? ` (${messagesUnreadCount})` : ''}</button>
@@ -1526,6 +1542,17 @@ const AppShell = () => {
             />
           )}
 
+          {/* Phase 51a: Annotation Votes overlay */}
+          {annotationVotesOpen && (
+            <AnnotationVotesOverlay
+              onBack={() => setAnnotationVotesOpen(false)}
+              onOpenAnnotation={(corpusId, corpusName, documentId, annotationId) => {
+                setAnnotationVotesOpen(false);
+                handleSubscribeToCorpus(corpusId, corpusName, documentId, annotationId);
+              }}
+            />
+          )}
+
           {/* Phase 31b: Messages page overlay */}
           {messagesPageOpen && (
             <MessagesPage
@@ -1538,7 +1565,7 @@ const AppShell = () => {
           )}
 
           {/* Corpus views — overlay normal content when active */}
-          {!savedPageOpen && !messagesPageOpen && corpusView && corpusView.view === 'list' && (
+          {!savedPageOpen && !messagesPageOpen && !annotationVotesOpen && corpusView && corpusView.view === 'list' && (
             <CorpusListView
               onSelectCorpus={(id) => setCorpusView({ view: 'detail', corpusId: id })}
               onBack={() => setCorpusView(null)}
@@ -1547,7 +1574,7 @@ const AppShell = () => {
               corpusTabs={corpusTabs}
             />
           )}
-          {!savedPageOpen && !messagesPageOpen && corpusView && corpusView.view === 'detail' && (
+          {!savedPageOpen && !messagesPageOpen && !annotationVotesOpen && corpusView && corpusView.view === 'detail' && (
             <CorpusDetailView
               corpusId={corpusView.corpusId}
               onBack={() => setCorpusView({ view: 'list' })}
@@ -1565,7 +1592,7 @@ const AppShell = () => {
               currentUserId={user?.id}
             />
           )}
-          {!savedPageOpen && !messagesPageOpen && corpusView && corpusView.view === 'document' && (
+          {!savedPageOpen && !messagesPageOpen && !annotationVotesOpen && corpusView && corpusView.view === 'document' && (
             <DocumentView
               documentId={corpusView.documentId}
               onBack={() => setCorpusView({ view: 'detail', corpusId: corpusView.corpusId })}
@@ -1574,7 +1601,7 @@ const AppShell = () => {
           )}
 
           {/* Phase 39b: Browse Combos overlay */}
-          {!savedPageOpen && !messagesPageOpen && !corpusView && comboView && comboView.view === 'list' && (
+          {!savedPageOpen && !messagesPageOpen && !annotationVotesOpen && !corpusView && comboView && comboView.view === 'list' && (
             <ComboListView
               onBack={() => setComboView(null)}
               isGuest={isGuest}
@@ -1593,7 +1620,7 @@ const AppShell = () => {
           )}
 
           {/* Normal tab content — hidden when overlays are active */}
-          {!savedPageOpen && !messagesPageOpen && !corpusView && !comboView && (
+          {!savedPageOpen && !messagesPageOpen && !annotationVotesOpen && !corpusView && !comboView && (
             <>
               {/* Combo tab content — render all, hide inactive to preserve state */}
               {!isGuest && comboSubscriptions.map(combo => {
@@ -1943,6 +1970,7 @@ const styles = {
   sidebarActions: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
+    gridTemplateRows: 'auto',
     gap: '6px',
     padding: '10px 10px 6px 10px',
   },

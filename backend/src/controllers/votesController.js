@@ -2316,6 +2316,128 @@ const votesController = {
   getVoteSetDrift: async (req, res) => {
     res.status(410).json({ error: 'Vote set drift has been retired' });
   },
+
+  // Phase 51a: Get all annotations the current user has voted for, grouped by corpus → document
+  getMyAnnotationVotes: async (req, res) => {
+    try {
+      const userId = req.user.userId;
+
+      const result = await pool.query(
+        `WITH RECURSIVE doc_roots AS (
+          SELECT d2.id AS doc_id, d2.id AS current_id, d2.source_document_id
+          FROM documents d2
+          UNION ALL
+          SELECT dr.doc_id, parent.id AS current_id, parent.source_document_id
+          FROM doc_roots dr
+          JOIN documents parent ON parent.id = dr.source_document_id
+          WHERE dr.source_document_id IS NOT NULL
+        ),
+        roots AS (
+          SELECT doc_id, current_id AS root_document_id
+          FROM doc_roots WHERE source_document_id IS NULL
+        ),
+        all_anns AS (
+          SELECT da.id AS annotation_id,
+                 da.quote_text, da.comment,
+                 da.created_at,
+                 da.document_id, d.title AS document_title,
+                 d.version_number,
+                 da.corpus_id, cor.name AS corpus_name,
+                 da.edge_id,
+                 e.child_id,
+                 c.name AS concept_name,
+                 att.name AS attribute_name,
+                 COUNT(av_all.id)::int AS vote_count,
+                 av_user.created_at AS voted_at,
+                 r.root_document_id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY r.root_document_id, da.corpus_id, da.created_by, da.edge_id, COALESCE(da.quote_text, '')
+                   ORDER BY d.version_number DESC
+                 ) AS rn
+          FROM annotation_votes av_user
+          JOIN document_annotations da ON da.id = av_user.annotation_id
+          JOIN edges e ON e.id = da.edge_id
+          JOIN concepts c ON c.id = e.child_id
+          JOIN documents d ON d.id = da.document_id
+          JOIN corpuses cor ON cor.id = da.corpus_id
+          JOIN roots r ON r.doc_id = da.document_id
+          LEFT JOIN attributes att ON att.id = e.attribute_id
+          LEFT JOIN annotation_votes av_all ON av_all.annotation_id = da.id
+          WHERE av_user.user_id = $1
+            AND e.is_hidden = false
+          GROUP BY da.id, da.quote_text, da.comment,
+                   da.created_at, da.created_by,
+                   da.document_id, d.title, d.version_number,
+                   da.corpus_id, cor.name,
+                   da.edge_id, e.child_id, c.name,
+                   att.name, av_user.created_at, r.root_document_id
+        )
+        SELECT annotation_id, quote_text, comment,
+               created_at, document_id, document_title,
+               corpus_id, corpus_name, edge_id, child_id AS child_concept_id,
+               concept_name, attribute_name, vote_count, voted_at,
+               root_document_id
+        FROM all_anns WHERE rn = 1
+        ORDER BY corpus_name ASC, document_title ASC, voted_at DESC`,
+        [userId]
+      );
+
+      // Group results into corpus → document → annotations structure
+      const corpusMap = new Map();
+      for (const row of result.rows) {
+        if (!corpusMap.has(row.corpus_id)) {
+          corpusMap.set(row.corpus_id, {
+            corpusId: row.corpus_id,
+            corpusName: row.corpus_name,
+            documentsMap: new Map(),
+          });
+        }
+        const corpus = corpusMap.get(row.corpus_id);
+        if (!corpus.documentsMap.has(row.document_id)) {
+          corpus.documentsMap.set(row.document_id, {
+            documentId: row.document_id,
+            documentTitle: row.document_title,
+            rootDocumentId: row.root_document_id,
+            annotations: [],
+          });
+        }
+        corpus.documentsMap.get(row.document_id).annotations.push({
+          annotationId: row.annotation_id,
+          edgeId: row.edge_id,
+          childConceptId: row.child_concept_id,
+          conceptName: row.concept_name,
+          attributeName: row.attribute_name,
+          quoteText: row.quote_text,
+          voteCount: row.vote_count,
+          votedAt: row.voted_at,
+        });
+      }
+
+      // Convert maps to arrays
+      const corpuses = [];
+      for (const corpus of corpusMap.values()) {
+        const documents = [];
+        for (const doc of corpus.documentsMap.values()) {
+          documents.push({
+            documentId: doc.documentId,
+            documentTitle: doc.documentTitle,
+            rootDocumentId: doc.rootDocumentId,
+            annotations: doc.annotations,
+          });
+        }
+        corpuses.push({
+          corpusId: corpus.corpusId,
+          corpusName: corpus.corpusName,
+          documents,
+        });
+      }
+
+      res.json({ corpuses });
+    } catch (error) {
+      console.error('Error getting annotation votes:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
 };
 
 module.exports = votesController;

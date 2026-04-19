@@ -103,6 +103,9 @@ router.get('/swap/:edgeId', votesController.getSwapVotes);
 router.post('/swap/add', votesController.addSwapVote);
 router.post('/swap/remove', votesController.removeSwapVote);
 
+// Phase 51a: Annotation Votes (user's voted-for annotations grouped by corpus/document)
+router.get('/my-annotation-votes', votesController.getMyAnnotationVotes);
+
 // Sidebar Items (Phase 19b)
 router.get('/sidebar-items', votesController.getSidebarItems);
 router.post('/sidebar-items/reorder', votesController.reorderSidebarItems);
