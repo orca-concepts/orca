@@ -1269,6 +1269,25 @@ const createTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_rlc_window ON rate_limit_counters(window_start);
     `);
 
+    // ============================================================
+    // Phase 52a: Data Export Request Audit Log
+    // Tracks self-service data export requests per user. Used to
+    // enforce the Colorado Privacy Act limit of 2 export requests
+    // per user per 12-month rolling period.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS data_export_requests (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_data_export_requests_user_time
+        ON data_export_requests(user_id, requested_at);
+    `);
+    console.log('Phase 52a: Created data_export_requests table');
+
     await client.query('COMMIT');
 
     // Phase 20a migration REMOVED — it destructively normalized all edges
