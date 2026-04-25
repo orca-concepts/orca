@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { usersAPI, authAPI } from '../services/api';
+import { PRIVACY_CONTACT_EMAIL } from '../config/constants';
 
 const ProfilePage = () => {
   const { userId } = useParams();
@@ -20,6 +21,16 @@ const ProfilePage = () => {
 
   // Dev-mode ORCID input
   const [devOrcidInput, setDevOrcidInput] = useState('');
+
+  // Privacy & Data state (Phase 52c)
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [emailError, setEmailError] = useState(null);
+  const [emailSuccess, setEmailSuccess] = useState(null);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [exportStatus, setExportStatus] = useState(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState(null);
 
   const isOwnProfile = user && String(user.id) === String(userId);
   const isDev = import.meta.env.MODE !== 'production';
@@ -43,6 +54,67 @@ const ProfilePage = () => {
     };
     loadProfile();
   }, [userId]);
+
+  // Load export status for own profile
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    usersAPI.getExportStatus()
+      .then(res => setExportStatus(res.data))
+      .catch(() => setExportStatus({ exports_used: 0, limit: 2 }));
+  }, [isOwnProfile]);
+
+  const handleEmailSave = async () => {
+    const trimmed = emailDraft.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!trimmed || !emailRegex.test(trimmed)) {
+      setEmailError('Invalid email address.');
+      return;
+    }
+    try {
+      setEmailBusy(true);
+      setEmailError(null);
+      await usersAPI.updateProfile({ email: trimmed });
+      setProfile(prev => ({ ...prev, email: trimmed }));
+      await refreshUser();
+      setEditingEmail(false);
+      setEmailSuccess('Email updated');
+      setTimeout(() => setEmailSuccess(null), 2000);
+    } catch (err) {
+      setEmailError(err.response?.data?.error || 'Failed to update email');
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const handleExportDownload = async () => {
+    try {
+      setExportBusy(true);
+      setExportError(null);
+      const response = await usersAPI.exportMyData();
+      const blob = new Blob([response.data], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const a = window.document.createElement('a');
+      a.href = url;
+      const disposition = response.headers['content-disposition'] || '';
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      a.download = match ? match[1] : `orca-export-${new Date().toISOString().slice(0, 10)}.json`;
+      window.document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      // Refresh counter
+      const statusRes = await usersAPI.getExportStatus();
+      setExportStatus(statusRes.data);
+    } catch (err) {
+      if (err.response?.status === 429) {
+        setExportError(`You have reached the limit of 2 exports per 12 months. Please contact ${PRIVACY_CONTACT_EMAIL} if you need additional access.`);
+      } else {
+        setExportError(err.response?.data?.error || 'Export failed');
+      }
+    } finally {
+      setExportBusy(false);
+    }
+  };
 
   const handleConnectOrcid = async () => {
     try {
@@ -192,6 +264,78 @@ const ProfilePage = () => {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {isOwnProfile && (
+          <div style={styles.privacySection}>
+            <h3 style={styles.sectionHeading}>Privacy & Data</h3>
+
+            {/* Email correction */}
+            <div style={styles.subsection}>
+              <p style={styles.subsectionLabel}>Email</p>
+              {emailSuccess && <p style={styles.successText}>{emailSuccess}</p>}
+              {emailError && <p style={styles.errorText}>{emailError}</p>}
+              {!editingEmail ? (
+                <div style={styles.emailReadRow}>
+                  <span style={styles.emailValue}>{user?.email || 'Not set'}</span>
+                  <button
+                    onClick={() => { setEmailDraft(user?.email || ''); setEditingEmail(true); setEmailError(null); }}
+                    style={styles.editLink}
+                  >
+                    Edit
+                  </button>
+                </div>
+              ) : (
+                <div style={styles.emailEditRow}>
+                  <input
+                    type="email"
+                    value={emailDraft}
+                    onChange={e => setEmailDraft(e.target.value)}
+                    style={styles.emailInput}
+                    placeholder="you@example.com"
+                  />
+                  <button onClick={handleEmailSave} disabled={emailBusy} style={styles.confirmButton}>
+                    {emailBusy ? 'Saving...' : 'Save'}
+                  </button>
+                  <button onClick={() => { setEditingEmail(false); setEmailError(null); }} style={styles.cancelButton}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Data export */}
+            <div style={styles.subsection}>
+              <p style={styles.subsectionLabel}>Download my data</p>
+              <p style={styles.mutedText}>
+                Download a JSON file containing your account, contributions, votes, and subscriptions.
+                You can download your data up to twice per 12-month period.
+              </p>
+              {exportError && <p style={styles.errorText}>{exportError}</p>}
+              <button
+                onClick={handleExportDownload}
+                disabled={exportBusy || (exportStatus && exportStatus.exports_used >= exportStatus.limit)}
+                style={{
+                  ...styles.connectButton,
+                  ...(exportStatus && exportStatus.exports_used >= exportStatus.limit ? styles.disabledButton : {}),
+                }}
+              >
+                {exportBusy ? 'Preparing...' : exportStatus && exportStatus.exports_used >= exportStatus.limit ? 'Limit reached' : 'Download my data (JSON)'}
+              </button>
+              <p style={styles.counterText}>
+                {exportStatus ? `${exportStatus.exports_used} of 2 exports used in the last 12 months.` : 'Loading...'}
+              </p>
+            </div>
+
+            {/* Privacy contact */}
+            <div style={styles.subsection}>
+              <p style={styles.mutedText}>
+                For other privacy requests — including data correction beyond email, account deletion
+                assistance, or general privacy questions — contact us at{' '}
+                <a href={`mailto:${PRIVACY_CONTACT_EMAIL}`} style={styles.privacyLink}>{PRIVACY_CONTACT_EMAIL}</a>.
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -359,6 +503,77 @@ const styles = {
     cursor: 'pointer',
     fontSize: '13px',
     fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  privacySection: {
+    marginTop: '20px',
+    paddingTop: '16px',
+    borderTop: '1px solid #e0e0e0',
+  },
+  sectionHeading: {
+    margin: '0 0 16px 0',
+    fontSize: '20px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontWeight: '600',
+    color: '#333',
+  },
+  subsection: {
+    marginBottom: '20px',
+  },
+  subsectionLabel: {
+    margin: '0 0 6px 0',
+    fontSize: '15px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    fontWeight: '600',
+    color: '#333',
+  },
+  emailReadRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  emailValue: {
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#333',
+  },
+  editLink: {
+    background: 'none',
+    border: 'none',
+    color: '#888',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    padding: 0,
+    textDecoration: 'underline',
+  },
+  emailEditRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+  emailInput: {
+    flex: 1,
+    minWidth: '180px',
+    padding: '6px 10px',
+    border: '1px solid #ccc',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  counterText: {
+    fontSize: '13px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#888',
+    margin: '8px 0 0 0',
+  },
+  disabledButton: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  privacyLink: {
+    color: 'inherit',
+    textDecoration: 'underline',
   },
 };
 

@@ -648,6 +648,13 @@ export const usersAPI = {
     api.get(`/users/${userId}/profile`),
   searchUsers: (query) =>
     api.get(`/users/search?q=${encodeURIComponent(query)}`),
+  // Phase 52b+c
+  exportMyData: () =>
+    api.get('/users/me/export', { responseType: 'blob' }),
+  getExportStatus: () =>
+    api.get('/users/me/export-status'),
+  updateProfile: (updates) =>
+    api.patch('/users/me', updates),
 };
 
 export default api;

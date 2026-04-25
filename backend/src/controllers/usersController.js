@@ -87,6 +87,58 @@ const usersController = {
     }
   },
 
+  // PATCH /api/users/me — update correctable profile fields (Phase 52b)
+  updateMyProfile: async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { email } = req.body;
+
+      if (email === undefined) {
+        return res.status(400).json({ error: 'No fields to update.' });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const trimmed = (email || '').trim().toLowerCase();
+      if (!trimmed || trimmed.length > 255 || !emailRegex.test(trimmed)) {
+        return res.status(400).json({ error: 'Invalid email address.' });
+      }
+
+      const result = await pool.query(
+        'UPDATE users SET email = $1 WHERE id = $2 RETURNING id, username, email',
+        [trimmed, userId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({ user: result.rows[0] });
+    } catch (error) {
+      console.error('Update profile error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // GET /api/users/me/export-status — check export usage count (Phase 52b)
+  getExportStatus: async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const result = await pool.query(
+        `SELECT COUNT(*)::int AS count FROM data_export_requests
+         WHERE user_id = $1 AND requested_at > NOW() - INTERVAL '1 year'`,
+        [userId]
+      );
+      res.json({
+        exports_used: result.rows[0].count,
+        limit: 2,
+        period: '12 months',
+      });
+    } catch (error) {
+      console.error('Export status error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
   // GET /api/users/me/export — self-service data export (Phase 52a)
   // Colorado Privacy Act: max 2 exports per rolling 12-month period
   exportMyData: async (req, res) => {
@@ -102,7 +154,7 @@ const usersController = {
       const exportsUsed = rateLimitResult.rows[0].count;
       if (exportsUsed >= 2) {
         return res.status(429).json({
-          error: `You have reached the maximum of 2 data exports per 12-month period under the Colorado Privacy Act. Please contact ${PRIVACY_CONTACT_EMAIL} if you need additional access.`,
+          error: `You have reached the limit of 2 data exports per 12-month period. Please contact ${PRIVACY_CONTACT_EMAIL} if you need additional access.`,
           exports_used: exportsUsed,
           limit: 2,
         });
