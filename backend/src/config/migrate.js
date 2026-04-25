@@ -2131,6 +2131,31 @@ const createTables = async () => {
     `);
     console.log('Phase 45: Added hide_annotation_warning column to users table');
 
+    // ── Phase 51a: Click-wrap consent columns ──
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'tos_accepted_at'
+        ) THEN
+          ALTER TABLE users ADD COLUMN tos_accepted_at TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'tos_version_accepted'
+        ) THEN
+          ALTER TABLE users ADD COLUMN tos_version_accepted VARCHAR(32);
+        END IF;
+      END $$;
+    `);
+    console.log('Phase 51a: Added tos_accepted_at and tos_version_accepted columns to users table');
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

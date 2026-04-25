@@ -1,7 +1,9 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 16, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete; Phase 48 and/or logic for superconcepts display complete; Phase 49a rate limit foundation complete; Phase 49b write-endpoint limiters + global safety net complete; Phase 49d global safety net raised to 2000/15min, GET-exempt, Postgres-backed; Phase 50 reverse citations — "Cited by N" on annotation cards with lazy-loaded list and click-through navigation complete)
+**Last Updated:** April 25, 2026 (Phase 50 reverse citations complete; **Phase 48 fully reverted** — edge discussions feature reset and dropped, see Roadmap Summary; **Phase 51 + Phase 52 added as pre-launch blockers** based on outside legal counsel review — Phase 51 click-wrap consent driven by counsel comment #0, Phase 52 data export/correction/privacy contact driven by counsel comment #11 and the Colorado Privacy Act; **Phase 53 added as launch-recommended** — unified DMCA + illegal-content removal infrastructure driven by Copyright Policy review and counsel comment #1, includes documented exception to append-only philosophy in Permanence section. See "Pre-Launch Legal & Compliance Blockers" section for full scope of all three phases.)
+
+**Prior Last Updated:** April 16, 2026 (Phase 37 complete; Phase 38 complete; Phase 39 Combos complete; invite link options added; Subscribed sort option for annotations; Phase 40b password login with phone OTP for registration and password reset; codebase published under AGPL v3; Phase 41c document external links complete; Phase 41a ORCID OAuth complete; Phase 41b ORCID display across UI complete; Phase 41d corpus invite by username/ORCID complete; Phase 42a superconcepts UI rename complete; Phase 42b document coauthor lookup by username/ORCID complete; Phase 42c superconcept ownership transfer complete; Phase 42d corpus member document removal complete; Phase 43 Tunneling complete; Phase 44 sibling-only swap votes with auto-save complete; Phase 45 annotation creation warning modal complete; Phase 46 responsive concept header layout complete; Phase 47 superconcepts tab in concept annotation panel complete; Phase 49a rate limit foundation complete; Phase 49b write-endpoint limiters + global safety net complete; Phase 49d global safety net raised to 2000/15min, GET-exempt, Postgres-backed; Phase 50 reverse citations — "Cited by N" on annotation cards with lazy-loaded list and click-through navigation complete)
 
 ---
 
@@ -79,6 +81,8 @@ CREATE UNIQUE INDEX idx_users_orcid ON users(orcid_id) WHERE orcid_id IS NOT NUL
 - `token_issued_after` — timestamp used by "Log out everywhere" (Phase 32b). When set, auth middleware rejects any JWT with `iat <= token_issued_after`. Nullable — null means no sessions have been invalidated.
 - `age_verified_at` — timestamp recording when the user confirmed they are at least 18 years old during registration (Phase 36). Set once at account creation, never cleared. Nullable — null for users who registered before Phase 36 (test users backfilled with `NOW()` in migration).
 - `hide_annotation_warning` — boolean flag (Phase 45). When `true`, the annotation creation warning modal is suppressed for this user. Set via `POST /auth/hide-annotation-warning`. Default `false` — new users see the warning on their first annotation creation. NOT NULL.
+- `tos_accepted_at` — **🔲 PLANNED (Phase 51).** Timestamp recording when the user ticked the click-wrap checkbox at registration. Nullable for backward compatibility (existing rows backfilled with `created_at` via standalone migration script — NOT in `migrate.js` per Architecture Decision #271).
+- `tos_version_accepted` — **🔲 PLANNED (Phase 51).** Version string of the ToS in effect at registration time (e.g., `'2026-04-25'`). Nullable. Used for future re-acceptance prompts when ToS changes materially. Backfilled to `'pre-launch'` for legacy rows.
 - `orcid_id` — verified ORCID iD in the format `0000-0000-0000-0000` (19 chars with dashes). Set via ORCID OAuth `/authenticate` flow (Phase 41a). Nullable — null for users who haven't linked an ORCID. Partial unique index (`WHERE orcid_id IS NOT NULL`) prevents two users from linking the same ORCID. Users can disconnect (set to NULL) at any time via their profile page. **Important:** Per ORCID's integration requirements, iDs must be authenticated via OAuth — users cannot manually type an ORCID iD.
 - **Note:** `last_active` column was originally planned for inactive user filtering. The inactive feature was redesigned to operate at the **corpus tab level on the Saved Page** instead — see Phase 8 (Inactive Corpus Tab Dormancy, now complete). No `last_active` column is needed on the users table.
 
@@ -186,7 +190,7 @@ CREATE TABLE attributes (
 - Four default attributes seeded: **action**, **tool**, **value**, **question**
 - **Attributes are required:** Every concept must have an attribute selected at creation time. There are no "unattributed" concepts.
 - **Selection model (Phase 20a):** Users select an attribute only when creating a **root concept**. All descendant edges in the graph inherit the root edge's attribute automatically. No free-text attribute creation.
-- **No user-created attributes for now.** The four released attributes are the only options. All four are enabled at launch via `ENABLED_ATTRIBUTES=value,action,tool,question`. The owner (Miles) will manually add new attributes as needed by inserting rows into the `attributes` table and updating the `ENABLED_ATTRIBUTES` environment variable. The original Phase 23 (user-generated attributes) has been cancelled.
+- **No user-created attributes for now.** The four released attributes are the only options. All four are enabled at launch via `ENABLED_ATTRIBUTES=value,action,tool,question`. The owner will manually add new attributes as needed by inserting rows into the `attributes` table and updating the `ENABLED_ATTRIBUTES` environment variable. The original Phase 23 (user-generated attributes) has been cancelled.
 - **Immutability:** Once an attribute is assigned to an edge at creation time, it cannot be changed. The attribute becomes part of the contextual identity of that concept in that path.
 - **Single-attribute graphs (Phase 20a):** Every graph has exactly one attribute, determined by the root edge. All descendant edges must match. Consistency enforced on write — backend looks up `graph_path[0]` to find the root edge's attribute and auto-assigns it.
 - Same concept name with different attributes = completely separate contextual entities. "Running [action]" and "Running [tool]" share a string but are unrelated.
@@ -1337,6 +1341,26 @@ CREATE INDEX idx_tunnel_votes_link ON tunnel_votes(tunnel_link_id);
 - Toggle on/off pattern, same as annotation votes and web link votes
 - `ON DELETE CASCADE` from both FKs ensures cleanup
 
+#### `data_export_requests` — 🔲 PLANNED (Phase 52)
+Audit log for self-service data export requests, used to enforce the Colorado Privacy Act limit of 2 export requests per user per 12-month period.
+
+```sql
+CREATE TABLE data_export_requests (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_data_export_requests_user_time ON data_export_requests(user_id, requested_at);
+```
+
+**Key Points:**
+- One row inserted each time `GET /api/users/me/export` is successfully called.
+- Rate limit check: `SELECT COUNT(*) FROM data_export_requests WHERE user_id = $1 AND requested_at > NOW() - INTERVAL '1 year'`. If >= 2, endpoint returns 429 with explanatory message.
+- `ON DELETE CASCADE` from `users` — when a user deletes their account, their export history is cleaned up. Acceptable because account deletion already breaks the link to personal data; export log retention is not legally required.
+- This table is INDEPENDENT of the existing rate limiter infrastructure (`rate_limit_counters`, `userRateLimiter.js`). Different policy purpose: this is a legal/regulatory limit, not an abuse-prevention limit, and it spans 12 months (existing limiters are sub-hour windows).
+- Append-only — never delete rows except via the cascade above.
+
 ---
 
 ## API Endpoints
@@ -1347,7 +1371,7 @@ CREATE INDEX idx_tunnel_votes_link ON tunnel_votes(tunnel_link_id);
 |--------|----------|---------------|-------------|
 | POST | `/login` | No | Password login. Accepts `{ identifier, password }`. `identifier` is username or email (detected by `@`). Rate-limited: 10 req/IP/15 min. Returns JWT. (Phase 40b) |
 | POST | `/send-code` | No | Send OTP via Twilio. Accepts `{ phoneNumber, intent }`. Rate-limited: 5 req/IP/15 min. `intent=register` checks phone uniqueness before sending. (Phase 32b, updated Phase 40b — `intent=login` removed) |
-| POST | `/verify-register` | No | Verify OTP + create account. Accepts `{ phoneNumber, code, username, email, password, ageVerified }`. Validates password with zxcvbn (score >= 2), email format, and `ageVerified === true`. Stores password_hash, email, sets `age_verified_at = NOW()`. Returns JWT. (Phase 32b, updated Phase 36, Phase 40b) |
+| POST | `/verify-register` | No | Verify OTP + create account. Accepts `{ phoneNumber, code, username, email, password, ageVerified }`. Validates password with zxcvbn (score >= 2), email format, and `ageVerified === true`. Stores password_hash, email, sets `age_verified_at = NOW()`. Returns JWT. (Phase 32b, updated Phase 36, Phase 40b) **🔲 Phase 51 update:** will also accept `tosAccepted: true` and `tosVersion: <string>`, validate `tosAccepted === true`, and write `tos_accepted_at` + `tos_version_accepted`. |
 | POST | `/forgot-password/send-code` | No | Send OTP for password reset. Accepts `{ phoneNumber }`. Looks up user via HMAC phone_lookup. Returns generic success message regardless of whether account exists (security best practice). Rate-limited: 5 req/IP/15 min. (Phase 40b) |
 | POST | `/forgot-password/reset` | No | Verify OTP + reset password. Accepts `{ phoneNumber, code, newPassword }`. Validates new password with zxcvbn. Updates password_hash. Returns JWT (auto-login). (Phase 40b) |
 | GET | `/me` | Yes | Get current user info |
@@ -1396,6 +1420,8 @@ Response: { message: 'All sessions invalidated. Please log in again.' }
 |--------|----------|------|-------------|
 | GET | `/:id/profile` | Guest OK | Returns user's public profile: username, orcid_id (if set), created_at, corpus count, document count. (Phase 41a) |
 | GET | `/search` | Required | Search users by username (ILIKE prefix match) or ORCID iD (exact match). Query: `?q=searchterm`. Returns max 10 results, excludes requesting user. (Phase 41d) |
+| GET | `/me/export` | Required | **🔲 PLANNED (Phase 52a).** Returns the requesting user's complete personal data + attributed contributions + votes/subscriptions as a downloadable JSON file. Rate-limited to 2 requests per user per 12-month rolling period (Colorado Privacy Act). Returns 429 if limit exceeded. `Content-Disposition: attachment; filename=orca-export-{username}-{ISO-date}.json`. |
+| PATCH | `/me` | Required | **🔲 PLANNED (Phase 52b).** Update editable profile fields. Body: `{ email?: string }`. Validates email format. Future: may accept other correctable fields per Colorado right-to-correct. |
 
 ---
 
@@ -2261,6 +2287,337 @@ As a platform that hosts user generated content, Orca's approach to content mode
 - The dynamism is in the *child sets* of the user's voted leaf nodes — those evolve as other users add content — but the user's bookmarked list itself does not churn
 - Unvoting cascades: removing a concept (via X button on Graph Votes page or unvoting in children view) also removes all descendants in that branch, with vote counts subtracted accordingly
 
+### Documented Exception: Company-Initiated Legal Removal (Phase 53)
+The append-only "Nothing Is Ever Deleted" rule governs **user-driven** deletion and the **community** moderation system (hide/unhide via flags and votes). It does NOT apply to Company-initiated removal in response to legal obligation — DMCA takedown notices, content the Company has actual knowledge is illegal, or court orders. Phase 53 builds the audited, admin-only mechanism for these cases. Legally-removed content sets a `legal_hold` flag (where applicable) that prevents community unhide. Audit trail lives in `legal_removals`, `dmca_notices`, `dmca_counter_notices`, and `dmca_strikes` tables. This exception must be acknowledged in the ToS (per counsel review of comment #1) so users understand append-only is community-scoped, not absolute.
+
+---
+
+## Pre-Launch Legal & Compliance Blockers
+
+This section captures features that are required before public launch for legal/compliance reasons, based on outside legal counsel review of three documents: the Subscriber Agreement and Terms of Use (counsel comments dated April 20–24, 2026), the Privacy Policy (embedded in the same document), and the Website Copyright Policy (counsel comments dated April 20–24, 2026).
+
+**Three phases follow, with different launch-blocker status:**
+- **Phase 51 (click-wrap consent)** — hard blocker. Cannot legally bind users to ToS without affirmative consent.
+- **Phase 52 (data export + correction + privacy contact)** — hard blocker. Colorado Privacy Act compliance.
+- **Phase 53 (DMCA + illegal-content removal infrastructure)** — launch-recommended but not strict blocker. The Copyright Policy + DMCA agent registration alone qualify Orca for §512 safe harbor on day one; the operational machinery here is what's needed to *defend* a claim and handle real notices once traffic exists. Minimum viable subset (53a + 53b) should ideally land before public launch.
+
+LLC formation can proceed in parallel with all three phases. Orca cannot go public until at least Phases 51 and 52 are implemented.
+
+### Phase 51: Click-Wrap Consent at Registration & Document Upload — 🔲 PLANNED
+
+**Driver:** Counsel comment #0 — "You should use a click-wrap (not a browser wrap)." Browse-wrap agreements (where mere use of the site implies acceptance) are increasingly held unenforceable by courts. Click-wrap requires an affirmative action — typically a checkbox the user must tick before proceeding.
+
+**Scope:**
+
+1. **Registration screen click-wrap.** On the existing `LoginModal.jsx` "Sign Up" tab (Phase 28f), add a required, unchecked-by-default checkbox above the "Sign Up" button reading:
+   *"I have read and agree to the [Terms of Service](url) and [Privacy Policy](url). I confirm I am at least 18 years old."*
+   The Sign Up button must remain disabled (greyed, non-clickable) until the checkbox is ticked. ToS and Privacy Policy are linked as separate hyperlinks (open in new tab). Note: age verification is already collected via `users.age_verified_at` (Phase 36) — this consolidates that affirmation into the click-wrap, replacing whatever standalone age confirmation currently exists.
+
+2. **Document upload click-wrap.** The existing copyright affirmation modal (Phase 36, "I affirm and expressly acknowledge I have the legal right to share or otherwise distribute this document or content") is already a click-wrap — confirm it uses an unchecked-by-default checkbox + disabled-until-checked button pattern. If currently implemented as a "click to accept" button without a checkbox, refactor to checkbox + disabled button.
+
+3. **Persist consent record.** New columns on `users`:
+   - `tos_accepted_at TIMESTAMP` — set at registration when the click-wrap checkbox is ticked, never cleared. Nullable for backward compatibility (existing test users backfilled with `created_at` value via migration).
+   - `tos_version_accepted VARCHAR(32)` — version string of the ToS in effect at registration (e.g., `'2026-04-25'`). Nullable. Used so that a future material ToS change can prompt re-acceptance from existing users without breaking legacy rows. Hard-coded `CURRENT_TOS_VERSION` constant in `backend/src/config/constants.js` (or similar) — bump this string when ToS changes substantively.
+
+4. **`copyright_confirmed_at` already exists** on the documents table (Phase 36 rule from memory) — no change needed for document upload consent persistence.
+
+**Backend changes:**
+- `verifyRegister` in `authController.js` accepts new `tosAccepted: true` and `tosVersion: <string>` fields in request body. Rejects registration with 400 if `tosAccepted !== true`. Writes `tos_accepted_at = NOW()` and `tos_version_accepted = <version>` into the new `users` columns.
+- New migration to add the two columns idempotently (`ALTER TABLE users ADD COLUMN IF NOT EXISTS tos_accepted_at TIMESTAMP; ALTER TABLE users ADD COLUMN IF NOT EXISTS tos_version_accepted VARCHAR(32);`).
+- Backfill migration as a standalone script (NOT in `migrate.js` per Architecture Decision #271) — set `tos_accepted_at = created_at` and `tos_version_accepted = 'pre-launch'` for existing rows where `tos_accepted_at IS NULL`.
+
+**Frontend changes:**
+- `LoginModal.jsx` Sign Up tab: new checkbox state, two `<a target="_blank">` links to ToS and Privacy Policy URLs (placeholder route `/terms` and `/privacy` until those pages are built — see note below), Sign Up button `disabled={!tosAccepted}`.
+- `api.js` `verifyRegister` function passes `tosAccepted` and `tosVersion` through.
+- Document upload affirmation modal — verify or refactor to the same checkbox-disabled-button pattern.
+
+**Note on ToS/Privacy Policy display URLs:** Phase 51 only handles consent capture. The actual `/terms` and `/privacy` static pages can be built as part of this phase or in a follow-up — recommended to build them in this phase so the click-wrap links work end-to-end. Two new entries in the existing info pages system (Phase 30g pattern with `pages` slugs) would be the cleanest approach: slugs `terms` and `privacy`, content seeded from the finalized counsel drafts. No comment functionality on these pages.
+
+**Implementation order suggestion:**
+- Phase 51a: Schema additions + backend `verifyRegister` consent fields + backfill migration
+- Phase 51b: Static `/terms` and `/privacy` pages (using `pages` table pattern from Phase 30g)
+- Phase 51c: `LoginModal.jsx` checkbox + disabled button + linking to /terms and /privacy
+- Phase 51d: Document upload affirmation modal pattern verification/refactor
+
+---
+
+### Phase 52: Data Export, Correction, and Privacy Contact — 🔲 PLANNED
+
+**Driver:** Counsel comment #11 — Colorado Privacy Act grants consumers the right to data portability ("personal data in a portable and easily usable format that allows transmission to another entity without hindrance"). Limit: 2 requests per calendar year per user. Counsel confirmed: "Effectively the Colorado law means that Orca needs to implement a data export feature." Also: a contact channel must exist for export, correction, and deletion requests.
+
+**Note:** Counsel confirmed Orca does NOT need a "Do Not Sell / Share" opt-out mechanism (no targeted advertising, no sale of personal data). Phase 52 is data export + correction + contact only.
+
+**Scope:**
+
+1. **Self-service data export endpoint.** New `GET /api/users/me/export` (authenticated, user can only export their own data). Returns a JSON file containing the user's personal data and attributed contributions:
+   - **Account record:** `username`, `email`, `created_at`, `age_verified_at`, `tos_accepted_at`, `tos_version_accepted`, `orcid_id` (if linked). NEVER include `password_hash`, `phone_hash`, or `phone_lookup` — these are credentials, not "personal data the user provided."
+   - **Attributed contributions:**
+     - Annotations created by the user (id, document_id, document title, document version, corpus name, concept_id, concept name, edge graph_path, quote_text, comment, created_at)
+     - Web links the user added to concepts (id, concept_id, concept name, url, created_at)
+     - Page comments authored by the user (id, page_slug, body, parent_comment_id, created_at)
+     - Moderation comments authored by the user (id, target_type, target_id, body, created_at)
+     - Documents uploaded by the user (id, title, corpus name(s), version_number, lineage_id, created_at, copyright_confirmed_at) — file content NOT included; just metadata. (Optional follow-up: signed Cloudflare R2 download URLs for each document so the user can pull the actual files. Out of scope for Phase 52a.)
+     - Corpuses owned by the user (id, name, created_at, member count)
+     - Superconcepts owned by the user (id, name, created_at, subscriber count)
+     - Document co-authorships the user holds (document_id, document title, role)
+     - ORCID disconnection log entries if applicable
+   - **Votes & subscriptions:**
+     - Graph votes (edge_id, edge graph_path, edge concept name, created_at)
+     - Swap votes (edge_id, replacement_edge_id, created_at)
+     - Link votes (concept_link_id, concept_id, url, created_at)
+     - Annotation votes (annotation_id, created_at)
+     - Web link votes (concept_link_id, created_at)
+     - Flag votes (flag_id, target_type, target_id, created_at)
+     - Tunnel votes (tunnel_link_id, source_concept_id, target_concept_id, created_at)
+     - Page comment votes (comment_id, created_at)
+     - Combo subscriptions (combo_id, combo name, created_at)
+     - Corpus subscriptions (corpus_id, corpus name, created_at)
+     - Saved tabs and graph tabs (id, name, created_at)
+   - **Format:** Single JSON file, top-level keys grouping the above (`account`, `contributions`, `votes_and_subscriptions`). Pretty-printed (2-space indent) for human readability. Filename: `orca-export-{username}-{ISO-date}.json`.
+   - **Response:** `Content-Type: application/json`, `Content-Disposition: attachment; filename=...` so the browser downloads the file directly.
+
+2. **Rate limit: 2 exports per calendar year.** Colorado law allows declining requests beyond 2 per 12-month period. New table `data_export_requests` audits each export with `(user_id, requested_at)`. Endpoint queries `COUNT(*) WHERE user_id = $1 AND requested_at > NOW() - INTERVAL '1 year'` and returns 429 with explanatory message if `>= 2`. Uses calendar-year semantics per Colorado statute — 12 rolling months is the conservative interpretation. (Note: this rate limit is separate from the existing per-user hourly limiter — different policy purpose, different storage.)
+
+3. **Profile editing for correction.** Counsel comment #11 also notes Colorado's right-to-correct. Verify the existing profile page allows the user to edit `email` (the primary correctable personal data field). `username` is intentionally not changeable post-registration (graph integrity). `orcid_id` can be disconnected and re-linked (already supported, Phase 41a). If email editing isn't currently exposed in the UI, add it: new `PATCH /api/users/me` endpoint accepting `{ email: string }`, validates format, writes to `users.email`. Profile page UI gets a small inline edit affordance.
+
+4. **Privacy contact email.** Decide on and provision a contact address (recommendation: `privacy@orcaconcepts.org`). Update the placeholder slots in the Privacy Policy draft (`[email/write to]`, `[contact information]`, `[toll-free phone number]`) before sending the draft back to counsel. Toll-free phone number is not strictly required for a small open-source project — counsel's draft offers it as one of three contact methods, all alternatives. Email + a simple data subject request form on the website is sufficient.
+
+5. **Optional: data subject request form.** Privacy Policy mentions a form on the website. Could be implemented as a simple page with form fields (name, email, request type [export/correction/deletion/access], description) that emails `privacy@orcaconcepts.org`. Lower priority than the self-service export; can be deferred to Phase 52d if needed.
+
+**Backend changes:**
+- New `data_export_requests` table (see schema below in Planned Tables section).
+- New endpoint `GET /api/users/me/export` in `usersController.js`. Aggregates the data described above with parameterized queries (use LEFT JOIN where appropriate per Phase 36 rule on nullable foreign keys). Streams or returns JSON response.
+- New endpoint `PATCH /api/users/me` in `usersController.js` for email correction.
+- Migration: new `data_export_requests` table.
+
+**Frontend changes:**
+- New "Privacy & Data" section on the profile page with two affordances:
+  - "Download my data (JSON)" button → calls `GET /api/users/me/export`, triggers browser download. Show inline "X of 2 exports used this year" counter.
+  - "Edit email" inline affordance → calls `PATCH /api/users/me`.
+- `api.js` adds `usersAPI.exportMyData()` and `usersAPI.updateProfile({ email })`.
+
+**Implementation order suggestion:**
+- Phase 52a: Backend export endpoint + `data_export_requests` table + rate limit
+- Phase 52b: Backend profile PATCH endpoint for email correction
+- Phase 52c: Frontend Privacy & Data section on profile page
+- Phase 52d (optional): Data subject request form page
+
+**Out of scope for Phase 52 (intentional):**
+- Right-to-be-forgotten beyond existing account deletion (already implemented in Phase 17 / Section 17 of ToS — `username` is replaced with placeholder, votes/subscriptions deleted, contributions stay).
+- Document file downloads in the export bundle (metadata only for v1).
+- Bulk export of graph data (different feature — public data API, post-launch roadmap).
+- "Do Not Sell" opt-out (not required — Counsel confirmed).
+
+---
+
+### Phase 53: DMCA & Illegal-Content Removal Infrastructure — 🔲 PLANNED
+
+**Driver:** Two convergent requirements from the legal review:
+1. **DMCA safe harbor** (17 U.S.C. § 512, Copyright Policy review): To qualify for §512(c) safe harbor, Orca must (a) "expeditiously" remove content upon valid takedown notice (§512(c)(1)(C)), (b) notify the subscriber of removal (§512(g)(2)(A)), (c) handle counter-notifications and restore content if no court action follows in 10–14 business days (§512(g)(2)(C)), and (d) "reasonably implement" a repeat-infringer termination policy (§512(i)(1)(A)).
+2. **§230 illegal-content removal** (counsel comment #1 on ToS): Although §230 gives broad immunity for user content, if Orca has *actual knowledge* that content violates the law, it must proactively remove it. The current hide mechanism (10 flags + admin override) is insufficient for this — hide is contestable, restorable, and primarily community-driven. Legally-mandated removal needs a different mechanism.
+
+These two requirements share the same underlying need: a permanent, admin-initiated, audited removal mechanism that bypasses the community moderation system. Phase 53 builds the unified infrastructure for both.
+
+**Launch positioning:** This phase is **launch-recommended but not a hard blocker**. The Copyright Policy + DMCA agent registration alone are sufficient to *qualify* for safe harbor on day one. The operational infrastructure here is what's needed to *defend* a safe harbor claim and to handle real takedown notices once traffic exists. The minimum viable subset (53a + 53b) should ideally land before public launch; 53c (counter-notice workflow) and 53d (repeat-infringer tracking UI) can follow shortly after.
+
+**Conceptual relationship to append-only philosophy:** This is a **documented exception** to "Nothing Is Ever Deleted" (see Permanence & Moderation Rules section). Append-only governs *user-driven* deletion and the *community* moderation system. Phase 53's permanent removal is *Company-initiated*, in response to legal obligation. The exception must be acknowledged in the Permanence section of this document and (per counsel review) in the ToS as well.
+
+**Scope:**
+
+1. **Admin permanent-removal endpoint.** New endpoint `POST /api/admin/legal-removal` (admin-only, gated by the existing `ADMIN_USER_ID` env var pattern). Accepts:
+   ```
+   {
+     target_type: 'document_version' | 'annotation' | 'concept' | 'edge' | 'web_link' | 'page_comment' | 'moderation_comment',
+     target_id: integer,
+     removal_reason: 'dmca' | 'illegal_content' | 'court_order',
+     notice_reference: string,  // DMCA notice ID, court order docket, etc.
+     internal_notes: string     // free-text for the audit trail
+   }
+   ```
+   Behavior depends on target type:
+   - **`document_version`** (most common case for DMCA): The version is permanently removed (file deleted from R2, row hard-deleted from `documents` table), cascading to annotations on that version. Other versions in the chain are unaffected. This matches existing user-uploader self-deletion behavior (Phase 6 Tier 3 in ToS) — the difference is this is admin-initiated and audited.
+   - **`annotation`**: Permanent deletion (hard delete, not the existing "hide" pattern). Cascades remove citation links and votes via existing FK cascades.
+   - **`concept` / `edge` / `web_link`**: Hidden via existing hide mechanism but with a NEW `legal_hold` flag set (see schema below) that prevents unhide via community vote. Existing hide infrastructure (Phase 16a) is reused; the legal_hold flag adds permanence.
+   - **`page_comment` / `moderation_comment`**: Permanent deletion (these don't have a hide mechanism today; this adds the first deletion path for them).
+   - All cases: writes a row to `legal_removals` audit table.
+
+2. **Notify the affected user.** §512(g)(2)(A) requires "reasonable steps to promptly notify the subscriber" of removal. Implementation: when the endpoint executes, look up the user who created/uploaded the target (via `created_by` / `uploaded_by` column), and send them an email at the address on their `users.email` row. Email body templated by `removal_reason`:
+   - DMCA: "A copyright holder has filed a takedown notice for content you posted. We have removed the content as required by federal law (17 U.S.C. § 512). You may file a counter-notification if you believe this was in error — see [link to counter-notice form]."
+   - Illegal content: "We have removed content you posted because it violates [specific law / our Terms of Service §13]. This action is not appealable through our community moderation system."
+   - Court order: "We have removed content you posted in response to a court order. See [reference]."
+   - Use existing email infrastructure (whatever is set up for ToS-update notifications per Phase 36 email reactivation). If no email infrastructure exists yet, build it as part of this phase using a transactional email provider (recommendation: Postmark or AWS SES — neither is currently in the stack; minimal addition).
+
+3. **Counter-notice intake.** New endpoint `POST /api/legal/counter-notice` (authenticated — only the affected user can file). Accepts the §512(g)(3) required fields:
+   ```
+   {
+     removed_target_type, removed_target_id,
+     full_legal_name, address, phone, email,
+     good_faith_statement: true,
+     consent_to_jurisdiction: true,
+     signature: string  // typed full legal name
+   }
+   ```
+   Stores in new `dmca_counter_notices` table. Sends email notification to the original DMCA complainant (whose email is stored on the original `dmca_notices` row). Schedules an internal review reminder for 10 business days out. This is operational tooling — the actual "restore the content unless complainant sues" step is a manual admin action after the 10-day window, not automated.
+
+4. **Repeat-infringer tracking.** §512(i)(1)(A) requires a "reasonably implemented" repeat-infringer policy. Needs (a) a count of DMCA strikes per user, (b) a documented threshold for action, (c) actual enforcement at the threshold. Suggested threshold: **3 valid DMCA notices in 12 months → admin review, not automatic ban**. Not automatic because case law (e.g., *BMG v. Cox*) emphasizes "appropriate circumstances" judgment, but case law also penalizes providers whose policies were sham (no enforcement ever happened). A queue UI for the admin to review users at threshold is the pragmatic middle ground. Specifically:
+   - When a `legal_removals` row with `removal_reason = 'dmca'` is inserted, also insert into `dmca_strikes` keyed by the user.
+   - Counter-notices that result in restoration should clear the corresponding strike (via admin action).
+   - New admin page lists users with ≥ 3 strikes in the trailing 12 months; admin can review history and either suspend the account, dismiss the strike, or take no action (with note).
+
+**Schema additions:**
+
+```sql
+-- Audit log for all admin-initiated legal removals (DMCA, illegal content, court orders)
+CREATE TABLE legal_removals (
+  id SERIAL PRIMARY KEY,
+  target_type VARCHAR(32) NOT NULL,        -- 'document_version' | 'annotation' | 'concept' | 'edge' | 'web_link' | 'page_comment' | 'moderation_comment'
+  target_id INTEGER NOT NULL,              -- not a FK — target may be hard-deleted
+  affected_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  removal_reason VARCHAR(32) NOT NULL,     -- 'dmca' | 'illegal_content' | 'court_order'
+  notice_reference VARCHAR(255),           -- DMCA notice ID, court order docket, etc.
+  internal_notes TEXT,
+  removed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- admin who performed action
+  removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  user_notified_at TIMESTAMP,              -- when subscriber notification email was sent
+  restored_at TIMESTAMP,                   -- non-null if subsequently restored (e.g., after counter-notice)
+  restored_reason VARCHAR(255)
+);
+CREATE INDEX idx_legal_removals_user ON legal_removals(affected_user_id);
+CREATE INDEX idx_legal_removals_reason ON legal_removals(removal_reason, removed_at);
+
+-- DMCA notices received (input side — what triggers a removal)
+CREATE TABLE dmca_notices (
+  id SERIAL PRIMARY KEY,
+  complainant_name VARCHAR(255) NOT NULL,
+  complainant_email VARCHAR(255) NOT NULL,
+  complainant_address TEXT,
+  complainant_phone VARCHAR(64),
+  copyrighted_work_description TEXT NOT NULL,
+  infringing_material_description TEXT NOT NULL,
+  infringing_urls TEXT,                    -- newline-separated
+  good_faith_statement BOOLEAN NOT NULL,
+  accuracy_statement BOOLEAN NOT NULL,
+  signature VARCHAR(255) NOT NULL,
+  received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  substantial_compliance BOOLEAN,          -- admin-evaluated per §512(c)(3)(B)
+  legal_removal_id INTEGER REFERENCES legal_removals(id) ON DELETE SET NULL,
+  internal_notes TEXT
+);
+
+-- DMCA counter-notices (subscriber's response per §512(g)(3))
+CREATE TABLE dmca_counter_notices (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  legal_removal_id INTEGER REFERENCES legal_removals(id) ON DELETE CASCADE,
+  full_legal_name VARCHAR(255) NOT NULL,
+  address TEXT NOT NULL,
+  phone VARCHAR(64) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  good_faith_statement BOOLEAN NOT NULL,
+  consent_to_jurisdiction BOOLEAN NOT NULL,
+  signature VARCHAR(255) NOT NULL,
+  filed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  forwarded_to_complainant_at TIMESTAMP,
+  restoration_decision VARCHAR(32),        -- 'restored' | 'lawsuit_filed' | 'pending'
+  decision_at TIMESTAMP,
+  internal_notes TEXT
+);
+
+-- Per-user DMCA strike record for repeat-infringer policy
+CREATE TABLE dmca_strikes (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  legal_removal_id INTEGER REFERENCES legal_removals(id) ON DELETE CASCADE,
+  struck_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  cleared_at TIMESTAMP,                    -- if counter-notice succeeded or admin dismissed
+  cleared_reason VARCHAR(255)
+);
+CREATE INDEX idx_dmca_strikes_user_active ON dmca_strikes(user_id) WHERE cleared_at IS NULL;
+
+-- Add legal_hold flag to existing hideable types — prevents community unhide for legally-removed content
+ALTER TABLE concepts ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE edges ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE concept_links ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
+```
+
+**Backend changes:**
+- New `adminLegalController.js` handling the legal-removal endpoint, counter-notice intake, and repeat-infringer queue queries.
+- New `dmcaController.js` (or merged into above) handling public-facing endpoints: takedown notice intake form (the `[LINK TO ONLINE FORM]` referenced in the Copyright Policy), counter-notice intake form.
+- Existing community unhide endpoints (Phase 16a) must check `legal_hold` and reject unhide requests for items where `legal_hold = true`.
+- Email infrastructure for subscriber notifications (new transactional email provider integration if not already present).
+- Migration: idempotent ALTER TABLE for `legal_hold` columns; new tables; NO destructive migrations (Architecture Decision #271).
+
+**Frontend changes:**
+- **Public-facing:**
+  - `/copyright-policy` static page (new info page like `/terms` and `/privacy` from Phase 51b) displaying the finalized Copyright Policy text.
+  - `/dmca/takedown` page with form for copyright holders to file notices. Server-side validation against §512(c)(3)(A) seven elements. Submission creates a `dmca_notices` row with `substantial_compliance` left null for admin review.
+  - `/dmca/counter-notice` page (authenticated — only affected users) for filing counter-notices.
+- **Admin-facing:**
+  - New admin panel section "Legal Removals" with: pending DMCA notices queue (compliance review), removal action UI per notice, repeat-infringer queue (users with ≥ 3 active strikes in 12 months), removal history view.
+  - The existing admin "hidden content" page (Phase 16a admin override) gets a new column showing `legal_hold` status and disables unhide for legally-held items.
+
+**Implementation order suggestion:**
+- Phase 53a: Schema additions + admin legal-removal endpoint + `legal_hold` flag enforcement on existing unhide paths + transactional email for subscriber notification
+- Phase 53b: `/copyright-policy` static page + `/dmca/takedown` public form with §512(c)(3)(A) validation
+- Phase 53c: `/dmca/counter-notice` flow + complainant forwarding email
+- Phase 53d: Repeat-infringer tracking + admin review queue UI
+
+**Operational handling SOP (separate deliverable, not code):** Before launch, draft a one-page internal procedure for evaluating takedown notices: the §512(c)(3)(A) seven-element checklist, the §512(c)(3)(B)(ii) "partial compliance triggers a duty to assist" rule, the standard for "substantial compliance," and the contact-the-complainant-for-clarification template. This SOP lives outside the codebase (recommendation: a private document accessible to whoever handles legal mail).
+
+**Out of scope for Phase 53 (intentional):**
+- Automatic content fingerprinting / proactive infringement detection. §512(m)(1) explicitly says safe harbor does NOT require proactive monitoring. Building this would *increase* legal exposure (creates "actual knowledge" risk), not decrease it.
+- Standard technical measures accommodation (§512(i)(1)(B)). No industry-standard measure has actually been formally adopted; this is currently a paper requirement. Boilerplate acknowledgment in the Copyright Policy is sufficient — counsel can advise on whether to add it.
+- Transparency reporting (publishing aggregate takedown stats). Best practice but not legally required at Orca's scale.
+- Public DMCA notice repository. Some platforms (GitHub, Lumen) publish redacted takedown notices for transparency. Worth considering long-term but out of scope for v1.
+
+**Counsel reviews open for this phase:**
+- Confirm 3-strikes-in-12-months threshold for repeat-infringer queue is "reasonable implementation" of §512(i)(1)(A).
+- Confirm subscriber notification email templates accurately describe legal basis without admitting liability.
+- Confirm `legal_hold` flag interaction with append-only philosophy is properly documented in the ToS amendment that follows from counsel comment #1.
+
+---
+
+### Other Counsel Comments — Status & Action
+
+| # | Anchor | Issue | Resolution | Implementation impact |
+|---|--------|-------|------------|----------------------|
+| 0 | "AGREEMENT" (opening) | Browse-wrap → click-wrap | **Phase 51** | Frontend: registration checkbox; possibly upload modal |
+| 1 | "or the Company" (Tier system intro) | §230 illegal-content removal vs. append-only | **Phase 53** — admin-initiated permanent removal mechanism with audit trail (`legal_removals` table, `legal_hold` flag) is the documented exception to append-only philosophy. ToS amendment also needed to acknowledge this exception | Backend: admin endpoint, schema additions; Frontend: admin review UI |
+| 2 | "child" concepts | Term collides with "no users under 18" | **Cosmetic doc edit** — replace "child concepts" with "descendant concepts" throughout ToS. UI uses both "child" and "descendant"; consider standardizing on "descendant" in user-facing copy too. Low priority — codebase rename can be later | Possible UI copy pass. Not a blocker |
+| 3 | "owns the Submission document" | Ambiguous: IP ownership vs. platform control? | **Cosmetic doc edit** — clarify in ToS this means platform-level control (delete, assign co-authors), NOT IP ownership. IP stays with the actual copyright holder | None — doc-only |
+| 4 | "any material that:" (rule list) | Counsel asks for Orca-specific additions | **Review pass** — current list covers vote manipulation, moderation circumvention, graph spam. Worth adding: bad-faith mass-flagging, attempts to evade 18+ requirement. Multi-account vote manipulation already covered | None — doc-only |
+| 5 | "ownership" of Corpuses/Superconcepts | "Ownership" suggests IP rights | **Cosmetic doc edit** — replace with "stewardship" or "administration" in ToS. Consider whether to rename "owner" → "steward" in the UI as well. UI rename is non-trivial (affects CorpusDetailView, ComboTabContent, sidebar labels, member panel copy). Recommendation: rename in legal docs only for now; defer UI rename to a later phase | UI rename possible follow-up phase. Not a blocker |
+| 6 | "any changes or amendments to this Agreement" | Don't promise to notify users of changes | **Doc edit only** — accept counsel's redline | None |
+| 7 | "in the database" (phone storage) | Counsel asks "do you mean by the Company?" | **Cosmetic doc edit** — minor clarification | None |
+| 8 | "identifiers" (third-party advertising) | Third-party data collection disclosure | **Resolved in current draft** — Twilio, ORCID, Cloudflare are disclosed in §4. Add to operational checklist: annual review of these vendors' privacy practices to maintain "reasonable awareness" per CA/DE law | New annual compliance task — see "Operational Compliance Tasks" below |
+| 9 | "UI" (visibility section) | Spell out "user interface" | **Cosmetic doc edit** | None |
+| 10 | "data" (security section) | Confirms industry-standard language is sufficient | **Accept counsel's redline** in subsection (e) | None |
+| 11 | "exists" (data export feature) | **Build the data export feature** (Colorado) | **Phase 52** | Backend + frontend, see Phase 52 above |
+
+**Outstanding questions for counsel (next legal review pass):**
+1. Comment #5: should "owner" → "steward" rename be reflected in the UI as well, or legal documents only?
+2. Privacy Policy contact section currently has TWO different request limits stated — "more than twice within any 12-month period" (request-limits paragraph) and "twice within a 12-month period" (Contact section) — please harmonize to a single phrasing.
+3. Confirm the chosen privacy contact email (suggested: `privacy@orcaconcepts.org`) before final ToS draft.
+4. **Copyright Policy review (Phase 53 driver):** Confirm Orca qualifies as a §512(k)(1)(B) "service provider" — yes per our reading, but please confirm.
+5. **DMCA agent registration address:** the current draft uses the maintainer's home address. Options to avoid posting a residential address in the public Copyright Office directory: (a) use the law firm's office address with permission, (b) retain a registered-agent service for ~$100–200/year, (c) apply for the §201.38(b) P.O. box waiver. Which is lowest-friction? This decision affects both the Copyright Office filing AND the contact information posted on the website's `/copyright-policy` page — both permanent, both indexable.
+6. **Standard technical measures (§512(i)(1)(B)):** worth a one-line acknowledgment in the Copyright Policy or ToS, or is omitting it acceptable given no industry standard has been formally adopted?
+7. **Repeat-infringer policy threshold:** Phase 53 contemplates 3 valid DMCA notices in a trailing 12 months as the trigger for admin review (not automatic suspension). Does this satisfy "reasonable implementation" under §512(i)(1)(A) and the *BMG v. Cox* line of cases?
+8. **Subscriber notification email language:** confirm template wording for DMCA / illegal-content / court-order removals accurately describes legal basis without admitting liability or making representations about the underlying claim.
+9. **ToS amendment for legal-removal exception:** confirm append-only philosophy carve-out for Company-initiated legal removal (Phase 53) is properly documented in the next ToS revision so users have notice that legally-removed content is non-restorable through community moderation.
+
+---
+
+### Operational Compliance Tasks (Recurring)
+
+These are not coding tasks but should be tracked alongside the code roadmap so they don't fall through the cracks:
+
+- **Annual third-party vendor review** (driven by counsel comment #8): Once per year, re-read the privacy policies of Twilio, ORCID, and Cloudflare, plus any new vendors added (Railway, etc.). Confirm they still match what Orca's Privacy Policy describes. Update Privacy Policy if vendor practices have materially changed. CA and DE laws expect this "reasonable awareness." Suggested: add to a shared calendar with annual recurrence.
+- **DMCA agent registration** (already on roadmap): Register Orca as an interactive computer service with the U.S. Copyright Office DMCA agent directory after LLC formation completes. Use LLC name in registration. DMCA/platform law support to be retained separately. Filing fee was $6 base + $1/additional address as of last check — verify current fee on the Copyright Office site before filing.
+- **DMCA agent re-registration (every 3 years):** Per 37 CFR §201.38, designated agent registrations must be renewed every 3 years or they lapse. A lapsed registration breaks §512 safe harbor. Calendar reminder set for 30 days before the 3-year anniversary of the initial filing date. Update on every re-registration: confirm the listed address, name, and URLs are still accurate.
+- **Privacy contact monitoring**: Once `privacy@orcaconcepts.org` is provisioned, set up monitoring (forward to the maintainer's email or similar) so requests don't go unanswered. Colorado, GDPR, and others impose response timeframes (typically 30–45 days).
+- **DMCA contact monitoring** (Phase 53 dependency): Once the DMCA agent email is provisioned (separate from `privacy@`, suggested: `dmca@orcaconcepts.org` or whatever is registered with the Copyright Office), set up monitoring with the same urgency as `privacy@`. The "expeditious removal" standard in §512(c)(1)(C) is interpreted as 24–48 hours by case law; an unmonitored inbox is a safe-harbor risk.
+- **Operational handling SOP for takedown notices** (Phase 53 dependency): Maintain a one-page internal procedure outside the codebase covering: §512(c)(3)(A) seven-element checklist, the §512(c)(3)(B)(ii) "partial compliance triggers a duty to assist" rule, the standard for "substantial compliance," and the contact-the-complainant-for-clarification template. Review annually.
+
 ---
 
 ## My Notes on Status
@@ -2445,6 +2802,12 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 45:** Annotation Creation Warning Modal — ✅ COMPLETE (new `hide_annotation_warning` column on users, `POST /auth/hide-annotation-warning` endpoint, `AnnotationWarningModal.jsx` with "Don't show again" checkbox, wired into `AnnotationPanel.handleConfirmCreate`, preference persisted per-user in DB and refreshed in AuthContext)
 - **Phase 46:** Responsive Concept Header Layout — ✅ COMPLETE (added `flexWrap: 'wrap'` to `headerContent`, `buttonSection`, and `conceptHeader` styles in `Concept.jsx` — action buttons and sort toggles reflow to second row at narrow widths instead of squishing)
 - **Phase 47:** Superconcepts Tab in Concept Annotation Panel — ✅ COMPLETE (new `GET /api/combos/by-edge/:edgeId` endpoint, conditional "Superconcepts (N)" tab in ConceptAnnotationPanel showing combos containing the current edge, click-through subscribes and opens superconcept tab, subconcept list in ComboTabContent now visible to all users with clickable names opening graph tabs)
+- **Phase 48:** ❌ REVERTED (edge discussions feature; fully implemented then fully reverted via `git reset --hard` + force-push + manual `DROP TABLE edge_discussions` and `edge_discussion_votes`. Phase number 48 reused below for a different scope but currently held open — see "On the Horizon" notes about persistent annotation highlight + AND/OR superconcept match mode that were prompted under reused Phase 48.)
+- **Phase 49:** Rate Limiting Hardening — ✅ 49a/49b/49d COMPLETE (49a: trust proxy + SMS abuse protection with Postgres-backed pgRateLimitStore; 49b: write-endpoint user-keyed limiters via perUserHourly factory + initial global safety net; 49d: global safety net raised to 2000/15min, GET-exempt, Postgres-backed after lockout incident. Phase 49c polish deferred post-launch.)
+- **Phase 50:** Reverse Citations — "Cited by N" on Annotations — ✅ COMPLETE (50a: `GET /api/annotations/:id/cited-by` backend with cited_by_count on annotation payload; 50b: frontend "Cited by N" badge with lazy-loaded expand-to-list and click-through navigation, 409 short-circuit fix, useEffect lazy-fetch fix)
+- **Phase 51:** Click-Wrap Consent at Registration & Document Upload — 🔲 PLANNED (PRE-LAUNCH BLOCKER — driven by counsel comment #0; 51a: schema additions `tos_accepted_at` + `tos_version_accepted` on users, backend `verifyRegister` consent fields, backfill migration; 51b: static `/terms` and `/privacy` pages via `pages` table pattern; 51c: `LoginModal.jsx` checkbox + disabled button + ToS/Privacy hyperlinks; 51d: document upload affirmation modal pattern verification — see Pre-Launch Legal & Compliance Blockers section above for full scope)
+- **Phase 52:** Data Export, Correction, and Privacy Contact — 🔲 PLANNED (PRE-LAUNCH BLOCKER — driven by counsel comment #11, Colorado Privacy Act portability requirement; 52a: backend `GET /api/users/me/export` + `data_export_requests` table + 2-per-12-month rate limit; 52b: backend `PATCH /api/users/me` for email correction; 52c: frontend Privacy & Data section on profile page; 52d optional: data subject request form page — see Pre-Launch Legal & Compliance Blockers section above for full scope)
+- **Phase 53:** DMCA & Illegal-Content Removal Infrastructure — 🔲 PLANNED (LAUNCH-RECOMMENDED, not strict blocker — driven by Copyright Policy review and counsel comment #1 on the ToS; unifies §512 DMCA safe-harbor operational machinery with §230 illegal-content removal mechanism; 53a: schema additions `legal_removals` + `dmca_notices` + `dmca_counter_notices` + `dmca_strikes` tables, `legal_hold` flag on concepts/edges/concept_links, admin `POST /api/admin/legal-removal` endpoint, transactional email for subscriber notification; 53b: `/copyright-policy` static page + public `/dmca/takedown` form with §512(c)(3)(A) validation; 53c: `/dmca/counter-notice` flow + complainant forwarding; 53d: repeat-infringer tracking + admin review queue at 3 strikes/12 months threshold — see Pre-Launch Legal & Compliance Blockers section above for full scope, including documented exception to append-only philosophy in Permanence section)
 
 ### Git Commits (Phase 27)
 1. `feat: 27a, two-column concept layout with annotation panel stub, retire links/fliplinks view modes and WebLinksView/FlipLinksView`
@@ -3864,13 +4227,13 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 | `POST /api/concepts/root` | 10/hr | Graph-level vandalism |
 | `POST /api/concepts/child` | 100/hr | Normal usage budget |
 
-**Global safety-net limiter:** `server.js` originally mounted a 500 req / 15 min / IP limiter (in-memory, express-rate-limit) on `/api` BEFORE any routes. This was replaced in Phase 49d — see below — after the original threshold locked Miles out during routine dev use.
+**Global safety-net limiter:** `server.js` originally mounted a 500 req / 15 min / IP limiter (in-memory, express-rate-limit) on `/api` BEFORE any routes. This was replaced in Phase 49d — see below — after the original threshold locked the owner out during routine dev use.
 
 **Verification:** Smoke-tested the flag limiter end-to-end — requests 1–20 returned 404 (dummy edge ID), request 21 returned 429 with `Retry-After: 3587` (~1 hour). Confirms per-user keying, rate-limit enforcement, and `standardHeaders` all work correctly. Frontend build passes; backend starts cleanly with no `express-rate-limit` v8 validation warnings.
 
 #### Phase 49d: Global safety net — raised threshold, GET-exempt, Postgres-backed — ✅ COMPLETE
 
-**Problem discovered April 11, 2026:** The Phase 49b global safety net (500 req / 15 min / IP, in-memory) was too aggressive for legitimate browsing. React StrictMode double-invokes effects in dev, doubling every API call, so a normal session opening Orca and navigating a few graphs easily exceeded 500 requests in 15 minutes. A university lab behind a NAT'd IP would trip it almost instantly with multiple users. Miles locked himself out during a favicon work session — `taskkill /f /im node.exe` cleared it instantly, confirming the store was in-memory (no Postgres persistence) and counters silently reset on every backend restart in production.
+**Problem discovered April 11, 2026:** The Phase 49b global safety net (500 req / 15 min / IP, in-memory) was too aggressive for legitimate browsing. React StrictMode double-invokes effects in dev, doubling every API call, so a normal session opening Orca and navigating a few graphs easily exceeded 500 requests in 15 minutes. A university lab behind a NAT'd IP would trip it almost instantly with multiple users. the maintainer locked themselves out during a favicon work session — `taskkill /f /im node.exe` cleared it instantly, confirming the store was in-memory (no Postgres persistence) and counters silently reset on every backend restart in production.
 
 **Fixes in `server.js`:**
 - **Threshold raised to 2000 req / 15 min / IP.** Deliberately generous; this is not the primary defense for any specific endpoint, it's a blanket floor.
@@ -3908,7 +4271,7 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 
 - **Architecture Decision #266 — Trust Proxy Set to 2 (Phase 49a):** `app.set('trust proxy', 2)` reflects production topology — traffic passes through Cloudflare → Railway edge → app, which is two proxy hops. Setting this to `1` would still leak the Cloudflare edge IP as `req.ip`; setting it to `2` walks two headers back to get the actual client IP. Must be set before any route or limiter mounts, or the limiters are created with the wrong key function. This finding was the highest-severity item in `RATE_LIMIT_AUDIT.md` because every pre-Phase-49 rate limiter was effectively broken in production without it.
 
-- **Architecture Decision #267 — Global Safety Net Exempts GETs (Phase 49d):** The global safety-net limiter skips GET requests entirely. Reads should never consume the bucket because a safety net for abuse should care about writes (creating concepts, voting, flagging, uploading) and auth attempts, not innocent page loads. React StrictMode in dev double-invokes effects, so a normal session can rack up 100+ GETs in a few minutes — the pre-Phase-49d threshold of 500 req/15min locked Miles out during routine dev work. Exempting reads means the global bucket only meters state-changing traffic, which is the thing the backstop is meant to bound.
+- **Architecture Decision #267 — Global Safety Net Exempts GETs (Phase 49d):** The global safety-net limiter skips GET requests entirely. Reads should never consume the bucket because a safety net for abuse should care about writes (creating concepts, voting, flagging, uploading) and auth attempts, not innocent page loads. React StrictMode in dev double-invokes effects, so a normal session can rack up 100+ GETs in a few minutes — the pre-Phase-49d threshold of 500 req/15min locked the owner out during routine dev work. Exempting reads means the global bucket only meters state-changing traffic, which is the thing the backstop is meant to bound.
 
 - **Architecture Decision #268 — Global Safety Net Uses Postgres Store (Phase 49d):** The global safety net moved from express-rate-limit's in-memory store to the existing `pgRateLimitStore`, with key namespace `global:ip:<ip>` to avoid collision with the SMS limiter's `sms:*` keys. Rationale: on Railway's multi-instance deploys an in-memory store means counters are not shared across instances and silently reset on every restart, so an abuser's counter clears on any deploy. Postgres gives real persistence shared across instances. The implementation is a custom async middleware rather than a full express-rate-limit Store adapter because `pgRateLimitStore`'s helpers already expose exactly what a manual middleware needs, and writing an adapter would add indirection for no benefit. Fails open on store errors — a transient DB hiccup should not lock legit users out, and the per-route write-endpoint limiters (Phase 49b) plus the per-phone SMS limiter (Phase 49a) are the real defenses.
 

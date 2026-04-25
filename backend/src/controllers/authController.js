@@ -217,7 +217,7 @@ const authController = {
 
   // Verify OTP and register new user (Phase 40b: now requires password)
   verifyRegister: async (req, res) => {
-    const { phoneNumber, code, username, email, password, ageVerified } = req.body;
+    const { phoneNumber, code, username, email, password, ageVerified, tosAccepted, tosVersion } = req.body;
 
     if (!phoneNumber || !code || !username) {
       return res.status(400).json({ error: 'Phone number, code, and username are required' });
@@ -241,6 +241,14 @@ const authController = {
     // Age verification validation (before Twilio call)
     if (ageVerified !== true) {
       return res.status(400).json({ error: 'Age verification is required (must be 18 or older)' });
+    }
+
+    // ToS consent validation (Phase 51a — before Twilio call)
+    if (tosAccepted !== true) {
+      return res.status(400).json({ error: 'You must accept the Terms of Service and Privacy Policy.' });
+    }
+    if (!tosVersion || typeof tosVersion !== 'string' || !tosVersion.trim()) {
+      return res.status(400).json({ error: 'Invalid Terms of Service version.' });
     }
 
     // Username format validation (before Twilio call)
@@ -297,8 +305,8 @@ const authController = {
         await client.query('BEGIN');
 
         const result = await client.query(
-          'INSERT INTO users (username, phone_hash, phone_lookup, password_hash, email, age_verified_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id, username',
-          [username, phoneHash, phoneLookup, passwordHash, email.trim()]
+          'INSERT INTO users (username, phone_hash, phone_lookup, password_hash, email, age_verified_at, tos_accepted_at, tos_version_accepted) VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6) RETURNING id, username',
+          [username, phoneHash, phoneLookup, passwordHash, email.trim(), tosVersion.trim()]
         );
         user = result.rows[0];
 
