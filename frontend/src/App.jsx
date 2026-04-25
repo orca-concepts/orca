@@ -7,6 +7,8 @@ import DocInviteAccept from './components/DocInviteAccept';
 import CitationRedirect from './components/CitationRedirect';
 import ProfilePage from './components/ProfilePage';
 import OrcidCallback from './components/OrcidCallback';
+import TermsPage from './components/TermsPage';
+import PrivacyPage from './components/PrivacyPage';
 
 function App() {
   return (
@@ -31,6 +33,10 @@ function App() {
 
           {/* Phase 41a: ORCID OAuth callback */}
           <Route path="/orcid/callback" element={<OrcidCallback />} />
+
+          {/* Phase 51b: Terms of Service and Privacy Policy (static, no auth required) */}
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
 
           {/* AppShell handles both authenticated and guest users */}
           <Route

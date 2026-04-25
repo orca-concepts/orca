@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { CURRENT_TOS_VERSION } from '../config/constants';
 
 /**
  * LoginModal — inline modal overlay for password login, phone OTP registration, and forgot password.
@@ -29,7 +30,7 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
   const [signUpPassword, setSignUpPassword] = useState('');
   const [signUpConfirm, setSignUpConfirm] = useState('');
   const [showSignUpPassword, setShowSignUpPassword] = useState(false);
-  const [ageVerified, setAgeVerified] = useState(false);
+  const [tosAccepted, setTosAccepted] = useState(false);
 
   // Forgot state
   const [forgotStep, setForgotStep] = useState(1); // 1=phone, 2=OTP, 3=new password
@@ -91,7 +92,7 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
     setSignUpPassword('');
     setSignUpConfirm('');
     setShowSignUpPassword(false);
-    setAgeVerified(false);
+    setTosAccepted(false);
     setForgotStep(1);
     setForgotPhone('');
     setForgotCode('');
@@ -195,12 +196,12 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
       setError('Passwords do not match');
       return;
     }
-    if (!ageVerified) {
-      setError('Age verification is required');
+    if (!tosAccepted) {
+      setError('You must accept the Terms of Service and Privacy Policy');
       return;
     }
     setLoading(true);
-    const result = await phoneRegister('+1' + phoneDigits, code, username.trim(), signUpEmail.trim(), signUpPassword, ageVerified);
+    const result = await phoneRegister('+1' + phoneDigits, code, username.trim(), signUpEmail.trim(), signUpPassword, tosAccepted, CURRENT_TOS_VERSION);
     if (result.success) {
       onClose();
     } else {
@@ -479,19 +480,26 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
           disabled={loading}
         />
       </div>
-      <label style={styles.checkboxRow}>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '14px', fontFamily: '"EB Garamond", Georgia, serif', lineHeight: 1.4, cursor: 'pointer' }}>
         <input
           type="checkbox"
-          checked={ageVerified}
-          onChange={(e) => setAgeVerified(e.target.checked)}
+          checked={tosAccepted}
+          onChange={(e) => setTosAccepted(e.target.checked)}
           disabled={loading}
+          style={{ marginTop: '3px', flexShrink: 0 }}
         />
-        <span style={styles.checkboxLabel}>I confirm I am at least 18 years old</span>
+        <span>
+          I have read and agree to the{' '}
+          <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Terms of Service</a>
+          {' '}and{' '}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Privacy Policy</a>.
+          I confirm I am at least 18 years old.
+        </span>
       </label>
       <button
         onClick={handleSignupCreate}
-        style={loading ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
-        disabled={loading}
+        style={(loading || !tosAccepted) ? { ...styles.submitBtn, ...styles.disabledBtn } : styles.submitBtn}
+        disabled={loading || !tosAccepted}
       >
         {loading ? 'Creating account...' : 'Create Account'}
       </button>

@@ -37,8 +37,8 @@ export const authAPI = {
   sendCode: (phoneNumber, intent) =>
     api.post('/auth/send-code', { phoneNumber, intent }),
 
-  verifyRegister: (phoneNumber, code, username, email, password, ageVerified) =>
-    api.post('/auth/verify-register', { phoneNumber, code, username, email, password, ageVerified }),
+  verifyRegister: (phoneNumber, code, username, email, password, tosAccepted, tosVersion) =>
+    api.post('/auth/verify-register', { phoneNumber, code, username, email, password, ageVerified: tosAccepted, tosAccepted, tosVersion }),
 
   // Forgot password (Phase 40b)
   forgotPasswordSendCode: (phoneNumber) =>

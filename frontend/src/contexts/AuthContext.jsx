@@ -76,10 +76,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const phoneRegister = async (phoneNumber, code, username, email, password, ageVerified) => {
+  const phoneRegister = async (phoneNumber, code, username, email, password, tosAccepted, tosVersion) => {
     try {
       setError(null);
-      const response = await authAPI.verifyRegister(phoneNumber, code, username, email, password, ageVerified);
+      const response = await authAPI.verifyRegister(phoneNumber, code, username, email, password, tosAccepted, tosVersion);
       const { token, user } = response.data;
       localStorage.setItem('token', token);
       setUser(user);
