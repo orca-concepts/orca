@@ -203,6 +203,101 @@ const adminLegalController = {
       console.error('Error performing legal removal:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
+  },
+
+  // GET /api/admin/legal/notices — admin-only list of infringement notices
+  getNotices: async (req, res) => {
+    try {
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID);
+      if (!adminUserId || req.user.userId !== adminUserId) {
+        return res.status(403).json({ error: 'Only administrators can view legal notices' });
+      }
+
+      const result = await pool.query(
+        `SELECT cin.*,
+           EXISTS (
+             SELECT 1 FROM legal_removals lr
+             WHERE lr.notice_reference LIKE 'copyright_infringement_notices.id=' || cin.id || '%'
+           ) AS acted_on
+         FROM copyright_infringement_notices cin
+         ORDER BY cin.created_at DESC`
+      );
+
+      res.json({ notices: result.rows });
+    } catch (error) {
+      console.error('Error fetching infringement notices:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // GET /api/admin/legal/counter-notices — admin-only list of counter-notices
+  getCounterNotices: async (req, res) => {
+    try {
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID);
+      if (!adminUserId || req.user.userId !== adminUserId) {
+        return res.status(403).json({ error: 'Only administrators can view counter-notices' });
+      }
+
+      const result = await pool.query(
+        `SELECT * FROM copyright_counter_notices ORDER BY created_at DESC`
+      );
+
+      res.json({ counterNotices: result.rows });
+    } catch (error) {
+      console.error('Error fetching counter-notices:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // GET /api/admin/legal/removals — admin-only audit history
+  getRemovals: async (req, res) => {
+    try {
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID);
+      if (!adminUserId || req.user.userId !== adminUserId) {
+        return res.status(403).json({ error: 'Only administrators can view legal removals' });
+      }
+
+      const result = await pool.query(
+        `SELECT lr.*, u.username AS affected_username, u.email AS affected_email
+         FROM legal_removals lr
+         LEFT JOIN users u ON lr.affected_user_id = u.id
+         ORDER BY lr.removed_at DESC`
+      );
+
+      res.json({ removals: result.rows });
+    } catch (error) {
+      console.error('Error fetching legal removals:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // POST /api/admin/legal/removals/:id/mark-notified — set user_notified_at = NOW()
+  markNotified: async (req, res) => {
+    try {
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID);
+      if (!adminUserId || req.user.userId !== adminUserId) {
+        return res.status(403).json({ error: 'Only administrators can update legal removals' });
+      }
+
+      const removalId = parseInt(req.params.id);
+      if (isNaN(removalId)) {
+        return res.status(400).json({ error: 'Invalid removal ID' });
+      }
+
+      const result = await pool.query(
+        `UPDATE legal_removals SET user_notified_at = NOW() WHERE id = $1 RETURNING *`,
+        [removalId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Legal removal not found' });
+      }
+
+      res.json({ removal: result.rows[0] });
+    } catch (error) {
+      console.error('Error marking removal as notified:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 };
 

@@ -108,7 +108,8 @@ const authController = {
       }
 
       const row = result.rows[0];
-      res.json({ user: { id: row.id, username: row.username, email: row.email, orcidId: row.orcid_id, hideAnnotationWarning: row.hide_annotation_warning, created_at: row.created_at } });
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID || '0');
+      res.json({ user: { id: row.id, username: row.username, email: row.email, orcidId: row.orcid_id, hideAnnotationWarning: row.hide_annotation_warning, isAdmin: row.id === adminUserId, created_at: row.created_at } });
     } catch (error) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Internal server error' });

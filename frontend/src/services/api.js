@@ -665,4 +665,17 @@ export const legalAPI = {
     api.post('/legal/counter-notice', data),
 };
 
+export const adminAPI = {
+  getNotices: () =>
+    api.get('/admin/legal/notices'),
+  getCounterNotices: () =>
+    api.get('/admin/legal/counter-notices'),
+  getRemovals: () =>
+    api.get('/admin/legal/removals'),
+  legalRemove: (data) =>
+    api.post('/admin/legal-removal', data),
+  markNotified: (removalId) =>
+    api.post(`/admin/legal/removals/${removalId}/mark-notified`),
+};
+
 export default api;

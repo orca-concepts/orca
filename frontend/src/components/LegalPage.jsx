@@ -1,8 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const LegalPage = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
     <div style={styles.container}>
@@ -35,6 +37,18 @@ const LegalPage = () => {
           <span style={styles.docDesc}>Respond to a DMCA takedown affecting your content</span>
         </button>
       </div>
+
+      {user?.isAdmin && (
+        <>
+          <h2 style={styles.subheading}>Administration</h2>
+          <div style={styles.linkList}>
+            <button onClick={() => navigate('/admin/legal')} style={styles.docLink}>
+              <span style={styles.docTitle}>Legal Administration</span>
+              <span style={styles.docDesc}>Review infringement notices, counter-notices, and removal history</span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 };
