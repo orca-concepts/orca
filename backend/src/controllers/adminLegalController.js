@@ -306,6 +306,93 @@ const adminLegalController = {
       console.error('Error marking removal as notified:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
+  },
+
+  // GET /api/admin/legal/repeat-infringers — users with 3+ active DMCA strikes in trailing 12 months
+  getRepeatInfringers: async (req, res) => {
+    try {
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID);
+      if (!adminUserId || req.user.userId !== adminUserId) {
+        return res.status(403).json({ error: 'Only administrators can view repeat-infringer data' });
+      }
+
+      // Find users at threshold
+      const usersResult = await pool.query(
+        `SELECT ds.user_id, u.username, u.email, u.created_at AS account_created_at,
+                COUNT(*) AS active_strike_count
+         FROM dmca_strikes ds
+         JOIN users u ON ds.user_id = u.id
+         WHERE ds.cleared_at IS NULL
+           AND ds.struck_at > NOW() - INTERVAL '1 year'
+         GROUP BY ds.user_id, u.username, u.email, u.created_at
+         HAVING COUNT(*) >= 3
+         ORDER BY COUNT(*) DESC, u.username ASC`
+      );
+
+      // For each flagged user, fetch their strike details with legal_removals context
+      const infringers = [];
+      for (const row of usersResult.rows) {
+        const strikesResult = await pool.query(
+          `SELECT ds.id AS strike_id, ds.struck_at, ds.cleared_at, ds.cleared_reason,
+                  lr.id AS removal_id, lr.target_type, lr.target_id,
+                  lr.removal_reason, lr.notice_reference, lr.internal_notes, lr.removed_at
+           FROM dmca_strikes ds
+           JOIN legal_removals lr ON ds.legal_removal_id = lr.id
+           WHERE ds.user_id = $1
+             AND ds.cleared_at IS NULL
+             AND ds.struck_at > NOW() - INTERVAL '1 year'
+           ORDER BY ds.struck_at DESC`,
+          [row.user_id]
+        );
+        infringers.push({
+          user_id: row.user_id,
+          username: row.username,
+          email: row.email,
+          account_created_at: row.account_created_at,
+          active_strike_count: parseInt(row.active_strike_count),
+          strikes: strikesResult.rows,
+        });
+      }
+
+      res.json({ infringers });
+    } catch (error) {
+      console.error('Error fetching repeat infringers:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+
+  // POST /api/admin/legal/strikes/:id/clear — dismiss a DMCA strike
+  clearStrike: async (req, res) => {
+    try {
+      const adminUserId = parseInt(process.env.ADMIN_USER_ID);
+      if (!adminUserId || req.user.userId !== adminUserId) {
+        return res.status(403).json({ error: 'Only administrators can clear strikes' });
+      }
+
+      const strikeId = parseInt(req.params.id);
+      if (isNaN(strikeId)) {
+        return res.status(400).json({ error: 'Invalid strike ID' });
+      }
+
+      const { reason } = req.body;
+      if (!reason || !reason.trim()) {
+        return res.status(400).json({ error: 'A reason is required to clear a strike' });
+      }
+
+      const result = await pool.query(
+        `UPDATE dmca_strikes SET cleared_at = NOW(), cleared_reason = $1 WHERE id = $2 AND cleared_at IS NULL RETURNING *`,
+        [reason.trim(), strikeId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Strike not found or already cleared' });
+      }
+
+      res.json({ strike: result.rows[0] });
+    } catch (error) {
+      console.error('Error clearing strike:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 };
 

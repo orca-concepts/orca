@@ -676,6 +676,10 @@ export const adminAPI = {
     api.post('/admin/legal-removal', data),
   markNotified: (removalId) =>
     api.post(`/admin/legal/removals/${removalId}/mark-notified`),
+  getRepeatInfringers: () =>
+    api.get('/admin/legal/repeat-infringers'),
+  clearStrike: (strikeId, reason) =>
+    api.post(`/admin/legal/strikes/${strikeId}/clear`, { reason }),
 };
 
 export default api;

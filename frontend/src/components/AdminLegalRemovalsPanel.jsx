@@ -4,6 +4,7 @@ import { adminAPI } from '../services/api';
 const VALID_TARGET_TYPES = ['document_version', 'annotation', 'concept', 'edge', 'web_link', 'page_comment', 'moderation_comment'];
 
 const AdminLegalRemovalsPanel = () => {
+  const [infringers, setInfringers] = useState([]);
   const [notices, setNotices] = useState([]);
   const [counterNotices, setCounterNotices] = useState([]);
   const [removals, setRemovals] = useState([]);
@@ -14,6 +15,12 @@ const AdminLegalRemovalsPanel = () => {
   const [expandedNotices, setExpandedNotices] = useState({});
   const [expandedCounter, setExpandedCounter] = useState({});
   const [expandedRemovalNotes, setExpandedRemovalNotes] = useState({});
+  const [expandedInfringerStrikes, setExpandedInfringerStrikes] = useState({});
+
+  // Strike dismissal state
+  const [clearingStrike, setClearingStrike] = useState(null); // strike id being dismissed
+  const [clearReason, setClearReason] = useState('');
+  const [clearSubmitting, setClearSubmitting] = useState(false);
 
   // Inline removal form state per notice
   const [activeForm, setActiveForm] = useState(null); // notice id
@@ -28,11 +35,13 @@ const AdminLegalRemovalsPanel = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [noticesRes, counterRes, removalsRes] = await Promise.all([
+      const [infringersRes, noticesRes, counterRes, removalsRes] = await Promise.all([
+        adminAPI.getRepeatInfringers(),
         adminAPI.getNotices(),
         adminAPI.getCounterNotices(),
         adminAPI.getRemovals(),
       ]);
+      setInfringers(infringersRes.data.infringers || []);
       setNotices(noticesRes.data.notices || []);
       setCounterNotices(counterRes.data.counterNotices || []);
       setRemovals(removalsRes.data.removals || []);
@@ -81,6 +90,21 @@ const AdminLegalRemovalsPanel = () => {
     }
   };
 
+  const handleClearStrike = async (strikeId) => {
+    if (!clearReason.trim()) return;
+    setClearSubmitting(true);
+    try {
+      await adminAPI.clearStrike(strikeId, clearReason.trim());
+      setClearingStrike(null);
+      setClearReason('');
+      await loadData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to clear strike');
+    } finally {
+      setClearSubmitting(false);
+    }
+  };
+
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedEmail(true);
@@ -109,6 +133,120 @@ const AdminLegalRemovalsPanel = () => {
   return (
     <div style={styles.container}>
       <h2 style={styles.pageTitle}>Legal Administration</h2>
+
+      {/* Section 0: Repeat Infringers */}
+      <section style={styles.section}>
+        <h3 style={styles.sectionTitle}>Repeat Infringers (3+ strikes / 12 months)</h3>
+        {infringers.length === 0 ? (
+          <p style={styles.emptyText}>No users at threshold.</p>
+        ) : (
+          <div style={styles.tableContainer}>
+            {infringers.map(inf => (
+              <div key={inf.user_id} style={styles.row}>
+                <div style={styles.rowHeader}>
+                  <span style={styles.rowId}>{inf.username}</span>
+                  <span style={styles.rowMeta}>{inf.active_strike_count} active strike{inf.active_strike_count !== 1 ? 's' : ''}</span>
+                  <span style={styles.rowDate}>Account created {formatDate(inf.account_created_at)}</span>
+                </div>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Email:</span>
+                  <span style={styles.detailValue}>
+                    {inf.email || 'none'}
+                    {inf.email && (
+                      <button
+                        onClick={() => copyToClipboard(inf.email)}
+                        style={styles.copyButton}
+                      >
+                        Copy
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <div style={{ marginTop: '8px' }}>
+                  <button
+                    style={styles.expandButton}
+                    onClick={() => setExpandedInfringerStrikes(prev => ({ ...prev, [inf.user_id]: !prev[inf.user_id] }))}
+                  >
+                    {expandedInfringerStrikes[inf.user_id] ? 'Hide strikes' : 'Show strikes'}
+                  </button>
+                </div>
+                {expandedInfringerStrikes[inf.user_id] && (
+                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {inf.strikes.map(s => (
+                      <div key={s.strike_id} style={{ padding: '8px', border: '1px solid #e0dcd6', borderRadius: '3px', backgroundColor: '#faf8f5' }}>
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Strike date:</span>
+                          <span style={styles.detailValue}>{formatDate(s.struck_at)}</span>
+                        </div>
+                        <div style={styles.detailRow}>
+                          <span style={styles.detailLabel}>Removed:</span>
+                          <span style={styles.detailValue}>{s.target_type} #{s.target_id} ({s.removal_reason})</span>
+                        </div>
+                        {s.notice_reference && (
+                          <div style={styles.detailRow}>
+                            <span style={styles.detailLabel}>Notice ref:</span>
+                            <span style={styles.detailValue}>{s.notice_reference}</span>
+                          </div>
+                        )}
+                        {s.internal_notes && (
+                          <div style={styles.detailRow}>
+                            <span style={styles.detailLabel}>Notes:</span>
+                            <span style={styles.detailValue}>{truncate(s.internal_notes, 120)}</span>
+                          </div>
+                        )}
+                        <div style={{ marginTop: '6px' }}>
+                          {clearingStrike === s.strike_id ? (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                              <textarea
+                                value={clearReason}
+                                onChange={e => setClearReason(e.target.value)}
+                                placeholder="Reason for dismissal"
+                                rows={1}
+                                style={styles.formTextarea}
+                              />
+                              <button
+                                onClick={() => handleClearStrike(s.strike_id)}
+                                disabled={clearSubmitting || !clearReason.trim()}
+                                style={styles.submitButton}
+                              >
+                                {clearSubmitting ? 'Clearing...' : 'Confirm'}
+                              </button>
+                              <button
+                                onClick={() => { setClearingStrike(null); setClearReason(''); }}
+                                style={styles.cancelButton}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setClearingStrike(s.strike_id); setClearReason(''); }}
+                              style={styles.removeButton}
+                            >
+                              Dismiss strike
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ ...styles.instructionBlock, marginTop: '12px' }}>
+          <p style={styles.instructionText}>
+            To suspend a user account, run the following manually in psql after reviewing their strike history above:
+          </p>
+          <p style={{ ...styles.instructionText, fontFamily: 'monospace', fontSize: '12px', marginTop: '6px' }}>
+            UPDATE users SET &lt;suspension_column_name&gt; = NOW() WHERE id = &lt;user_id&gt;;
+          </p>
+          <p style={{ ...styles.instructionText, marginTop: '6px' }}>
+            Then email the user from orcaconcepts@gmail.com explaining the suspension and appeal process.
+          </p>
+        </div>
+      </section>
 
       {/* Section 1: Infringement Notices */}
       <section style={styles.section}>
