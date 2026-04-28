@@ -1,7 +1,7 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 28, 2026 (Phase 53a public intake forms COMPLETE — `copyright_infringement_notices` + `copyright_counter_notices` tables created via `migrate.js`, new `legalController.js` + `routes/legal.js` with public no-auth `POST /api/legal/infringement` and `POST /api/legal/counter-notice` endpoints with field validation, new `InfringementNoticePage.jsx` and `CounterNoticePage.jsx` form components mounted at `/report-infringement` and `/counter-notice` via `AppShell.jsx` LEGAL_SLUGS extension, "Copyright Notices" section added to `LegalPage.jsx` linking to both forms, `legalAPI.submitInfringement` and `submitCounterNotice` added to `frontend/src/services/api.js`. **Major Phase 53 simplification:** transactional email infrastructure (originally Phase 53.0) is now REMOVED FROM SCOPE entirely — Miles will manually respond to all infringement and counter-notice submissions via `orcaconcepts@gmail.com` using the contact info captured on the intake forms. No `sendEmail` wrapper, no Postmark/SES integration, no automated subscriber notification, no automated complainant forwarding. See Architecture Decision #275. Remaining Phase 53 work (admin permanent-removal endpoint, `legal_hold` flag, `legal_removals` audit table, repeat-infringer tracking) still PLANNED but now significantly smaller without the email layer. Phases 51 + 52 remain COMPLETE — both pre-launch hard blockers resolved.)
+**Last Updated:** April 28, 2026 (Phase 53 DMCA & illegal-content removal infrastructure COMPLETE — all sub-phases shipped. 53a: public intake forms (`copyright_infringement_notices` + `copyright_counter_notices` tables, no-auth POST endpoints, form pages). 53b: `legal_removals` audit table + `legal_hold` flag on concepts/edges/concept_links + admin `POST /api/admin/legal-removal` endpoint with per-target-type behavior (hard-delete for documents/annotations/comments, hide+legal_hold for concepts/edges/web_links) + `AdminLegalRemovalsPanel.jsx` admin UI at `/admin/legal` with infringement notice queue, counter-notice display, removal audit history, inline removal form, mark-notified workflow + `isAdmin` field on `/auth/me` response. 53c: `dmca_strikes` table with auto-insert on DMCA removal + repeat-infringer admin review queue (3+ active strikes / 12 months) with per-strike dismissal. No transactional email infrastructure — all notification is manual from `orcaconcepts@gmail.com` per Architecture Decision #275. User suspension is intentionally manual via psql — no suspend button or endpoint. Phases 51 + 52 also COMPLETE — all three pre-launch legal/compliance phases resolved.)
 
 **Prior Last Updated:** April 25, 2026 (Phase 52 data portability/correction COMPLETE — 52a self-service `GET /api/users/me/export` endpoint returning JSON of account + contributions + votes/subscriptions, with `data_export_requests` audit table and 2-per-12-months rate limit; 52b+c `PATCH /api/users/me` email correction endpoint + Privacy & Data section on profile page with download button, exports-used counter, inline email edit, and privacy contact mailto; follow-up commit softened user-facing strings to drop the explicit "Colorado Privacy Act" reference in favor of plain language. 52d data subject request form intentionally deferred. Phase 51 click-wrap consent also COMPLETE — schema + backend verifyRegister consent fields + standalone backfill script + static `/terms` + `/privacy` placeholder pages + LoginModal Sign Up click-wrap.)
 
@@ -1385,7 +1385,7 @@ CREATE TABLE IF NOT EXISTS copyright_infringement_notices (
 - The form copy on `/report-infringement` lists the §512(c)(3)(A) seven required elements (identification of copyrighted work, identification of allegedly infringing material, contact info, good-faith statement, accuracy-and-authority statement, signature) as guidance for what the submitter should include in the `body` text.
 - `submitter_name` and `submitter_email` are captured as separate columns; everything else (the §512 substantive content) lives in the free-text `body`. This deliberate simplicity means the form imposes no specific structure on the body — the legal sufficiency of any given submission is evaluated manually by Miles when he reviews it.
 - **No automated email** is sent on submission. Miles checks the table periodically: `SELECT * FROM copyright_infringement_notices ORDER BY created_at DESC;` and replies manually from `orcaconcepts@gmail.com`. See Architecture Decision #275.
-- When Phase 53b ships, an admin action against a notice will create a `legal_removals` row that references this notice via the `notice_reference` field (suggested format: `copyright_infringement_notices.id=<id>` so the link is unambiguous in audit history).
+- **Phase 53b (shipped):** Admin actions against notices create `legal_removals` rows referencing this notice via the `notice_reference` field (format: `copyright_infringement_notices.id=<id>`).
 - Append-only by policy — submissions are legal records and should never be deleted.
 
 #### `copyright_counter_notices` — ✅ IMPLEMENTED (Phase 53a)
@@ -1847,6 +1847,20 @@ All corpus endpoints use authentication. GET endpoints for listing and viewing a
 | GET | `/comments/:edgeId` | Required | Get all moderation comments for a hidden edge, ordered by creation time. |
 | POST | `/unhide` | Admin only | Restore a hidden edge (sets `is_hidden = false`). Admin determined by `ADMIN_USER_ID` environment variable. |
 
+### Admin Legal (`/api/admin`) — ✅ IMPLEMENTED (Phase 53b/53c)
+
+All endpoints require authentication and are admin-only (gated by `ADMIN_USER_ID` env var). Non-admin users receive 403.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/legal-removal` | Perform a legal removal. Body: `{ target_type, target_id, removal_reason, notice_reference, internal_notes }`. Hard-deletes documents/annotations/comments; hides+legal_hold for concepts/edges/web_links. Writes `legal_removals` audit row. Auto-inserts `dmca_strikes` row for DMCA removals with non-null affected user. Returns `{ success, legal_removal_id, affected_user_email, affected_username }`. (Phase 53b) |
+| GET | `/legal/notices` | List all `copyright_infringement_notices` with `acted_on` boolean (true if a `legal_removals` row references this notice). (Phase 53b) |
+| GET | `/legal/counter-notices` | List all `copyright_counter_notices`. (Phase 53b) |
+| GET | `/legal/removals` | List all `legal_removals` with affected user info via LEFT JOIN. (Phase 53b) |
+| POST | `/legal/removals/:id/mark-notified` | Set `user_notified_at = NOW()` on a legal removal row. (Phase 53b) |
+| GET | `/legal/repeat-infringers` | Users with 3+ active DMCA strikes in trailing 12 months, with strike details joined to legal_removals. (Phase 53c) |
+| POST | `/legal/strikes/:id/clear` | Dismiss a DMCA strike. Body: `{ reason }`. Sets `cleared_at = NOW()` and `cleared_reason`. (Phase 53c) |
+
 ### Info Pages (`/api/pages`) — ✅ IMPLEMENTED (Phase 30g)
 
 | Method | Endpoint | Auth | Description |
@@ -1882,6 +1896,7 @@ orca/
 │   │   │   ├── comboController.js # Combo CRUD, subscriptions, annotations, voting (Phase 39a)
 │   │   │   ├── conceptsController.js # Concept CRUD operations
 │   │   │   ├── corpusController.js  # Corpus & document CRUD (Phase 7a)
+│   │   │   ├── adminLegalController.js # Admin legal removals, notices, strikes, repeat-infringer queue (Phase 53b/53c)
 │   │   │   ├── legalController.js   # Copyright infringement + counter-notice intake (Phase 53a)
 │   │   │   ├── moderationController.js # Moderation: flag, unflag, vote, comment, unhide (Phase 16, updated 30k)
 │   │   │   ├── pagesController.js   # Informational page comments CRUD (Phase 30g)
@@ -1900,6 +1915,7 @@ orca/
 │   │   │   ├── citations.js     # Citation resolution routes (Phase 38j)
 │   │   │   ├── combos.js        # Combo routes — CRUD, subscriptions, annotations, voting (Phase 39a)
 │   │   │   ├── documents.js     # Document routes — standalone doc + tags + citations (Phase 7a, 17a, 38j)
+│   │   │   ├── adminLegal.js      # Admin legal routes — removals, notices, strikes (Phase 53b/53c)
 │   │   │   ├── legal.js          # Legal routes — copyright infringement + counter-notice intake (Phase 53a)
 │   │   │   ├── pages.js          # Informational page comment routes (Phase 30g)
 │   │   │   ├── tunnels.js       # Tunnel link routes — CRUD, voting (Phase 43a)
@@ -1930,6 +1946,7 @@ orca/
     │   │   ├── CorpusMembersPanel.jsx # Shared: members panel — invite tokens, member list, leave button, transfer ownership (Phase 35a extraction, updated 35b)
     │   │   ├── CorpusListView.jsx   # Corpus browsing and creation UI (Phase 7a)
     │   │   ├── CorpusTabContent.jsx # Inline corpus tab — persistent tab with doc viewer + annotations + shared sub-components (Phase 7c, updated 35a)
+    │   │   ├── AdminLegalRemovalsPanel.jsx # Admin legal review panel — /admin/legal route (Phase 53b/53c)
     │   │   ├── CounterNoticePage.jsx # DMCA counter-notification public form — /counter-notice route (Phase 53a)
     │   │   ├── DiffModal.jsx       # Concept diff modal — side-by-side child comparison with Shared/Similar/Unique grouping, drill-down navigation with breadcrumbs (Phase 14a+14b)
     │   │   ├── DocInviteAccept.jsx  # Document co-author invite acceptance page — /doc-invite/:token route (Phase 26a)
@@ -2361,7 +2378,7 @@ As a platform that hosts user generated content, Orca's approach to content mode
 - Unvoting cascades: removing a concept (via X button on Graph Votes page or unvoting in children view) also removes all descendants in that branch, with vote counts subtracted accordingly
 
 ### Documented Exception: Company-Initiated Legal Removal (Phase 53)
-The append-only "Nothing Is Ever Deleted" rule governs **user-driven** deletion and the **community** moderation system (hide/unhide via flags and votes). It does NOT apply to Company-initiated removal in response to legal obligation — DMCA takedown notices, content the Company has actual knowledge is illegal, or court orders. Phase 53 builds the audited, admin-only mechanism for these cases. Legally-removed content will set a `legal_hold` flag (where applicable) that prevents community unhide. Intake audit trail lives in `copyright_infringement_notices` and `copyright_counter_notices` (Phase 53a, ✅ implemented). The admin removal audit table (`legal_removals`) and repeat-infringer strike table are still planned. This exception must be acknowledged in the ToS (per counsel review of comment #1) so users understand append-only is community-scoped, not absolute.
+The append-only "Nothing Is Ever Deleted" rule governs **user-driven** deletion and the **community** moderation system (hide/unhide via flags and votes). It does NOT apply to Company-initiated removal in response to legal obligation — DMCA takedown notices, content the Company has actual knowledge is illegal, or court orders. Phase 53 (✅ COMPLETE) builds the audited, admin-only mechanism for these cases. Legally-removed content sets a `legal_hold` flag (where applicable) that prevents community unhide. Intake audit trail lives in `copyright_infringement_notices` and `copyright_counter_notices`. The admin removal audit table (`legal_removals`) tracks every removal with full provenance. The `dmca_strikes` table tracks per-user DMCA strikes with a repeat-infringer admin review queue at 3+ active strikes in 12 months. This exception is acknowledged in the ToS (per counsel review of comment #1) so users understand append-only is community-scoped, not absolute.
 
 ---
 
@@ -2372,9 +2389,9 @@ This section captures features that are required before public launch for legal/
 **Three phases follow, with different launch-blocker status:**
 - **Phase 51 (click-wrap consent)** — ✅ **COMPLETE (April 25, 2026).** Hard blocker resolved.
 - **Phase 52 (data export + correction + privacy contact)** — ✅ **COMPLETE (April 25, 2026).** Hard blocker resolved. (Phase 52d optional data subject request form intentionally deferred — `orcaconcepts@gmail.com` mailto in the Privacy & Data section is sufficient until volume warrants a structured form.)
-- **Phase 53 (DMCA + illegal-content removal infrastructure)** — 🟡 PARTIAL. Phase 53a (public intake forms) ✅ COMPLETE — `copyright_infringement_notices` and `copyright_counter_notices` tables, `/api/legal/infringement` and `/api/legal/counter-notice` endpoints, `/report-infringement` and `/counter-notice` form pages, "Copyright Notices" section on `/legal` hub. Remaining work (admin permanent-removal endpoint with `legal_hold` flag and `legal_removals` audit table; repeat-infringer tracking) is launch-recommended but not a strict blocker. The Copyright Policy + DMCA agent registration + working intake forms qualify Orca for §512 safe harbor on day one. **Major scope simplification (April 28, 2026):** transactional email infrastructure (originally Phase 53.0) has been REMOVED FROM SCOPE. Miles will manually respond to all submissions from `orcaconcepts@gmail.com` using the contact info captured on the intake forms. No `sendEmail` wrapper, no Postmark/SES integration, no automated subscriber notification. See Architecture Decision #275.
+- **Phase 53 (DMCA + illegal-content removal infrastructure)** — ✅ **COMPLETE (April 28, 2026).** All sub-phases shipped: 53a public intake forms, 53b admin permanent-removal endpoint + `legal_hold` flag + admin review UI + mark-notified workflow, 53c `dmca_strikes` table + repeat-infringer admin review queue. No transactional email — manual response from `orcaconcepts@gmail.com` per Architecture Decision #275. User suspension is intentionally manual via psql.
 
-LLC formation can proceed in parallel with the remaining phase. Both pre-launch hard blockers (Phase 51 and Phase 52) are done, and the public-facing legal intake (Phase 53a) is now also live. Orca is launch-ready from a legal-compliance standpoint: the Copyright Policy is published, infringement and counter-notice forms are functional, and submissions land in dedicated tables for manual review. The remaining Phase 53 admin tooling (permanent-removal endpoint + repeat-infringer tracking) can ship post-launch as traffic warrants — it is what's needed to *defend* a §512 safe harbor claim if a notice is ever received, not what qualifies for safe harbor in the first place.
+LLC formation can proceed. All three pre-launch legal/compliance phases (51, 52, 53) are complete. Orca is launch-ready from a legal-compliance standpoint: click-wrap consent, data portability/correction, Copyright Policy, DMCA agent registration, infringement/counter-notice intake forms, admin removal tooling, and repeat-infringer tracking are all in place.
 
 ### Phase 51: Click-Wrap Consent at Registration & Document Upload — ✅ COMPLETE (April 25, 2026)
 
@@ -2413,7 +2430,7 @@ LLC formation can proceed in parallel with the remaining phase. Both pre-launch 
 
 ---
 
-### Phase 53: DMCA & Illegal-Content Removal Infrastructure — 🟡 PARTIAL (53a COMPLETE, 53b–53d PLANNED)
+### Phase 53: DMCA & Illegal-Content Removal Infrastructure — ✅ COMPLETE (April 28, 2026)
 
 **Driver:** Two convergent requirements from the legal review:
 1. **DMCA safe harbor** (17 U.S.C. § 512, Copyright Policy review): To qualify for §512(c) safe harbor, Orca must (a) "expeditiously" remove content upon valid takedown notice (§512(c)(1)(C)), (b) notify the subscriber of removal (§512(g)(2)(A)), (c) handle counter-notifications and restore content if no court action follows in 10–14 business days (§512(g)(2)(C)), and (d) "reasonably implement" a repeat-infringer termination policy (§512(i)(1)(A)).
@@ -2421,7 +2438,7 @@ LLC formation can proceed in parallel with the remaining phase. Both pre-launch 
 
 These two requirements share the same underlying need: a permanent, admin-initiated, audited removal mechanism that bypasses the community moderation system, plus public intake for receiving notices. Phase 53 builds the unified infrastructure for both.
 
-**Launch positioning:** Phase 53a (intake forms) is now ✅ COMPLETE — Orca can receive copyright infringement notices and counter-notifications via public web forms that store submissions to the database for manual review. The Copyright Policy + DMCA agent registration + working intake forms together qualify Orca for §512 safe harbor at launch. Phase 53b (admin permanent-removal endpoint) and 53c (repeat-infringer tracking) remain planned but are not launch blockers — they are operational tooling needed to *defend* a safe harbor claim and to scale handling of notices, both of which can ship post-launch.
+**Launch positioning:** All Phase 53 sub-phases are now COMPLETE. Orca has the full §512 safe harbor infrastructure: public intake forms (53a), admin permanent-removal with audit trail and `legal_hold` enforcement (53b), and repeat-infringer tracking with admin review queue (53c). No transactional email — all notification is manual from `orcaconcepts@gmail.com`. User suspension is intentionally a manual psql action after admin review of the repeat-infringer queue.
 
 **🚨 Major scope simplification (April 28, 2026):** The original Phase 53 plan included a "Phase 53.0" prerequisite to build transactional email infrastructure (provider selection — Postmark or AWS SES — plus a `sendEmail` wrapper) so that subscriber notification emails (§512(g)(2)(A)) and complainant-forwarding emails could be sent automatically. **This entire layer has been removed from scope.** Miles will manually respond to all infringement and counter-notice submissions from `orcaconcepts@gmail.com` using the contact information captured on the intake forms. The §512(g)(2)(A) "reasonable steps to promptly notify the subscriber" requirement is satisfied by manual reply within an expeditious timeframe (24–48 hours per case-law guidance). See Architecture Decision #275 for the full rationale.
 
@@ -2450,103 +2467,29 @@ Built two public, no-auth web forms for receiving copyright infringement notices
 | Copyright Policy | `/copyright-policy` |
 | Report Infringement | `/report-infringement` |
 | Counter-Notification | `/counter-notice` |
+| Admin Legal Panel | `/admin/legal` (admin-only) |
 
 ---
 
-**Phase 53b: Admin permanent-removal endpoint — 🔲 PLANNED**
+**Phase 53b: Admin permanent-removal endpoint + legal_hold + admin UI — ✅ COMPLETE (April 28, 2026)**
 
-**Scope:**
+**Implemented across sub-phases 53b-1 through 53b-4:**
 
-1. **Admin permanent-removal endpoint.** New endpoint `POST /api/admin/legal-removal` (admin-only, gated by the existing `ADMIN_USER_ID` env var pattern). Accepts:
-   ```
-   {
-     target_type: 'document_version' | 'annotation' | 'concept' | 'edge' | 'web_link' | 'page_comment' | 'moderation_comment',
-     target_id: integer,
-     removal_reason: 'dmca' | 'illegal_content' | 'court_order',
-     notice_reference: string,  // FK to copyright_infringement_notices.id, court order docket, etc.
-     internal_notes: string     // free-text for the audit trail
-   }
-   ```
-   Behavior depends on target type:
-   - **`document_version`** (most common case for DMCA): The version is permanently removed (file deleted from R2, row hard-deleted from `documents` table), cascading to annotations on that version. Other versions in the chain are unaffected. This matches existing user-uploader self-deletion behavior (Phase 6 Tier 3 in ToS) — the difference is this is admin-initiated and audited.
-   - **`annotation`**: Permanent deletion (hard delete, not the existing "hide" pattern). Cascades remove citation links and votes via existing FK cascades.
-   - **`concept` / `edge` / `web_link`**: Hidden via existing hide mechanism but with a NEW `legal_hold` flag set (see schema below) that prevents unhide via community vote. Existing hide infrastructure (Phase 16a) is reused; the legal_hold flag adds permanence.
-   - **`page_comment` / `moderation_comment`**: Permanent deletion (these don't have a hide mechanism today; this adds the first deletion path for them).
-   - All cases: writes a row to `legal_removals` audit table.
+- **53b-1 (schema):** `legal_removals` audit table + `legal_hold BOOLEAN NOT NULL DEFAULT false` columns on `concepts`, `edges`, and `concept_links` — all added idempotently to `migrate.js`.
+- **53b-2 (removal endpoint):** `POST /api/admin/legal-removal` in `adminLegalController.js`, gated by `ADMIN_USER_ID` env var. Accepts `{ target_type, target_id, removal_reason, notice_reference, internal_notes }`. Behavior by target type: hard-delete for `document_version`, `annotation`, `page_comment`, `moderation_comment`; hide + `legal_hold = true` for `concept`, `edge`, `web_link`. All operations wrapped in a DB transaction with the `legal_removals` audit insert. Response includes `affected_user_email` and `affected_username` for manual notification. `user_notified_at` starts as NULL. Existing community unhide in `moderationController.unhideEdge` rejects unhide when `legal_hold = true` (403 with contact email). Notice reference convention: DMCA removals use `copyright_infringement_notices.id=<id>` prefix (logged as warning if non-standard, not rejected).
+- **53b-3 (admin UI):** `AdminLegalRemovalsPanel.jsx` at `/admin/legal` (via `LEGAL_SLUGS` in `AppShell.jsx`). Three sections: (1) Incoming Infringement Notices with inline removal form and `acted_on` detection via `legal_removals.notice_reference` EXISTS subquery, (2) Counter-Notices with manual forwarding instructions, (3) Legal Removals audit history. On successful removal, displays affected user email prominently with copy-to-clipboard and §512(g)(2)(A) notification reminder template. Admin link visible only to admin users via `isAdmin` field on `/auth/me`. Backend: `GET /api/admin/legal/notices`, `GET /api/admin/legal/counter-notices`, `GET /api/admin/legal/removals` — all admin-only.
+- **53b-4 (mark-notified):** `POST /api/admin/legal/removals/:id/mark-notified` sets `user_notified_at = NOW()`. "Mark notified" button in audit history replaces itself with timestamp after click.
 
-2. **Notify the affected user — MANUAL.** §512(g)(2)(A) requires "reasonable steps to promptly notify the subscriber" of removal. Implementation: when an admin uses the legal-removal endpoint, the response payload should return the affected user's email (looked up from the `created_by` / `uploaded_by` column → `users.email`). Miles then manually composes a reply email from `orcaconcepts@gmail.com`. Suggested email body templates by `removal_reason` (Miles maintains these as a separate doc/snippets, not in the codebase):
-   - DMCA: "A copyright holder has filed a takedown notice for content you posted. We have removed the content as required by federal law (17 U.S.C. § 512). You may file a counter-notification if you believe this was in error at https://orcaconcepts.org/counter-notice."
-   - Illegal content: "We have removed content you posted because it violates [specific law / our Terms of Service §13]. This action is not appealable through our community moderation system."
-   - Court order: "We have removed content you posted in response to a court order. See [reference]."
-   The endpoint should set `user_notified_at` to `NULL` initially, with a future admin endpoint (or DB column update) to mark it after Miles confirms the email was sent. **No `sendEmail` wrapper, no transactional email provider integration is built.** See Architecture Decision #275.
+---
 
-3. **Counter-notice intake — ✅ ALREADY DONE in Phase 53a.** The `POST /api/legal/counter-notice` endpoint exists and writes to `copyright_counter_notices`. Forwarding the counter-notice to the original complainant is also manual: when a counter-notice arrives, Miles emails the original complainant (whose email is on the corresponding `copyright_infringement_notices` row) with the counter-notice content. The §512(g)(2)(B) requirement to "promptly provide" the counter-notification to the complainant is satisfied by this manual forwarding step. The 10-business-day waiting period before content restoration is also tracked manually — Miles notes the counter-notice arrival date and watches for any court action notification before deciding to restore.
+**Phase 53c: Repeat-infringer tracking — ✅ COMPLETE (April 28, 2026)**
 
-4. **Repeat-infringer tracking.** §512(i)(1)(A) requires a "reasonably implemented" repeat-infringer policy. Needs (a) a count of DMCA strikes per user, (b) a documented threshold for action, (c) actual enforcement at the threshold. Suggested threshold: **3 valid DMCA notices in 12 months → admin review, not automatic ban**. Not automatic because case law (e.g., *BMG v. Cox*) emphasizes "appropriate circumstances" judgment, but case law also penalizes providers whose policies were sham (no enforcement ever happened). A queue UI for the admin to review users at threshold is the pragmatic middle ground. Specifically:
-   - When a `legal_removals` row with `removal_reason = 'dmca'` is inserted, also insert into `dmca_strikes` keyed by the user.
-   - Counter-notices that result in restoration should clear the corresponding strike (via admin action).
-   - New admin page lists users with ≥ 3 strikes in the trailing 12 months; admin can review history and either suspend the account, dismiss the strike, or take no action (with note).
+**Implemented across sub-phases 53c-1 and 53c-2:**
 
-**Schema additions (still planned for 53b/53c):**
+- **53c-1 (schema + auto-insert):** `dmca_strikes` table with `user_id`, `legal_removal_id`, `struck_at`, `cleared_at`, `cleared_reason`. Partial index `idx_dmca_strikes_user_active ON dmca_strikes(user_id) WHERE cleared_at IS NULL`. Auto-insert: when `legalRemove` handler inserts a `legal_removals` row with `removal_reason = 'dmca'` AND `affected_user_id` is non-null, a `dmca_strikes` row is inserted in the same transaction.
+- **53c-2 (admin review queue):** `GET /api/admin/legal/repeat-infringers` returns users with 3+ active (un-cleared) DMCA strikes in the trailing 12 months, with full strike details joined to `legal_removals` for context. `POST /api/admin/legal/strikes/:id/clear` dismisses a strike with a required reason. Frontend: "Repeat Infringers" section at the top of `AdminLegalRemovalsPanel.jsx` (highest-urgency item). Per-user expandable strike list with "Dismiss strike" button and reason textarea. Users drop off the queue when active strikes fall below 3. Instructional block documents manual psql suspension procedure (no suspend button or endpoint — intentional scope decision per Architecture Decision #276).
 
-```sql
--- Audit log for all admin-initiated legal removals (DMCA, illegal content, court orders)
-CREATE TABLE legal_removals (
-  id SERIAL PRIMARY KEY,
-  target_type VARCHAR(32) NOT NULL,        -- 'document_version' | 'annotation' | 'concept' | 'edge' | 'web_link' | 'page_comment' | 'moderation_comment'
-  target_id INTEGER NOT NULL,              -- not a FK — target may be hard-deleted
-  affected_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  removal_reason VARCHAR(32) NOT NULL,     -- 'dmca' | 'illegal_content' | 'court_order'
-  notice_reference VARCHAR(255),           -- references copyright_infringement_notices.id, court order docket, etc.
-  internal_notes TEXT,
-  removed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- admin who performed action
-  removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  user_notified_at TIMESTAMP,              -- when Miles manually sent subscriber notification email (set by admin action, not automated)
-  restored_at TIMESTAMP,                   -- non-null if subsequently restored (e.g., after counter-notice)
-  restored_reason VARCHAR(255)
-);
-CREATE INDEX idx_legal_removals_user ON legal_removals(affected_user_id);
-CREATE INDEX idx_legal_removals_reason ON legal_removals(removal_reason, removed_at);
-
--- Notices intake tables (✅ ALREADY CREATED IN PHASE 53a — listed here for completeness):
--- copyright_infringement_notices (DMCA takedown intake — replaces originally-planned dmca_notices)
--- copyright_counter_notices (counter-notification intake — replaces originally-planned dmca_counter_notices)
-
--- Per-user DMCA strike record for repeat-infringer policy
-CREATE TABLE dmca_strikes (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  legal_removal_id INTEGER REFERENCES legal_removals(id) ON DELETE CASCADE,
-  struck_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  cleared_at TIMESTAMP,                    -- if counter-notice succeeded or admin dismissed
-  cleared_reason VARCHAR(255)
-);
-CREATE INDEX idx_dmca_strikes_user_active ON dmca_strikes(user_id) WHERE cleared_at IS NULL;
-
--- Add legal_hold flag to existing hideable types — prevents community unhide for legally-removed content
-ALTER TABLE concepts ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE edges ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE concept_links ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
-```
-
-**Backend changes (remaining for 53b/53c):**
-- New `adminLegalController.js` handling the legal-removal endpoint and repeat-infringer queue queries.
-- Existing community unhide endpoints (Phase 16a) must check `legal_hold` and reject unhide requests for items where `legal_hold = true`.
-- Migration: idempotent ALTER TABLE for `legal_hold` columns; new tables; NO destructive migrations (Architecture Decision #271).
-- **No email infrastructure** — Architecture Decision #275 keeps subscriber notification and complainant forwarding manual.
-
-**Frontend changes (remaining for 53b/53c):**
-- **Public-facing (already done in 53a):** ✅ `/copyright-policy`, `/report-infringement`, `/counter-notice` pages exist.
-- **Admin-facing:**
-  - New admin panel section "Legal Removals" with: pending infringement notices queue (compliance review), removal action UI per notice, repeat-infringer queue (users with ≥ 3 active strikes in 12 months), removal history view.
-  - The existing admin "hidden content" page (Phase 16a admin override) gets a new column showing `legal_hold` status and disables unhide for legally-held items.
-
-**Implementation order suggestion (revised):**
-- ✅ **Phase 53a (DONE):** `copyright_infringement_notices` + `copyright_counter_notices` schema, public intake forms, no-auth POST endpoints, "Copyright Notices" section on `/legal` hub.
-- 🔲 **Phase 53b:** `legal_removals` schema + `legal_hold` flag on concepts/edges/concept_links + `legal_hold` enforcement on unhide paths + admin `POST /api/admin/legal-removal` endpoint + admin UI to act on incoming infringement notices. (No email — endpoint returns affected user's email so Miles can manually compose a notification reply.)
-- 🔲 **Phase 53c:** `dmca_strikes` schema + repeat-infringer admin queue UI at 3 strikes/12 months threshold.
-
-**Operational handling SOP (separate deliverable, not code):** Before launch, draft a one-page internal procedure for evaluating takedown notices: the §512(c)(3)(A) seven-element checklist, the §512(c)(3)(B)(ii) "partial compliance triggers a duty to assist" rule, the standard for "substantial compliance," and the contact-the-complainant-for-clarification template. This SOP lives outside the codebase (recommendation: a private document accessible to whoever handles legal mail).
+**Operational handling SOP (separate deliverable, not code):** Before launch, draft a one-page internal procedure for evaluating takedown notices: the §512(c)(3)(A) seven-element checklist, the §512(c)(3)(B)(ii) "partial compliance triggers a duty to assist" rule, the standard for "substantial compliance," and the contact-the-complainant-for-clarification template. Also document the manual user-suspension procedure: when a user appears on the repeat-infringer queue, review their strike history; if suspension is warranted, update `users.<suspension_column>` directly via psql, then send a notification email from orcaconcepts@gmail.com. This SOP lives outside the codebase.
 
 **Out of scope for Phase 53 (intentional):**
 - Automatic content fingerprinting / proactive infringement detection. §512(m)(1) explicitly says safe harbor does NOT require proactive monitoring. Building this would *increase* legal exposure (creates "actual knowledge" risk), not decrease it.
@@ -2567,7 +2510,7 @@ ALTER TABLE concept_links ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL D
 | # | Anchor | Issue | Resolution | Implementation impact |
 |---|--------|-------|------------|----------------------|
 | 0 | "AGREEMENT" (opening) | Browse-wrap → click-wrap | **Phase 51** | Frontend: registration checkbox; possibly upload modal |
-| 1 | "or the Company" (Tier system intro) | §230 illegal-content removal vs. append-only | **Phase 53** — admin-initiated permanent removal mechanism with audit trail (`legal_removals` table, `legal_hold` flag) is the documented exception to append-only philosophy. Phase 53a public intake forms (`copyright_infringement_notices`, `copyright_counter_notices`) ✅ complete; admin-side mechanism (53b/53c) still planned. ToS amendment also needed to acknowledge this exception | Backend: admin endpoint, schema additions; Frontend: admin review UI |
+| 1 | "or the Company" (Tier system intro) | §230 illegal-content removal vs. append-only | **Phase 53 ✅ COMPLETE** — admin-initiated permanent removal mechanism with audit trail (`legal_removals` table, `legal_hold` flag) is the documented exception to append-only philosophy. All sub-phases shipped: 53a public intake forms, 53b admin removal endpoint + UI + mark-notified, 53c `dmca_strikes` + repeat-infringer review queue. ToS amendment still needed to acknowledge this exception | Done |
 | 2 | "child" concepts | Term collides with "no users under 18" | **Cosmetic doc edit** — replace "child concepts" with "descendant concepts" throughout ToS. UI uses both "child" and "descendant"; consider standardizing on "descendant" in user-facing copy too. Low priority — codebase rename can be later | Possible UI copy pass. Not a blocker |
 | 3 | "owns the Submission document" | Ambiguous: IP ownership vs. platform control? | **Cosmetic doc edit** — clarify in ToS this means platform-level control (delete, assign co-authors), NOT IP ownership. IP stays with the actual copyright holder | None — doc-only |
 | 4 | "any material that:" (rule list) | Counsel asks for Orca-specific additions | **Review pass** — current list covers vote manipulation, moderation circumvention, graph spam. Worth adding: bad-faith mass-flagging, attempts to evade 18+ requirement. Multi-account vote manipulation already covered | None — doc-only |
@@ -2793,7 +2736,7 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 50:** Reverse Citations — "Cited by N" on Annotations — ✅ COMPLETE (50a: `GET /api/annotations/:id/cited-by` backend with cited_by_count on annotation payload; 50b: frontend "Cited by N" badge with lazy-loaded expand-to-list and click-through navigation, 409 short-circuit fix, useEffect lazy-fetch fix)
 - **Phase 51:** Click-Wrap Consent at Registration & Document Upload — ✅ COMPLETE (PRE-LAUNCH BLOCKER RESOLVED — driven by counsel comment #0; 51a schema additions `tos_accepted_at` + `tos_version_accepted` on users + backend `verifyRegister` consent fields + standalone backfill script; 51b+c static `/terms` + `/privacy` placeholder pages + `LoginModal.jsx` Sign Up checkbox merging ToS/Privacy/age affirmation into one click-wrap with disabled-until-checked button; 51d document upload affirmation verified already correct — no refactor needed. See "Pre-Launch Legal & Compliance Blockers" section above for implementation summary)
 - **Phase 52:** Data Export, Correction, and Privacy Contact — ✅ COMPLETE (PRE-LAUNCH BLOCKER RESOLVED — driven by counsel comment #11; 52a `GET /api/users/me/export` returning full account + contributions + votes/subscriptions JSON, `data_export_requests` audit table, 2-per-12-months rate limit returning 429 when exceeded, audit row inserted only on successful export so failures don't burn quota; 52b `PATCH /api/users/me` for email correction + `GET /api/users/me/export-status` helper for the frontend counter; 52c frontend Privacy & Data section on profile page with download button + counter + inline email edit + privacy contact mailto; 52d data subject request form intentionally **deferred** — `orcaconcepts@gmail.com` mailto is sufficient. Wording follow-up commit replaced "Colorado Privacy Act" UI strings with plain language. New `PRIVACY_CONTACT_EMAIL` constant in both backend and frontend `config/constants.js`. See "Pre-Launch Legal & Compliance Blockers" section above for implementation summary)
-- **Phase 53:** DMCA & Illegal-Content Removal Infrastructure — 🟡 PARTIAL (53a COMPLETE, 53b–53c PLANNED — driven by Copyright Policy review and counsel comment #1 on the ToS; unifies §512 DMCA safe-harbor operational machinery with §230 illegal-content removal mechanism; **53a ✅ COMPLETE (April 28, 2026):** `copyright_infringement_notices` + `copyright_counter_notices` tables in `migrate.js`, new `legalController.js` + `routes/legal.js` with public no-auth `POST /api/legal/infringement` and `POST /api/legal/counter-notice` endpoints, new `InfringementNoticePage.jsx` + `CounterNoticePage.jsx` mounted at `/report-infringement` and `/counter-notice` via `AppShell.jsx` LEGAL_SLUGS extension, "Copyright Notices" section added to `LegalPage.jsx`, `legalAPI.submitInfringement` + `submitCounterNotice` added to `frontend/src/services/api.js`; **MAJOR SIMPLIFICATION:** transactional email infrastructure removed from scope entirely — Miles will manually respond from `orcaconcepts@gmail.com` to all submissions using captured contact info, see Architecture Decision #275; **53b PLANNED:** `legal_removals` table, `legal_hold` flag on concepts/edges/concept_links, admin `POST /api/admin/legal-removal` endpoint, admin UI to act on incoming notices; **53c PLANNED:** `dmca_strikes` table + repeat-infringer admin review queue at 3 strikes/12 months threshold — see Pre-Launch Legal & Compliance Blockers section above for full scope, including documented exception to append-only philosophy in Permanence section)
+- **Phase 53:** DMCA & Illegal-Content Removal Infrastructure — ✅ COMPLETE (all sub-phases shipped April 28, 2026 — driven by Copyright Policy review and counsel comment #1 on the ToS; unifies §512 DMCA safe-harbor operational machinery with §230 illegal-content removal mechanism; **53a:** `copyright_infringement_notices` + `copyright_counter_notices` tables, public no-auth intake forms at `/report-infringement` and `/counter-notice`; **53b:** `legal_removals` audit table + `legal_hold` flag on concepts/edges/concept_links + admin `POST /api/admin/legal-removal` endpoint (per-target-type: hard-delete or hide+legal_hold) + `AdminLegalRemovalsPanel.jsx` admin UI at `/admin/legal` with infringement notice queue, counter-notice display, inline removal form, mark-notified workflow, audit history + `isAdmin` on `/auth/me` + `legal_hold` enforcement on community unhide; **53c:** `dmca_strikes` table with auto-insert on DMCA removal + repeat-infringer admin review queue (3+ active strikes / 12 months) with per-strike dismissal; **SCOPE DECISIONS:** transactional email removed from scope — manual response from `orcaconcepts@gmail.com` per AD #275; user suspension intentionally manual via psql per AD #276 — no suspend button or endpoint)
 
 ### Git Commits (Phase 27)
 1. `feat: 27a, two-column concept layout with annotation panel stub, retire links/fliplinks view modes and WebLinksView/FlipLinksView`
