@@ -7,6 +7,8 @@ const LegalPage = () => {
   return (
     <div style={styles.container}>
       <h1 style={styles.heading}>Legal</h1>
+
+      <h2 style={styles.subheading}>Policies</h2>
       <div style={styles.linkList}>
         <button onClick={() => navigate('/terms')} style={styles.docLink}>
           <span style={styles.docTitle}>Terms of Service</span>
@@ -19,6 +21,18 @@ const LegalPage = () => {
         <button onClick={() => navigate('/copyright-policy')} style={styles.docLink}>
           <span style={styles.docTitle}>Copyright Policy</span>
           <span style={styles.docDesc}>DMCA procedures and copyright compliance</span>
+        </button>
+      </div>
+
+      <h2 style={styles.subheading}>Copyright Notices</h2>
+      <div style={styles.linkList}>
+        <button onClick={() => navigate('/report-infringement')} style={styles.docLink}>
+          <span style={styles.docTitle}>Report Copyright Infringement</span>
+          <span style={styles.docDesc}>Submit a DMCA takedown notice</span>
+        </button>
+        <button onClick={() => navigate('/counter-notice')} style={styles.docLink}>
+          <span style={styles.docTitle}>Submit a Counter-Notification</span>
+          <span style={styles.docDesc}>Respond to a DMCA takedown affecting your content</span>
         </button>
       </div>
     </div>
@@ -40,6 +54,13 @@ const styles = {
     marginBottom: '24px',
     borderBottom: '1px solid #d0d0d0',
     paddingBottom: '12px',
+  },
+  subheading: {
+    fontSize: '20px',
+    fontWeight: '600',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    margin: '24px 0 12px 0',
+    color: '#333',
   },
   linkList: {
     display: 'flex',

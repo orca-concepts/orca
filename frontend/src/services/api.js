@@ -657,4 +657,12 @@ export const usersAPI = {
     api.patch('/users/me', updates),
 };
 
+// Legal form submissions (no auth required)
+export const legalAPI = {
+  submitInfringement: (data) =>
+    api.post('/legal/infringement', data),
+  submitCounterNotice: (data) =>
+    api.post('/legal/counter-notice', data),
+};
+
 export default api;

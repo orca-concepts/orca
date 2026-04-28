@@ -24,6 +24,8 @@ import LegalPage from '../components/LegalPage';
 import TermsPage from '../components/TermsPage';
 import PrivacyPage from '../components/PrivacyPage';
 import CopyrightPolicyPage from '../components/CopyrightPolicyPage';
+import InfringementNoticePage from '../components/InfringementNoticePage';
+import CounterNoticePage from '../components/CounterNoticePage';
 
 const AppShell = () => {
   const { logout, logoutEverywhere, user, isGuest, loading: authLoading } = useAuth();
@@ -32,7 +34,7 @@ const AppShell = () => {
 
   // Phase 30g: Info page detection and header nav
   const INFO_SLUGS = ['using-orca', 'constitution', 'donate'];
-  const LEGAL_SLUGS = ['legal', 'terms', 'privacy', 'copyright-policy'];
+  const LEGAL_SLUGS = ['legal', 'terms', 'privacy', 'copyright-policy', 'report-infringement', 'counter-notice'];
   const infoSlug = INFO_SLUGS.find(s => location.pathname === `/${s}`);
   const isLegalPage = LEGAL_SLUGS.some(s => location.pathname === `/${s}`);
 
@@ -1402,6 +1404,8 @@ const AppShell = () => {
             {location.pathname === '/terms' && <TermsPage />}
             {location.pathname === '/privacy' && <PrivacyPage />}
             {location.pathname === '/copyright-policy' && <CopyrightPolicyPage />}
+            {location.pathname === '/report-infringement' && <InfringementNoticePage />}
+            {location.pathname === '/counter-notice' && <CounterNoticePage />}
           </div>
         </div>
       ) : (

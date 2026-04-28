@@ -1288,6 +1288,35 @@ const createTables = async () => {
     `);
     console.log('Phase 52a: Created data_export_requests table');
 
+    // ============================================================
+    // Copyright Infringement Notices (DMCA takedown submissions)
+    // Public form — no auth required. Stored for admin review.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS copyright_infringement_notices (
+        id SERIAL PRIMARY KEY,
+        submitter_name VARCHAR(255) NOT NULL,
+        submitter_email VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // ============================================================
+    // Copyright Counter-Notices (DMCA counter-notification submissions)
+    // Public form — no auth required. Stored for admin review.
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS copyright_counter_notices (
+        id SERIAL PRIMARY KEY,
+        submitter_name VARCHAR(255) NOT NULL,
+        submitter_email VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('Created copyright_infringement_notices and copyright_counter_notices tables');
+
     await client.query('COMMIT');
 
     // Phase 20a migration REMOVED — it destructively normalized all edges
