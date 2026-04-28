@@ -1371,41 +1371,45 @@ CREATE INDEX idx_data_export_requests_user_time ON data_export_requests(user_id,
 Public intake table for DMCA §512(c)(3)(A) takedown notices submitted via the `/report-infringement` form. Permanent record — never deleted.
 
 ```sql
-CREATE TABLE copyright_infringement_notices (
+CREATE TABLE IF NOT EXISTS copyright_infringement_notices (
   id SERIAL PRIMARY KEY,
-  -- name/email/body captured from the public form
-  -- (exact column shape: see backend/src/config/migrate.js — confirm field names match what controller writes)
+  submitter_name VARCHAR(255) NOT NULL,
+  submitter_email VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 **Key Points:**
 - Populated by `POST /api/legal/infringement` (no-auth public endpoint).
-- The form copy on `/report-infringement` lists the §512(c)(3)(A) seven required elements (identification of copyrighted work, identification of allegedly infringing material, contact info, good-faith statement, accuracy-and-authority statement, signature) as guidance for what the submitter should include in the body.
+- The form copy on `/report-infringement` lists the §512(c)(3)(A) seven required elements (identification of copyrighted work, identification of allegedly infringing material, contact info, good-faith statement, accuracy-and-authority statement, signature) as guidance for what the submitter should include in the `body` text.
+- `submitter_name` and `submitter_email` are captured as separate columns; everything else (the §512 substantive content) lives in the free-text `body`. This deliberate simplicity means the form imposes no specific structure on the body — the legal sufficiency of any given submission is evaluated manually by Miles when he reviews it.
 - **No automated email** is sent on submission. Miles checks the table periodically: `SELECT * FROM copyright_infringement_notices ORDER BY created_at DESC;` and replies manually from `orcaconcepts@gmail.com`. See Architecture Decision #275.
-- When Phase 53b ships, an admin action against a notice will create a `legal_removals` row that references this notice via the `notice_reference` field.
+- When Phase 53b ships, an admin action against a notice will create a `legal_removals` row that references this notice via the `notice_reference` field (suggested format: `copyright_infringement_notices.id=<id>` so the link is unambiguous in audit history).
 - Append-only by policy — submissions are legal records and should never be deleted.
 
 #### `copyright_counter_notices` — ✅ IMPLEMENTED (Phase 53a)
 Public intake table for DMCA §512(g)(3) counter-notifications submitted via the `/counter-notice` form. Permanent record — never deleted.
 
 ```sql
-CREATE TABLE copyright_counter_notices (
+CREATE TABLE IF NOT EXISTS copyright_counter_notices (
   id SERIAL PRIMARY KEY,
-  -- name/email/body captured from the public form
-  -- (exact column shape: see backend/src/config/migrate.js — confirm field names match what controller writes)
+  submitter_name VARCHAR(255) NOT NULL,
+  submitter_email VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 **Key Points:**
 - Populated by `POST /api/legal/counter-notice` (no-auth public endpoint — see Phase 53 "Open question" about whether this should require auth).
-- The form copy on `/counter-notice` lists the §512(g)(3) required statements (identification of removed material, good-faith-mistake statement, consent-to-jurisdiction, signature) as guidance for what the submitter should include in the body.
-- **No automated forwarding to the original complainant.** Miles manually emails the complainant (whose email is on the corresponding `copyright_infringement_notices` row) with the counter-notice content. See Architecture Decision #275.
+- The form copy on `/counter-notice` lists the §512(g)(3) required statements (identification of removed material, good-faith-mistake statement, consent-to-jurisdiction, signature) as guidance for what the submitter should include in the `body` text.
+- Same shape as `copyright_infringement_notices` (deliberate symmetry). The `body` is free-text; legal sufficiency is evaluated manually.
+- **No automated forwarding to the original complainant.** Miles manually emails the complainant (whose email is on the corresponding `copyright_infringement_notices` row, identified by Miles cross-referencing the body text since there is no FK link between counter-notices and the original infringement notices) with the counter-notice content. See Architecture Decision #275.
 - The 10-business-day waiting period before content restoration (§512(g)(2)(C)) is tracked manually — Miles notes the counter-notice arrival date and watches for any court action notification before deciding to restore content.
 - Append-only by policy — submissions are legal records and should never be deleted.
 
-> **Schema note:** This documentation captures the existence of these tables and their intended use. The exact column names should match what `backend/src/controllers/legalController.js` writes — confirm by reading the actual file or `migrate.js` and update the SQL above if the field names differ.
+> **Future enhancement:** if volume grows, consider adding a `referenced_infringement_notice_id INTEGER REFERENCES copyright_infringement_notices(id)` column to formally link counter-notices to the original infringement notice they're responding to. For now, this linkage is captured in the body text and resolved manually.
 
 ---
 

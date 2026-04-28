@@ -1317,6 +1317,49 @@ const createTables = async () => {
     `);
     console.log('Created copyright_infringement_notices and copyright_counter_notices tables');
 
+    // ============================================================
+    // Legal Removals audit table (Phase 53b)
+    // Logs every admin-initiated legal removal (DMCA, illegal content, court orders)
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS legal_removals (
+        id SERIAL PRIMARY KEY,
+        target_type VARCHAR(32) NOT NULL,
+        target_id INTEGER NOT NULL,
+        affected_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        removal_reason VARCHAR(32) NOT NULL,
+        notice_reference VARCHAR(255),
+        internal_notes TEXT,
+        removed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        user_notified_at TIMESTAMP,
+        restored_at TIMESTAMP,
+        restored_reason VARCHAR(255)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_legal_removals_user ON legal_removals(affected_user_id);
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_legal_removals_reason ON legal_removals(removal_reason, removed_at);
+    `);
+    console.log('Created legal_removals table');
+
+    // ============================================================
+    // legal_hold flag on hideable tables (Phase 53b)
+    // Prevents community unhide for legally-removed content
+    // ============================================================
+    await client.query(`
+      ALTER TABLE concepts ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
+    `);
+    await client.query(`
+      ALTER TABLE edges ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
+    `);
+    await client.query(`
+      ALTER TABLE concept_links ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL DEFAULT false;
+    `);
+    console.log('Added legal_hold columns to concepts, edges, concept_links');
+
     await client.query('COMMIT');
 
     // Phase 20a migration REMOVED — it destructively normalized all edges
