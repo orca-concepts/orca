@@ -14,10 +14,11 @@ Delete this file from the repo after launch.
 - [x] **Verified test data cleanup is a non-issue** — no seed scripts run on deploy.
 - [x] **Verified phone storage architecture** — raw phones never stored; `phone_hash` (bcrypt, legacy) + `phone_lookup` (HMAC-SHA256, current).
 - [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings broken into Phases 49a/49b/49c below.
-- [x] **Twilio account-level protection** — usage triggers configured ($10 warning, $20 hard-cap warning). Prepaid mode setup deferred.
+- [x] **Twilio account-level protection** — usage triggers configured ($10 warning, $20 hard-cap warning).
+- [x] **Twilio prepaid mode configured** — upgraded from trial to paid, billing type is Pay as you go, auto-recharge disabled, initial balance ~$20.
 - [x] **Phase 49 — Rate limiting (foundation + write-endpoint limiters + global safety net)** complete. Trust proxy configured, per-phone SMS limiter + global daily SMS cap on Postgres-backed store, all write-endpoint limiters in place, global 500 req/15min/IP safety net active. Old broken IP-based limiters in `auth.js` ripped out.
 - [x] **CONTRIBUTING.md** added.
-- [x] **CODE_OF_CONDUCT.md** added (Contributor Covenant v2.1; contact email needs update once domain email is live).
+- [x] **CODE_OF_CONDUCT.md** added (Contributor Covenant v2.1).
 - [x] **GitHub issue templates** added (`bug_report.md`, `feature_request.md`).
 - [x] **LICENSE file verified** — full AGPL v3 text present at repo root.
 - [x] **Gitleaks secrets audit** — 76 commits scanned, no leaks found.
@@ -26,30 +27,85 @@ Delete this file from the repo after launch.
 
 ---
 
-## 🔒 Legal & Entity (blocked on Murphy Desmond)
+## 🔒 Deployment & Launch
 
-- [ ] LLC formation complete
-- [ ] Terms of Service finalized and published
-- [ ] Privacy Policy finalized and published (must cover email, phone hashing, ORCID, Twilio, document text, annotation permanence, cookies)
-- [ ] DMCA agent registered with US Copyright Office (~$6)
-- [ ] Update Constitution page to match Privacy Policy language (wait for Lane's draft)
-- [ ] Verify copyright confirmation checkbox at upload still in place
-- [ ] Verify age verification (18+) checkbox at registration still in place
-- [ ] Repeat infringer policy documented in ToS
-- [ ] Takedown / counter-notice process documented user-facing
+This section is the actual sequence to get Orca live on the internet. Items are roughly ordered — earlier ones unblock later ones.
+
+### Cloudflare R2 (file storage)
+
+- [ ] Create R2 bucket for production document uploads
+- [ ] Generate R2 access key + secret
+- [ ] Decide on bucket name and region
+- [ ] Note R2 credentials for Railway env vars
+
+### Railway setup
+
+- [ ] Create Railway project, connect GitHub repo (`orca-concepts/orca`)
+- [ ] Provision Railway Postgres add-on; confirm `DATABASE_URL` is auto-injected
+- [ ] Configure backend service: build command, start command, root directory
+- [ ] Configure frontend service (or static build) — confirm Vite build settings work on Railway
+- [ ] Confirm Railway is on Hobby plan (~$5/month)
+
+### Environment variables on Railway
+
+- [ ] `DATABASE_URL` (auto-injected by Railway Postgres) — confirm present
+- [ ] `JWT_SECRET` — generate fresh secret for production (do NOT reuse local dev value)
+- [ ] `PHONE_LOOKUP_KEY` — generate fresh production value (currently placeholder)
+- [ ] `ADMIN_USER_ID` — set after creating production admin account
+- [ ] `ENABLED_ATTRIBUTES` — confirm matches intended production set
+- [ ] `ENABLED_DOCUMENT_TAGS` — confirm matches intended production set
+- [ ] Twilio creds: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`
+- [ ] ORCID production OAuth creds: `ORCID_CLIENT_ID`, `ORCID_CLIENT_SECRET`, `ORCID_REDIRECT_URI` (production URL)
+- [ ] R2 creds: bucket name, access key, secret, endpoint URL, public URL prefix
+- [ ] `NODE_ENV=production`
+- [ ] Frontend `VITE_API_URL` pointing to production backend domain
+
+### Backend production config audit
+
+- [ ] CORS allowlist updated to include production domain (`https://orcaconcepts.org`)
+- [ ] Any hardcoded `localhost` references audited and made env-aware
+- [ ] File upload code switches to R2 in production, multer/local in dev
+- [ ] ORCID redirect URI uses production URL in production
+- [ ] Cookie/session settings appropriate for production (Secure flag, SameSite)
+
+### First deploy
+
+- [ ] Push to `main` (or whichever branch Railway is watching) and trigger first deploy
+- [ ] Watch deploy logs — confirm backend builds, migrations run cleanly
+- [ ] **Verify `pg_trgm` extension creates successfully on Railway Postgres** — if it fails, migration halts and the app won't start
+- [ ] Confirm frontend build succeeds and serves
+- [ ] Hit the Railway-provided URL directly (before DNS) and confirm app loads
+
+### DNS and SSL
+
+- [ ] Point `orcaconcepts.org` from Cloudflare DNS to Railway
+- [ ] Decide on `www` subdomain handling (redirect to apex, or vice versa)
+- [ ] Confirm Railway-issued SSL cert provisions on `orcaconcepts.org`
+- [ ] Test `https://orcaconcepts.org` loads the live app
+
+### Production smoke test
+
+- [ ] Register a real account on the live site (use real phone, real email)
+- [ ] Verify Twilio SMS arrives to a real phone
+- [ ] Upload a document, confirm it lands in R2 (check R2 dashboard)
+- [ ] Create a concept, add an annotation, vote
+- [ ] Try ORCID OAuth flow with production credentials end-to-end
+- [ ] Log out, log back in (test password login)
+- [ ] Test "Log out everywhere"
+- [ ] Open the app on a phone — basic mobile sanity check
+
+### Repo + announcement
+
+- [ ] Flip GitHub repo from private to public
+- [ ] Bluesky launch post (per pre-launch outreach plan)
 
 ---
 
 ## 🔒 Operational & Infrastructure
 
-- [ ] **Audit Railway env vars** — `PHONE_LOOKUP_KEY` (currently placeholder), `ADMIN_USER_ID`, `ENABLED_ATTRIBUTES`, `ENABLED_DOCUMENT_TAGS`, Twilio creds, ORCID prod creds, `DATABASE_URL`, R2 creds, JWT secret
-- [ ] **Verify `pg_trgm` works on Railway Postgres** on first deploy — if extension creation fails, migration halts and app won't start
 - [ ] Database backups configured on Railway
 - [ ] Error monitoring set up (Sentry free tier)
 - [ ] Uptime monitoring set up (UptimeRobot free tier)
-- [ ] SSL cert verified on orcaconcepts.org
-- [ ] Domain email working (for DMCA / ToS contact) — also update CODE_OF_CONDUCT.md contact email once live
-- [ ] **Investigate EB Garamond rendering** — coding convention says EB Garamond on all interactive elements, but live app is currently rendering in default sans-serif. Discovered April 11 during favicon work. Likely a missing `<link>` to Google Fonts in `index.html` or a broken local font import. Not a launch blocker but inconsistent with stated brand.
 
 ---
 
@@ -61,8 +117,8 @@ Delete this file from the repo after launch.
 
 - [x] **Twilio Usage Trigger: warning at $10/month**
 - [x] **Twilio Usage Trigger: hard-cap warning at $20/month**
-- [ ] **Twilio auto-recharge OFF** + balance kept low (~$25). The only true hard stop — triggers are notifications only.
-- [ ] Document in ORCA_STATUS.md that Twilio is in prepaid mode with auto-recharge off
+- [x] **Twilio prepaid mode configured** — upgraded to paid, Pay as you go billing, auto-recharge OFF, balance ~$20. The only true hard stop — triggers are notifications only.
+- [ ] Low-balance email alert configured (notify when balance < $5)
 
 ### ✅ Phase 49d — Global safety net fixed
 
@@ -119,7 +175,6 @@ Delete this file from the repo after launch.
 - [x] GitHub issue templates (bug report, feature request)
 - [x] Secrets audit on public repo (`gitleaks` once) — clean
 - [x] Delete duplicate `backend/seed-test-data.js`
-- [ ] **Flip repo from private back to public** (do once Murphy Desmond gives legal greenlight; repo currently private pending ToS/Privacy Policy)
 
 ---
 
@@ -144,15 +199,4 @@ Delete this file from the repo after launch.
 
 ---
 
-## Recommended next-session order (no spending required)
-
-1. **Manual testing batch** — forgot password, orphan cleanup, age verification, copyright, attributes (after lawyers; structured test script)
-2. **404 page**
-3. **EB Garamond investigation** — find why the brand font isn't rendering live
-4. **Twilio prepaid mode** (auto-recharge off + low balance) — outside code, ~5 min in Twilio console
-5. **Planning docs** (metrics, 2am plan, rollback) — anytime you have 15 minutes
-6. **Phase 49c — rate limiting polish** (post-launch OK)
-
----
-
-**Last updated:** April 11, 2026 (favicon + SEO complete; Phase 49d global rate limiter fix complete — raised to 2000/15min, GET-exempt, Postgres-backed; EB Garamond rendering issue noted)
+**Last updated:** April 28, 2026 (added Deployment & Launch section; removed legal/entity tracking, EB Garamond investigation, and domain email items)

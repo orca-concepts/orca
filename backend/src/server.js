@@ -140,7 +140,19 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running' });
 });
 
-// 404 handler
+// Phase 54b: In production, serve frontend static files and SPA fallback.
+// Placed AFTER all /api routes so API requests are handled first.
+if (process.env.NODE_ENV === 'production') {
+  const path = require('path');
+  const frontendDist = path.join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDist));
+  // SPA fallback — any non-/api route serves index.html so React Router works
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
+
+// 404 handler (only catches unmatched /api routes in production; catches all in dev)
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
