@@ -1360,6 +1360,25 @@ const createTables = async () => {
     `);
     console.log('Added legal_hold columns to concepts, edges, concept_links');
 
+    // ============================================================
+    // DMCA strikes table (Phase 53c)
+    // Per-user strike record for repeat-infringer policy
+    // ============================================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS dmca_strikes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        legal_removal_id INTEGER REFERENCES legal_removals(id) ON DELETE CASCADE,
+        struck_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        cleared_at TIMESTAMP,
+        cleared_reason VARCHAR(255)
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_dmca_strikes_user_active ON dmca_strikes(user_id) WHERE cleared_at IS NULL;
+    `);
+    console.log('Created dmca_strikes table');
+
     await client.query('COMMIT');
 
     // Phase 20a migration REMOVED — it destructively normalized all edges

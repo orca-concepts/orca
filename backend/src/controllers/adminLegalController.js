@@ -183,6 +183,14 @@ const adminLegalController = {
           [target_type, parsedTargetId, affectedUserId, removal_reason, notice_reference || null, internal_notes || null, req.user.userId]
         );
 
+        // --- Auto-insert DMCA strike if applicable ---
+        if (removal_reason === 'dmca' && affectedUserId) {
+          await client.query(
+            `INSERT INTO dmca_strikes (user_id, legal_removal_id) VALUES ($1, $2)`,
+            [affectedUserId, auditResult.rows[0].id]
+          );
+        }
+
         await client.query('COMMIT');
 
         res.json({
