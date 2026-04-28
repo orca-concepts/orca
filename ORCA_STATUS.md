@@ -1,9 +1,9 @@
 
 # ORCA - Project Status & Technical Reference
 
-**Last Updated:** April 25, 2026 (Phase 51 click-wrap consent COMPLETE — 51a schema + backend verifyRegister consent fields + standalone backfill script with all existing test users backfilled to `tos_version_accepted = 'pre-launch'`; 51b+c static `/terms` and `/privacy` placeholder pages + LoginModal Sign Up checkbox merging ToS/Privacy/age affirmation into a single click-wrap with disabled-until-checked button; 51d document upload affirmation modal verified already correct — was already a checkbox + disabled-button pattern, no refactor needed. **Phase 52 + Phase 53 still PLANNED** — Phase 52 hard launch blocker (Colorado Privacy Act data export/correction); Phase 53 launch-recommended (DMCA + illegal-content removal infrastructure). See "Pre-Launch Legal & Compliance Blockers" section for remaining scope.)
+**Last Updated:** April 25, 2026 (Phase 52 data portability/correction COMPLETE — 52a self-service `GET /api/users/me/export` endpoint returning JSON of account + contributions + votes/subscriptions, with `data_export_requests` audit table and 2-per-12-months rate limit; 52b+c `PATCH /api/users/me` email correction endpoint + Privacy & Data section on profile page with download button, exports-used counter, inline email edit, and privacy contact mailto; follow-up commit softened user-facing strings to drop the explicit "Colorado Privacy Act" reference in favor of plain language (rationale preserved in code comments and this status doc). 52d data subject request form intentionally **deferred** — `orcaconcepts@gmail.com` mailto link in the Privacy & Data section is sufficient until volume warrants a structured form. New config constant `PRIVACY_CONTACT_EMAIL = 'orcaconcepts@gmail.com'` added to both backend and frontend `config/constants.js` (mirrored shape from Phase 51's `CURRENT_TOS_VERSION`). **Phase 53 still PLANNED** — DMCA + illegal-content removal infrastructure, launch-recommended (Phase 53.0 transactional email foundation must precede 53a per implementation analysis).)
 
-**Prior Last Updated:** April 25, 2026 (Phase 50 reverse citations complete; **Phase 48 fully reverted** — edge discussions feature reset and dropped; **Phase 51 + Phase 52 added as pre-launch blockers** based on outside legal counsel review — Phase 51 click-wrap consent driven by counsel comment #0, Phase 52 data export/correction/privacy contact driven by counsel comment #11 and the Colorado Privacy Act; **Phase 53 added as launch-recommended** — unified DMCA + illegal-content removal infrastructure driven by Copyright Policy review and counsel comment #1, includes documented exception to append-only philosophy in Permanence section.)
+**Prior Last Updated:** April 25, 2026 (Phase 51 click-wrap consent COMPLETE — 51a schema + backend verifyRegister consent fields + standalone backfill script with all existing test users backfilled to `tos_version_accepted = 'pre-launch'`; 51b+c static `/terms` and `/privacy` placeholder pages + LoginModal Sign Up checkbox merging ToS/Privacy/age affirmation into a single click-wrap with disabled-until-checked button; 51d document upload affirmation modal verified already correct — was already a checkbox + disabled-button pattern, no refactor needed.)
 
 ---
 
@@ -1343,8 +1343,8 @@ CREATE INDEX idx_tunnel_votes_link ON tunnel_votes(tunnel_link_id);
 - Toggle on/off pattern, same as annotation votes and web link votes
 - `ON DELETE CASCADE` from both FKs ensures cleanup
 
-#### `data_export_requests` — 🔲 PLANNED (Phase 52)
-Audit log for self-service data export requests, used to enforce the Colorado Privacy Act limit of 2 export requests per user per 12-month period.
+#### `data_export_requests` — ✅ IMPLEMENTED (Phase 52a)
+Audit log for self-service data export requests, used to enforce a 2-export limit per user per rolling 12-month period.
 
 ```sql
 CREATE TABLE data_export_requests (
@@ -1357,10 +1357,12 @@ CREATE INDEX idx_data_export_requests_user_time ON data_export_requests(user_id,
 ```
 
 **Key Points:**
-- One row inserted each time `GET /api/users/me/export` is successfully called.
-- Rate limit check: `SELECT COUNT(*) FROM data_export_requests WHERE user_id = $1 AND requested_at > NOW() - INTERVAL '1 year'`. If >= 2, endpoint returns 429 with explanatory message.
+- One row inserted by `GET /api/users/me/export` AFTER successful data collection (so failed exports don't burn the user's quota — see Architecture Decision #274 for why this ordering matters).
+- Rate limit check: `SELECT COUNT(*) FROM data_export_requests WHERE user_id = $1 AND requested_at > NOW() - INTERVAL '1 year'`. If >= 2, endpoint returns 429.
+- The 2-per-12-months cap is **permitted but not required** by the Colorado Privacy Act — Orca enforces it for abuse prevention, not because the statute mandates it. See Architecture Decision #274 for the full rationale and where the legal grounding belongs in user-facing copy.
+- `GET /api/users/me/export-status` (Phase 52b) reads the same count without inserting a row — used by the frontend to show the exports-used counter without consuming a quota.
 - `ON DELETE CASCADE` from `users` — when a user deletes their account, their export history is cleaned up. Acceptable because account deletion already breaks the link to personal data; export log retention is not legally required.
-- This table is INDEPENDENT of the existing rate limiter infrastructure (`rate_limit_counters`, `userRateLimiter.js`). Different policy purpose: this is a legal/regulatory limit, not an abuse-prevention limit, and it spans 12 months (existing limiters are sub-hour windows).
+- This table is INDEPENDENT of the existing rate limiter infrastructure (`rate_limit_counters`, `userRateLimiter.js`, Phase 49). Different policy purpose: this is a legal/regulatory limit, not an abuse-prevention limit, and it spans 12 months (existing limiters are sub-hour windows).
 - Append-only — never delete rows except via the cascade above.
 
 ---
@@ -1422,8 +1424,9 @@ Response: { message: 'All sessions invalidated. Please log in again.' }
 |--------|----------|------|-------------|
 | GET | `/:id/profile` | Guest OK | Returns user's public profile: username, orcid_id (if set), created_at, corpus count, document count. (Phase 41a) |
 | GET | `/search` | Required | Search users by username (ILIKE prefix match) or ORCID iD (exact match). Query: `?q=searchterm`. Returns max 10 results, excludes requesting user. (Phase 41d) |
-| GET | `/me/export` | Required | **🔲 PLANNED (Phase 52a).** Returns the requesting user's complete personal data + attributed contributions + votes/subscriptions as a downloadable JSON file. Rate-limited to 2 requests per user per 12-month rolling period (Colorado Privacy Act). Returns 429 if limit exceeded. `Content-Disposition: attachment; filename=orca-export-{username}-{ISO-date}.json`. |
-| PATCH | `/me` | Required | **🔲 PLANNED (Phase 52b).** Update editable profile fields. Body: `{ email?: string }`. Validates email format. Future: may accept other correctable fields per Colorado right-to-correct. |
+| GET | `/me/export` | Required | Returns the requesting user's complete personal data + attributed contributions + votes/subscriptions as a downloadable JSON file. Top-level keys: `exported_at`, `export_version`, `account`, `contributions`, `votes_and_subscriptions`. NEVER includes `password_hash`, `phone_hash`, or `phone_lookup`. Rate-limited to 2 requests per user per rolling 12-month period (returns 429 with `{ error, exports_used, limit }` if exceeded). Audit row inserted into `data_export_requests` AFTER successful data collection. `Content-Disposition: attachment; filename=orca-export-{username}-{ISO-date}.json`. (Phase 52a) |
+| GET | `/me/export-status` | Required | Returns `{ exports_used, limit: 2, period: '12 months' }` for the requesting user — same count query as `/me/export` rate-limit check, but no audit insert. Used by the frontend to show "X of 2 exports used" without consuming quota. (Phase 52b) |
+| PATCH | `/me` | Required | Update editable profile fields. Body: `{ email?: string }`. Validates and normalizes email (lowercase + trim) and writes to `users.email`. Returns `{ user: { id, username, email } }` on success, 400 on invalid format. Unknown body keys are ignored (extensible without breaking forward-compat). `username` and `orcid_id` are NOT editable here — username is locked post-registration (graph integrity), ORCID has its own connect/disconnect flow (Phase 41a). (Phase 52b) |
 
 ---
 
@@ -2300,10 +2303,10 @@ This section captures features that are required before public launch for legal/
 
 **Three phases follow, with different launch-blocker status:**
 - **Phase 51 (click-wrap consent)** — ✅ **COMPLETE (April 25, 2026).** Hard blocker resolved.
-- **Phase 52 (data export + correction + privacy contact)** — 🔲 PLANNED. Hard blocker. Colorado Privacy Act compliance.
-- **Phase 53 (DMCA + illegal-content removal infrastructure)** — 🔲 PLANNED. Launch-recommended but not strict blocker. The Copyright Policy + DMCA agent registration alone qualify Orca for §512 safe harbor on day one; the operational machinery here is what's needed to *defend* a claim and handle real notices once traffic exists. Minimum viable subset (53a + 53b) should ideally land before public launch.
+- **Phase 52 (data export + correction + privacy contact)** — ✅ **COMPLETE (April 25, 2026).** Hard blocker resolved. (Phase 52d optional data subject request form intentionally deferred — `orcaconcepts@gmail.com` mailto in the Privacy & Data section is sufficient until volume warrants a structured form.)
+- **Phase 53 (DMCA + illegal-content removal infrastructure)** — 🔲 PLANNED. Launch-recommended but not strict blocker. The Copyright Policy + DMCA agent registration alone qualify Orca for §512 safe harbor on day one; the operational machinery here is what's needed to *defend* a claim and handle real notices once traffic exists. Minimum viable subset (53a + 53b) should ideally land before public launch. **Implementation note:** Phase 53 has an unstated prerequisite — Orca currently has no transactional email infrastructure, which 53a's "notify the affected user" step requires. Treat that as Phase 53.0 (provider selection + SDK + `sendEmail` wrapper + smoke test) before any of 53a–53d.
 
-LLC formation can proceed in parallel with all three phases. Orca cannot go public until at least Phase 52 is implemented (Phase 51 is now done).
+LLC formation can proceed in parallel with the remaining phase. Both pre-launch hard blockers (Phase 51 and Phase 52) are now done; Orca is technically launch-ready from a legal-compliance standpoint, though Phase 53 (DMCA infrastructure) is strongly recommended before any public traffic so real takedown notices can be handled.
 
 ### Phase 51: Click-Wrap Consent at Registration & Document Upload — ✅ COMPLETE (April 25, 2026)
 
@@ -2321,72 +2324,24 @@ LLC formation can proceed in parallel with all three phases. Orca cannot go publ
 
 ---
 
-### Phase 52: Data Export, Correction, and Privacy Contact — 🔲 PLANNED
+### Phase 52: Data Export, Correction, and Privacy Contact — ✅ COMPLETE (April 25, 2026)
 
-**Driver:** Counsel comment #11 — Colorado Privacy Act grants consumers the right to data portability ("personal data in a portable and easily usable format that allows transmission to another entity without hindrance"). Limit: 2 requests per calendar year per user. Counsel confirmed: "Effectively the Colorado law means that Orca needs to implement a data export feature." Also: a contact channel must exist for export, correction, and deletion requests.
+**Driver:** Counsel comment #11 — Colorado Privacy Act grants consumers the right to data portability ("personal data in a portable and easily usable format that allows transmission to another entity without hindrance") and the right to correct inaccurate personal data. Counsel confirmed the right to portability "effectively means Orca needs to implement a data export feature." A contact channel must also exist for export, correction, and deletion requests. Counsel confirmed Orca does NOT need a "Do Not Sell / Share" opt-out (no targeted advertising, no sale of personal data).
 
-**Note:** Counsel confirmed Orca does NOT need a "Do Not Sell / Share" opt-out mechanism (no targeted advertising, no sale of personal data). Phase 52 is data export + correction + contact only.
+**Implementation summary:**
 
-**Scope:**
+- **Phase 52a** (export endpoint + audit table + rate limit): New `data_export_requests` audit table (see Planned Tables section) — `(user_id, requested_at)` per export. New endpoint `GET /api/users/me/export` in `usersController.js`. Returns a single JSON file with three top-level sections: `account` (username, email, created_at, age_verified_at, tos_accepted_at, tos_version_accepted, orcid_id), `contributions` (annotations, web_links, page_comments, moderation_comments, documents_uploaded, corpuses_owned, superconcepts_owned, document_coauthorships), and `votes_and_subscriptions` (10 vote/subscription tables). NEVER includes credential fields (`password_hash`, `phone_hash`, `phone_lookup`). Uses `LEFT JOIN` for nullable FKs (Phase 36 rule). Independent queries run in `Promise.all` with `.catch()` fallbacks per query (silent-failure prevention rule). Audit row inserted AFTER successful data collection — failed exports do NOT burn the user's quota (see Architecture Decision #274). Rate limit: 2 exports per rolling 12-month period; returns 429 with `{ error, exports_used, limit }` if exceeded. Independent of the existing rate limiter infrastructure (Phase 49) — different policy purpose, different storage. Filename: `orca-export-{username}-{ISO-date}.json`. New backend constant `PRIVACY_CONTACT_EMAIL = 'orcaconcepts@gmail.com'` in `backend/src/config/constants.js`.
+- **Phase 52b+c** (email correction + frontend Privacy & Data section): New endpoint `PATCH /api/users/me` accepting `{ email?: string }` — validates and normalizes (lowercase, trim) before writing to `users.email`. Returns updated user row. Unknown body keys ignored (forward-compatible). Username and ORCID intentionally NOT editable here (username locked for graph integrity; ORCID has its own connect/disconnect flow from Phase 41a). New helper endpoint `GET /api/users/me/export-status` returns `{ exports_used, limit, period }` without inserting an audit row — used by the frontend to show the counter without consuming quota. New frontend constant `PRIVACY_CONTACT_EMAIL` in `frontend/src/config/constants.js` (mirrors backend). New "Privacy & Data" section on the profile page with three subsections: (1) inline email edit affordance (read-only by default, Edit/Save/Cancel buttons, inline error display on 400); (2) data export — description text, "Download my data (JSON)" button, exports-used counter, blob-download flow with filename pulled from `Content-Disposition`, status refetched after successful download; (3) privacy contact mailto link to `orcaconcepts@gmail.com`.
+- **Wording follow-up commit** (post-52b+c): Replaced user-facing strings that explicitly named the "Colorado Privacy Act" with plain language ("You can download your data up to twice per 12-month period"). The legal grounding remained accurate but was misleading on its face — the CPA *permits* but does not *require* the 2/12-months cap (see Architecture Decision #274). The CPA reference is preserved in code comments, in this status doc, and in the Privacy Policy where it legally belongs.
 
-1. **Self-service data export endpoint.** New `GET /api/users/me/export` (authenticated, user can only export their own data). Returns a JSON file containing the user's personal data and attributed contributions:
-   - **Account record:** `username`, `email`, `created_at`, `age_verified_at`, `tos_accepted_at`, `tos_version_accepted`, `orcid_id` (if linked). NEVER include `password_hash`, `phone_hash`, or `phone_lookup` — these are credentials, not "personal data the user provided."
-   - **Attributed contributions:**
-     - Annotations created by the user (id, document_id, document title, document version, corpus name, concept_id, concept name, edge graph_path, quote_text, comment, created_at)
-     - Web links the user added to concepts (id, concept_id, concept name, url, created_at)
-     - Page comments authored by the user (id, page_slug, body, parent_comment_id, created_at)
-     - Moderation comments authored by the user (id, target_type, target_id, body, created_at)
-     - Documents uploaded by the user (id, title, corpus name(s), version_number, lineage_id, created_at, copyright_confirmed_at) — file content NOT included; just metadata. (Optional follow-up: signed Cloudflare R2 download URLs for each document so the user can pull the actual files. Out of scope for Phase 52a.)
-     - Corpuses owned by the user (id, name, created_at, member count)
-     - Superconcepts owned by the user (id, name, created_at, subscriber count)
-     - Document co-authorships the user holds (document_id, document title, role)
-     - ORCID disconnection log entries if applicable
-   - **Votes & subscriptions:**
-     - Graph votes (edge_id, edge graph_path, edge concept name, created_at)
-     - Swap votes (edge_id, replacement_edge_id, created_at)
-     - Link votes (concept_link_id, concept_id, url, created_at)
-     - Annotation votes (annotation_id, created_at)
-     - Web link votes (concept_link_id, created_at)
-     - Flag votes (flag_id, target_type, target_id, created_at)
-     - Tunnel votes (tunnel_link_id, source_concept_id, target_concept_id, created_at)
-     - Page comment votes (comment_id, created_at)
-     - Combo subscriptions (combo_id, combo name, created_at)
-     - Corpus subscriptions (corpus_id, corpus name, created_at)
-     - Saved tabs and graph tabs (id, name, created_at)
-   - **Format:** Single JSON file, top-level keys grouping the above (`account`, `contributions`, `votes_and_subscriptions`). Pretty-printed (2-space indent) for human readability. Filename: `orca-export-{username}-{ISO-date}.json`.
-   - **Response:** `Content-Type: application/json`, `Content-Disposition: attachment; filename=...` so the browser downloads the file directly.
+**Phase 52d (data subject request form)** — intentionally **deferred**. The Privacy & Data section's privacy contact mailto (`orcaconcepts@gmail.com`) is sufficient for the small volume of structured-request traffic Orca will see pre-launch and early-launch. Add a real form when volume warrants it.
 
-2. **Rate limit: 2 exports per calendar year.** Colorado law allows declining requests beyond 2 per 12-month period. New table `data_export_requests` audits each export with `(user_id, requested_at)`. Endpoint queries `COUNT(*) WHERE user_id = $1 AND requested_at > NOW() - INTERVAL '1 year'` and returns 429 with explanatory message if `>= 2`. Uses calendar-year semantics per Colorado statute — 12 rolling months is the conservative interpretation. (Note: this rate limit is separate from the existing per-user hourly limiter — different policy purpose, different storage.)
-
-3. **Profile editing for correction.** Counsel comment #11 also notes Colorado's right-to-correct. Verify the existing profile page allows the user to edit `email` (the primary correctable personal data field). `username` is intentionally not changeable post-registration (graph integrity). `orcid_id` can be disconnected and re-linked (already supported, Phase 41a). If email editing isn't currently exposed in the UI, add it: new `PATCH /api/users/me` endpoint accepting `{ email: string }`, validates format, writes to `users.email`. Profile page UI gets a small inline edit affordance.
-
-4. **Privacy contact email.** Decide on and provision a contact address (recommendation: `privacy@orcaconcepts.org`). Update the placeholder slots in the Privacy Policy draft (`[email/write to]`, `[contact information]`, `[toll-free phone number]`) before sending the draft back to counsel. Toll-free phone number is not strictly required for a small open-source project — counsel's draft offers it as one of three contact methods, all alternatives. Email + a simple data subject request form on the website is sufficient.
-
-5. **Optional: data subject request form.** Privacy Policy mentions a form on the website. Could be implemented as a simple page with form fields (name, email, request type [export/correction/deletion/access], description) that emails `privacy@orcaconcepts.org`. Lower priority than the self-service export; can be deferred to Phase 52d if needed.
-
-**Backend changes:**
-- New `data_export_requests` table (see schema below in Planned Tables section).
-- New endpoint `GET /api/users/me/export` in `usersController.js`. Aggregates the data described above with parameterized queries (use LEFT JOIN where appropriate per Phase 36 rule on nullable foreign keys). Streams or returns JSON response.
-- New endpoint `PATCH /api/users/me` in `usersController.js` for email correction.
-- Migration: new `data_export_requests` table.
-
-**Frontend changes:**
-- New "Privacy & Data" section on the profile page with two affordances:
-  - "Download my data (JSON)" button → calls `GET /api/users/me/export`, triggers browser download. Show inline "X of 2 exports used this year" counter.
-  - "Edit email" inline affordance → calls `PATCH /api/users/me`.
-- `api.js` adds `usersAPI.exportMyData()` and `usersAPI.updateProfile({ email })`.
-
-**Implementation order suggestion:**
-- Phase 52a: Backend export endpoint + `data_export_requests` table + rate limit
-- Phase 52b: Backend profile PATCH endpoint for email correction
-- Phase 52c: Frontend Privacy & Data section on profile page
-- Phase 52d (optional): Data subject request form page
-
-**Out of scope for Phase 52 (intentional):**
+**Out of scope for Phase 52 (intentional, all confirmed by counsel):**
 - Right-to-be-forgotten beyond existing account deletion (already implemented in Phase 17 / Section 17 of ToS — `username` is replaced with placeholder, votes/subscriptions deleted, contributions stay).
 - Document file downloads in the export bundle (metadata only for v1).
 - Bulk export of graph data (different feature — public data API, post-launch roadmap).
-- "Do Not Sell" opt-out (not required — Counsel confirmed).
+- "Do Not Sell" opt-out (not required).
+- Toll-free phone number (counsel confirmed email is sufficient as one of three permitted contact methods).
 
 ---
 
@@ -2572,7 +2527,7 @@ ALTER TABLE concept_links ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN NOT NULL D
 | 8 | "identifiers" (third-party advertising) | Third-party data collection disclosure | **Resolved in current draft** — Twilio, ORCID, Cloudflare are disclosed in §4. Add to operational checklist: annual review of these vendors' privacy practices to maintain "reasonable awareness" per CA/DE law | New annual compliance task — see "Operational Compliance Tasks" below |
 | 9 | "UI" (visibility section) | Spell out "user interface" | **Cosmetic doc edit** | None |
 | 10 | "data" (security section) | Confirms industry-standard language is sufficient | **Accept counsel's redline** in subsection (e) | None |
-| 11 | "exists" (data export feature) | **Build the data export feature** (Colorado) | **Phase 52** | Backend + frontend, see Phase 52 above |
+| 11 | "exists" (data export feature) | **Build the data export feature** (Colorado) | ✅ **Phase 52 COMPLETE** | Backend + frontend, see Phase 52 above |
 
 **Outstanding questions for counsel (next legal review pass):**
 1. Comment #5: should "owner" → "steward" rename be reflected in the UI as well, or legal documents only?
@@ -2786,7 +2741,7 @@ Phase 6: Complete. All four sub-phases implemented:
 - **Phase 49:** Rate Limiting Hardening — ✅ 49a/49b/49d COMPLETE (49a: trust proxy + SMS abuse protection with Postgres-backed pgRateLimitStore; 49b: write-endpoint user-keyed limiters via perUserHourly factory + initial global safety net; 49d: global safety net raised to 2000/15min, GET-exempt, Postgres-backed after lockout incident. Phase 49c polish deferred post-launch.)
 - **Phase 50:** Reverse Citations — "Cited by N" on Annotations — ✅ COMPLETE (50a: `GET /api/annotations/:id/cited-by` backend with cited_by_count on annotation payload; 50b: frontend "Cited by N" badge with lazy-loaded expand-to-list and click-through navigation, 409 short-circuit fix, useEffect lazy-fetch fix)
 - **Phase 51:** Click-Wrap Consent at Registration & Document Upload — ✅ COMPLETE (PRE-LAUNCH BLOCKER RESOLVED — driven by counsel comment #0; 51a schema additions `tos_accepted_at` + `tos_version_accepted` on users + backend `verifyRegister` consent fields + standalone backfill script; 51b+c static `/terms` + `/privacy` placeholder pages + `LoginModal.jsx` Sign Up checkbox merging ToS/Privacy/age affirmation into one click-wrap with disabled-until-checked button; 51d document upload affirmation verified already correct — no refactor needed. See "Pre-Launch Legal & Compliance Blockers" section above for implementation summary)
-- **Phase 52:** Data Export, Correction, and Privacy Contact — 🔲 PLANNED (PRE-LAUNCH BLOCKER — driven by counsel comment #11, Colorado Privacy Act portability requirement; 52a: backend `GET /api/users/me/export` + `data_export_requests` table + 2-per-12-month rate limit; 52b: backend `PATCH /api/users/me` for email correction; 52c: frontend Privacy & Data section on profile page; 52d optional: data subject request form page — see Pre-Launch Legal & Compliance Blockers section above for full scope)
+- **Phase 52:** Data Export, Correction, and Privacy Contact — ✅ COMPLETE (PRE-LAUNCH BLOCKER RESOLVED — driven by counsel comment #11; 52a `GET /api/users/me/export` returning full account + contributions + votes/subscriptions JSON, `data_export_requests` audit table, 2-per-12-months rate limit returning 429 when exceeded, audit row inserted only on successful export so failures don't burn quota; 52b `PATCH /api/users/me` for email correction + `GET /api/users/me/export-status` helper for the frontend counter; 52c frontend Privacy & Data section on profile page with download button + counter + inline email edit + privacy contact mailto; 52d data subject request form intentionally **deferred** — `orcaconcepts@gmail.com` mailto is sufficient. Wording follow-up commit replaced "Colorado Privacy Act" UI strings with plain language. New `PRIVACY_CONTACT_EMAIL` constant in both backend and frontend `config/constants.js`. See "Pre-Launch Legal & Compliance Blockers" section above for implementation summary)
 - **Phase 53:** DMCA & Illegal-Content Removal Infrastructure — 🔲 PLANNED (LAUNCH-RECOMMENDED, not strict blocker — driven by Copyright Policy review and counsel comment #1 on the ToS; unifies §512 DMCA safe-harbor operational machinery with §230 illegal-content removal mechanism; 53a: schema additions `legal_removals` + `dmca_notices` + `dmca_counter_notices` + `dmca_strikes` tables, `legal_hold` flag on concepts/edges/concept_links, admin `POST /api/admin/legal-removal` endpoint, transactional email for subscriber notification; 53b: `/copyright-policy` static page + public `/dmca/takedown` form with §512(c)(3)(A) validation; 53c: `/dmca/counter-notice` flow + complainant forwarding; 53d: repeat-infringer tracking + admin review queue at 3 strikes/12 months threshold — see Pre-Launch Legal & Compliance Blockers section above for full scope, including documented exception to append-only philosophy in Permanence section)
 
 ### Git Commits (Phase 27)
@@ -4301,6 +4256,8 @@ Then computes `subscribed_vote_count` per annotation via a LEFT JOIN subquery co
 - **Architecture Decision #272 — Click-Wrap Pattern for Affirmation Modals (Phase 51):** Any modal or form that requires the user to legally affirm something (ToS acceptance, copyright affirmation, future age/jurisdiction confirmations, etc.) must use the **checkbox + disabled-button click-wrap pattern**, not a single "click this button to accept" pattern. **Rule:** (a) Affirmation text rendered as a label next to an unchecked-by-default `<input type="checkbox">`. (b) The proceed/submit button is `disabled={!affirmed}` until the checkbox is ticked, with the existing disabled visual treatment (opacity reduction + `cursor: 'not-allowed'`). (c) The affirmation state resets to `false` whenever the modal closes or a fresh submission begins — never auto-tick. (d) When the affirmation is recorded server-side (e.g., `tos_accepted_at`, `copyright_confirmed_at`), the timestamp must be set in the same DB transaction as whatever action the affirmation gates. **Why:** Browse-wrap (mere use implies acceptance) and single-button click-wrap (clicking proceed *is* the acceptance) are increasingly held unenforceable. A separate visible checkbox creates the affirmative action courts look for. Phase 51 implementation: `LoginModal.jsx` Sign Up step 3 (combined ToS + age affirmation) and the existing copyright affirmation modal both follow this pattern.
 
 - **Architecture Decision #273 — Split-Phase Regression Windows (Phase 51 lesson):** When a feature is split across multiple commits where a backend guard depends on a frontend change (or vice versa), the user-facing flow may be fully broken between commits even though each individual commit passes its own tests in isolation. Phase 51 example: Phase 51a added the backend `tosAccepted` requirement; until Phase 51b+c shipped the frontend checkbox, registration was completely broken. **Rule:** (a) Identify split-phase pairs at planning time and flag them in the prompts. (b) Run such pairs back-to-back in the same working session when possible — avoid leaving the broken intermediate state in `main` for hours or days. (c) If the pair must span sessions, document the broken state explicitly so it isn't mistaken for a real bug during testing. (d) When in doubt, prefer adding backend guards *after* the frontend wiring, so the worst-case intermediate state is "frontend sends a field that the backend ignores" rather than "backend rejects valid-looking requests."
+
+- **Architecture Decision #274 — Regulatory Caps That Are Permitted But Not Required (Phase 52 lesson):** Several privacy and consumer-protection statutes (Colorado Privacy Act, California CCPA/CPRA, Virginia VCDPA, etc.) follow a pattern: they grant consumers a right (e.g., data portability) AND simultaneously authorize the company to impose limits (e.g., "may decline a third request within 12 months as manifestly excessive"). When Orca implements such a cap, the cap itself is a **business decision** (typically motivated by abuse prevention or operational simplicity), not a statutory mandate. **Rule:** (a) **Implement the cap** — it's a free defensive layer with negligible user impact. (b) **Don't name the statute in user-facing UI copy.** "You can download your data up to twice per 12-month period" is honest; "The Colorado Privacy Act limits this to 2 requests per 12 months" is misleading because it implies the statute forces the cap when it merely permits it. (c) **Do name the statute in the Privacy Policy and in code comments** — that's where legal grounding belongs. (d) **Burn-the-quota timing:** when an export/request can fail mid-flight, insert the audit/quota row AFTER the operation succeeds, not before. A user whose export crashed shouldn't lose a request slot. Phase 52a follows this pattern: `INSERT INTO data_export_requests` runs only after the JSON is successfully assembled. (e) **Helper endpoint pattern:** when the frontend needs to display "X of N used" without consuming quota, expose a separate read-only endpoint (e.g., `GET /me/export-status`) that runs the same count query without the audit insert. Phase 52b ships this pattern and it's the right shape for any future regulatory cap (e.g., a hypothetical "deletion request" counter).
 
 ---
 

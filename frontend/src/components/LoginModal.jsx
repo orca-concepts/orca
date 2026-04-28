@@ -490,9 +490,9 @@ const LoginModal = ({ isOpen, onClose, initialTab = 'login', notice }) => {
         />
         <span>
           I have read and agree to the{' '}
-          <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Terms of Service</a>
-          {' '}and{' '}
-          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Privacy Policy</a>.
+          <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Terms of Service</a>,{' '}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Privacy Policy</a>, and{' '}
+          <a href="/copyright-policy" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Copyright Policy</a>.
           I confirm I am at least 18 years old.
         </span>
       </label>

@@ -1,34 +1,40 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const PrivacyPage = () => {
+  const navigate = useNavigate();
+
   return (
-    <div style={styles.wrapper}>
-      <div style={styles.container}>
-        <h1 style={styles.heading}>Privacy Policy</h1>
-        <p style={styles.body}>
-          This is a placeholder. The Privacy Policy is currently under legal review
-          and will be published here before public launch.
-        </p>
-        <div style={styles.footer}>Last updated: 2026-04-25</div>
-      </div>
+    <div style={styles.container}>
+      <button onClick={() => navigate('/legal')} style={styles.backLink}>← Legal</button>
+      <h1 style={styles.heading}>Privacy Policy</h1>
+      <p style={styles.body}>
+        This is a placeholder. The Privacy Policy is currently under legal review
+        and will be published here before public launch.
+      </p>
+      <div style={styles.footer}>Last updated: 2026-04-25</div>
     </div>
   );
 };
 
 const styles = {
-  wrapper: {
-    minHeight: '100vh',
-    backgroundColor: '#faf9f6',
-    display: 'flex',
-    justifyContent: 'center',
-    padding: '40px 20px',
-  },
   container: {
     maxWidth: '760px',
-    width: '100%',
+    padding: '40px 20px',
     fontFamily: '"EB Garamond", Georgia, serif',
     color: '#333',
     lineHeight: 1.6,
+  },
+  backLink: {
+    background: 'none',
+    border: 'none',
+    color: '#666',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    padding: 0,
+    marginBottom: '20px',
+    display: 'block',
   },
   heading: {
     fontSize: '28px',

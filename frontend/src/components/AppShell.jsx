@@ -20,6 +20,10 @@ import MessagesPage from '../components/MessagesPage';
 import ComboListView from '../components/ComboListView';
 import ComboTabContent from '../components/ComboTabContent';
 import AnnotationVotesOverlay from '../components/AnnotationVotesOverlay';
+import LegalPage from '../components/LegalPage';
+import TermsPage from '../components/TermsPage';
+import PrivacyPage from '../components/PrivacyPage';
+import CopyrightPolicyPage from '../components/CopyrightPolicyPage';
 
 const AppShell = () => {
   const { logout, logoutEverywhere, user, isGuest, loading: authLoading } = useAuth();
@@ -28,7 +32,9 @@ const AppShell = () => {
 
   // Phase 30g: Info page detection and header nav
   const INFO_SLUGS = ['using-orca', 'constitution', 'donate'];
+  const LEGAL_SLUGS = ['legal', 'terms', 'privacy', 'copyright-policy'];
   const infoSlug = INFO_SLUGS.find(s => location.pathname === `/${s}`);
+  const isLegalPage = LEGAL_SLUGS.some(s => location.pathname === `/${s}`);
 
   // Graph tabs (new Phase 5c — persistent navigation panes)
   const [graphTabs, setGraphTabs] = useState([]);
@@ -1332,6 +1338,7 @@ const AppShell = () => {
             <button style={{ ...styles.navLink, ...(infoSlug === 'using-orca' ? styles.navLinkActive : {}) }} onClick={() => navigate('/using-orca')}>Using Orca</button>
             <button style={{ ...styles.navLink, ...(infoSlug === 'constitution' ? styles.navLinkActive : {}) }} onClick={() => navigate('/constitution')}>Constitution</button>
             <button style={{ ...styles.navLink, ...(infoSlug === 'donate' ? styles.navLinkActive : {}) }} onClick={() => navigate('/donate')}>Donate</button>
+            <button style={{ ...styles.navLink, ...(isLegalPage ? styles.navLinkActive : {}) }} onClick={() => navigate('/legal')}>Legal</button>
           </div>
           {isGuest ? (
             <div style={styles.userSection}>
@@ -1386,10 +1393,15 @@ const AppShell = () => {
 
 
       {/* Phase 30g: Info pages replace normal layout */}
-      {infoSlug ? (
+      {/* Legal pages also replace normal layout */}
+      {infoSlug || isLegalPage ? (
         <div style={styles.mainLayout}>
           <div style={styles.contentArea}>
-            <InfoPage slug={infoSlug} onRequestLogin={handleRequestLogin} />
+            {infoSlug && <InfoPage slug={infoSlug} onRequestLogin={handleRequestLogin} />}
+            {location.pathname === '/legal' && <LegalPage />}
+            {location.pathname === '/terms' && <TermsPage />}
+            {location.pathname === '/privacy' && <PrivacyPage />}
+            {location.pathname === '/copyright-policy' && <CopyrightPolicyPage />}
           </div>
         </div>
       ) : (
