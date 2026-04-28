@@ -384,7 +384,7 @@ const moderationController = {
 
       // Verify edge exists and is hidden
       const edgeCheck = await pool.query(
-        'SELECT id, is_hidden FROM edges WHERE id = $1',
+        'SELECT id, is_hidden, legal_hold FROM edges WHERE id = $1',
         [edgeId]
       );
       if (edgeCheck.rows.length === 0) {
@@ -392,6 +392,9 @@ const moderationController = {
       }
       if (!edgeCheck.rows[0].is_hidden) {
         return res.status(400).json({ error: 'This concept is not currently hidden' });
+      }
+      if (edgeCheck.rows[0].legal_hold) {
+        return res.status(403).json({ error: 'Cannot unhide content that has been removed for legal reasons. Contact orcaconcepts@gmail.com if you believe this is in error.' });
       }
 
       // Unhide the edge
