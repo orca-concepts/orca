@@ -16,6 +16,8 @@ Delete this file from the repo after launch.
 - [x] **Rate limiting audit complete** — see `RATE_LIMIT_AUDIT.md`. Findings broken into Phases 49a/49b/49c below.
 - [x] **Twilio account-level protection** — usage triggers configured ($10 warning, $20 hard-cap warning).
 - [x] **Twilio prepaid mode configured** — upgraded from trial to paid, billing type is Pay as you go, auto-recharge disabled, initial balance ~$20.
+- [x] **Cloudflare R2 production bucket created** — bucket `orca-documents-prod`, S3 API endpoint noted, Account API token (`orca-backend-prod`) generated with Object Read & Write scoped to this bucket only, Public Development URL enabled. All 5 credentials saved for Railway env vars (bucket name, endpoint URL, access key ID, secret access key, public URL prefix).
+- [x] **Phase 54 — Production deployment readiness** complete. 54a: R2 file storage abstraction (`backend/src/config/storage.js`) with production/dev switch and hard startup error if R2 env vars are missing in production. 54b: Backend serves frontend static files in production; root `package.json` orchestrates build + migrations-on-startup; single Railway service architecture. 54c: License consistency (AGPL-3.0-only in both package.json files), localhost reference audit, cookie/session config audit, trust proxy confirmed.
 - [x] **Phase 49 — Rate limiting (foundation + write-endpoint limiters + global safety net)** complete. Trust proxy configured, per-phone SMS limiter + global daily SMS cap on Postgres-backed store, all write-endpoint limiters in place, global 500 req/15min/IP safety net active. Old broken IP-based limiters in `auth.js` ripped out.
 - [x] **CONTRIBUTING.md** added.
 - [x] **CODE_OF_CONDUCT.md** added (Contributor Covenant v2.1).
@@ -33,17 +35,24 @@ This section is the actual sequence to get Orca live on the internet. Items are 
 
 ### Cloudflare R2 (file storage)
 
-- [ ] Create R2 bucket for production document uploads
-- [ ] Generate R2 access key + secret
-- [ ] Decide on bucket name and region
-- [ ] Note R2 credentials for Railway env vars
+- [x] Create R2 bucket for production document uploads (`orca-documents-prod`)
+- [x] Generate R2 access key + secret (Account API token `orca-backend-prod`, scoped to the bucket only, Object Read & Write)
+- [x] Decide on bucket name and region (Automatic location)
+- [x] Public Development URL enabled (`pub-<hash>.r2.dev`)
+- [x] All 5 R2 credentials saved for Railway env vars
+
+### Backend production code (Phase 54 ✅ complete)
+
+- [x] R2 storage abstraction in production (Phase 54a)
+- [x] Backend serves frontend static files in production (Phase 54b)
+- [x] Migrations run on startup (Phase 54b)
+- [x] License consistency, localhost audit, cookie/session audit, trust proxy verified (Phase 54c)
 
 ### Railway setup
 
 - [ ] Create Railway project, connect GitHub repo (`orca-concepts/orca`)
 - [ ] Provision Railway Postgres add-on; confirm `DATABASE_URL` is auto-injected
-- [ ] Configure backend service: build command, start command, root directory
-- [ ] Configure frontend service (or static build) — confirm Vite build settings work on Railway
+- [ ] Configure service: build command (`npm run build`), start command (`npm start`), root directory (repo root)
 - [ ] Confirm Railway is on Hobby plan (~$5/month)
 
 ### Environment variables on Railway
@@ -55,18 +64,10 @@ This section is the actual sequence to get Orca live on the internet. Items are 
 - [ ] `ENABLED_ATTRIBUTES` — confirm matches intended production set
 - [ ] `ENABLED_DOCUMENT_TAGS` — confirm matches intended production set
 - [ ] Twilio creds: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`
-- [ ] ORCID production OAuth creds: `ORCID_CLIENT_ID`, `ORCID_CLIENT_SECRET`, `ORCID_REDIRECT_URI` (production URL)
-- [ ] R2 creds: bucket name, access key, secret, endpoint URL, public URL prefix
+- [ ] ORCID production OAuth creds: `ORCID_CLIENT_ID`, `ORCID_CLIENT_SECRET`, `ORCID_REDIRECT_URI` (production URL — set after DNS is wired up)
+- [ ] R2 creds: `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_PUBLIC_URL_PREFIX`
 - [ ] `NODE_ENV=production`
-- [ ] Frontend `VITE_API_URL` pointing to production backend domain
-
-### Backend production config audit
-
-- [ ] CORS allowlist updated to include production domain (`https://orcaconcepts.org`)
-- [ ] Any hardcoded `localhost` references audited and made env-aware
-- [ ] File upload code switches to R2 in production, multer/local in dev
-- [ ] ORCID redirect URI uses production URL in production
-- [ ] Cookie/session settings appropriate for production (Secure flag, SameSite)
+- [ ] `PRODUCTION_ORIGIN=https://orcaconcepts.org` (CORS allowlist for production)
 
 ### First deploy
 
@@ -82,6 +83,7 @@ This section is the actual sequence to get Orca live on the internet. Items are 
 - [ ] Decide on `www` subdomain handling (redirect to apex, or vice versa)
 - [ ] Confirm Railway-issued SSL cert provisions on `orcaconcepts.org`
 - [ ] Test `https://orcaconcepts.org` loads the live app
+- [ ] Update `ORCID_REDIRECT_URI` in Railway env vars and ORCID developer dashboard with production callback URL
 
 ### Production smoke test
 
@@ -93,6 +95,7 @@ This section is the actual sequence to get Orca live on the internet. Items are 
 - [ ] Log out, log back in (test password login)
 - [ ] Test "Log out everywhere"
 - [ ] Open the app on a phone — basic mobile sanity check
+- [ ] Test legal/compliance flows: `/report-infringement`, `/counter-notice`, `/admin/legal`, data export from profile page
 
 ### Repo + announcement
 
@@ -199,4 +202,4 @@ This section is the actual sequence to get Orca live on the internet. Items are 
 
 ---
 
-**Last updated:** April 28, 2026 (added Deployment & Launch section; removed legal/entity tracking, EB Garamond investigation, and domain email items)
+**Last updated:** April 28, 2026 (Phase 54 production deployment readiness complete; R2 storage abstraction, single-service architecture, migrations-on-startup all shipped; ready for Railway setup)
