@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../services/api';
@@ -10,6 +10,7 @@ const OrcidCallback = () => {
 
   const [status, setStatus] = useState('loading');
   const [errorMessage, setErrorMessage] = useState('');
+  const exchangedRef = useRef(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -35,12 +36,16 @@ const OrcidCallback = () => {
       return;
     }
 
+    if (exchangedRef.current) return;
+    exchangedRef.current = true;
+
     const exchangeCode = async () => {
       try {
         await authAPI.orcidCallback(code);
         await refreshUser();
         navigate(`/profile/${user.id}`, { replace: true });
       } catch (err) {
+        exchangedRef.current = false;
         setStatus('error');
         setErrorMessage(err.response?.data?.error || 'Failed to connect ORCID');
       }
