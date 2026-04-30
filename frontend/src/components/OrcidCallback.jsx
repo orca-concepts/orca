@@ -36,6 +36,15 @@ const OrcidCallback = () => {
       return;
     }
 
+    // If ORCID is already connected, this is a back-button loop:
+    // user hit Back from profile → landed on orcid.org/authorize →
+    // ORCID auto-redirected here with a fresh code. Go back past
+    // the ORCID authorize entry to break the cycle.
+    if (user.orcidId) {
+      window.history.back();
+      return;
+    }
+
     if (exchangedRef.current) return;
     exchangedRef.current = true;
 

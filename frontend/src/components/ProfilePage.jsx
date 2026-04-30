@@ -121,7 +121,7 @@ const ProfilePage = () => {
       setOrcidBusy(true);
       setOrcidError(null);
       const res = await authAPI.getOrcidAuthorizeUrl();
-      window.location.href = res.data.url;
+      window.location.replace(res.data.url);
     } catch (err) {
       setOrcidError(err.response?.data?.error || 'Failed to initiate ORCID connection');
       setOrcidBusy(false);
