@@ -58,9 +58,9 @@ const createTables = async () => {
       );
     `);
 
-    // Seed default attributes (action, tool, value) if they don't exist
+    // Seed default attributes (action, tool, value, question) if they don't exist
     await client.query(`
-      INSERT INTO attributes (name) VALUES ('action'), ('tool'), ('value')
+      INSERT INTO attributes (name) VALUES ('action'), ('tool'), ('value'), ('question')
       ON CONFLICT (name) DO NOTHING;
     `);
 
