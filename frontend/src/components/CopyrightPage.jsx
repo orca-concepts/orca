@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const TermsPage = () => {
+const CopyrightPage = () => {
   const navigate = useNavigate();
   const [html, setHtml] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/legal/terms-of-service.html')
+    fetch('/legal/copyright-policy.html')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.text();
@@ -25,10 +25,10 @@ const TermsPage = () => {
   return (
     <div style={styles.container}>
       <button onClick={() => navigate('/legal')} style={styles.backLink}>← Legal</button>
-      <h1 style={styles.heading}>Terms of Service</h1>
+      <h1 style={styles.heading}>Copyright Policy</h1>
       {error && (
         <p style={{ color: '#a00', fontFamily: '"EB Garamond", Georgia, serif' }}>
-          Could not load the Terms of Service. Please refresh, or contact orcaconcepts@gmail.com if the problem persists.
+          Could not load the Copyright Policy. Please refresh, or contact orcaconcepts@gmail.com if the problem persists.
         </p>
       )}
       {!error && html === null && <p style={{ fontFamily: '"EB Garamond", Georgia, serif' }}>Loading...</p>}
@@ -68,4 +68,4 @@ const styles = {
   },
 };
 
-export default TermsPage;
+export default CopyrightPage;

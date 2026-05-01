@@ -20,7 +20,7 @@ const LegalPage = () => {
           <span style={styles.docTitle}>Privacy Policy</span>
           <span style={styles.docDesc}>How we collect, use, and protect your data</span>
         </button>
-        <button onClick={() => navigate('/copyright-policy')} style={styles.docLink}>
+        <button onClick={() => navigate('/copyright')} style={styles.docLink}>
           <span style={styles.docTitle}>Copyright Policy</span>
           <span style={styles.docDesc}>DMCA procedures and copyright compliance</span>
         </button>

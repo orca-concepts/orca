@@ -1,0 +1,399 @@
+<p><strong>PRIVACY POLICY</strong></p>
+<p>Orca Concepts LLC, a Wisconsin limited liability company (orcaconcepts.org) (“<strong>Company</strong>” or “<strong>Orca</strong>”) welcomes you to its online service (the "<strong>Service</strong>"). By using its Service, you (“<strong>You</strong>” or “<strong>User</strong>”) are agreeing to the following, whether or not you are a registered customer or User of Orca (orcaoncepts.org). This Privacy Policy (“<strong>Privacy Policy</strong>”) may be updated from time to time without notice to you. Capitalized terms or other terms not herein defined are defined in the Subscriber Agreement and Terms of Use (“<strong>Agreement</strong>”) (orcaconcepts.org/terms). This Privacy Policy applies to personal data collected in connection with the Company Website(s) and the Website’s processing activities, as reflected in the Agreement.</p>
+<ol type="1">
+<li>
+<p><strong><u>DATA WE COLLECT</u></strong>.</p>
+
+<ol type="a">
+<li>
+<p>Account data (collected at registration):</p>
+
+<ol type="i">
+<li>
+<p>Username (chosen by User)</p>
+</li>
+<li>
+<p>Phone number (used for OTP verification during registration and password reset only)</p>
+</li>
+<li>
+<p>Email address (used for legal notifications, copyright violation notices, and other policy updates); it is not publicly visible</p>
+</li>
+<li>
+<p>Password (stored as a one-way hash; used for login)</p>
+</li>
+</ol></li>
+<li>
+<p>Optional Account Data (User-initiated)</p>
+
+<ol type="i">
+<li>
+<p>ORCID ID (verified via OAuth with orcid.org; stored if the User chooses to link their ORCID account)</p>
+</li>
+</ol></li>
+<li>
+<p>How Phone Numbers are Stored</p>
+
+<ol type="i">
+<li>
+<p>Phone numbers are hashed using bcryptjs (one-way hash; cannot be reversed to retrieve the original number)</p>
+</li>
+<li>
+<p>A separate HMAC-SHA256 deterministic hash is stored for O(1) lookup during password reset (keyed by a server-side secret).</p>
+</li>
+<li>
+<p>The original plain-text phone number is NEVER stored in the Company’s database.</p>
+</li>
+<li>
+<p>Phone numbers are sent to Twilio (third-party service) for OTP delivery during registration and password reset. Twilio's privacy policy governs their handling of phone numbers.</p>
+</li>
+</ol></li>
+<li>
+<p>How Passwords are Stored</p>
+
+<ol type="i">
+<li>
+<p>Passwords are hashed using bcryptjs (10 salt rounds). The original plain-text password is NEVER stored.</p>
+</li>
+</ol></li>
+</ol></li>
+<li>
+<p><strong><u>DATA WE DO NOT COLLECT</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Location data</p>
+</li>
+<li>
+<p>IP addresses (beyond what is inherent in server logs)</p>
+</li>
+<li>
+<p>Tracking cookies or analytics data</p>
+</li>
+<li>
+<p>Browser fingerprints</p>
+</li>
+<li>
+<p>Third-party advertising or analytics identifiers</p>
+</li>
+<li>
+<p>Data from anyone under age 18</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>USER ACTIVITY DATA</u></strong></p>
+</li>
+</ol>
+<p>User activity on the Website varies in its visibility:</p>
+<ol type="a">
+<li>
+<p>Attributed by username: Annotations on Content or Submissions, web links added to Concepts, document uploads (uploader name visible), Corpus ownership, Superconcept ownership, page comments, moderation comments</p>
+</li>
+<li>
+<p>Visible but not attributed: Concepts and edges created in the graph hierarchy, votes (graph votes, swap votes, link votes, tunnel votes). These are stored with the User's ID internally but the username is not displayed in the user interface (“UI”).</p>
+</li>
+<li>
+<p>Attributed within limited contexts: Corpus membership (usernames visible to other Users who are members of the same Corpus), document co-authorship (visible to other co-authors).</p>
+</li>
+</ol>
+<blockquote>
+<p>Users with verified ORCID IDs will have a small ORCID icon displayed alongside their username wherever it appears in authorship or membership contexts.</p>
+</blockquote>
+<ol start="4" type="1">
+<li>
+<p><strong><u>DATA WE SHARE AND DO NOT SHARE</u></strong></p>
+
+<ol type="a">
+<li>
+<p>We do not sell, rent, or share User data with third parties for marketing or advertising purposes.</p>
+</li>
+<li>
+<p>Phone numbers are transmitted to Twilio solely for the purpose of sending OTP verification codes during registration and password reset. No other User data is shared with Twilio.</p>
+</li>
+<li>
+<p>ORCID verification: During the optional ORCID linking process, the User is redirected to orcid.org to authenticate. Orca receives only the verified ORCID ID back from ORCID — no access tokens are stored. This is subject to ORCID's privacy policy (<a href="https://info.orcid.org/privacy-policy/"><u>https://info.orcid.org/privacy-policy/</u></a> ).</p>
+</li>
+<li>
+<p>Planned: Document files will be stored using Cloudflare R2 (cloud object storage). Cloudflare will store the uploaded file data but will not have access to user identity information. This is subject to Cloudflare's privacy policy (<a href="https://www.cloudflare.com/privacypolicy/"><u>https://www.cloudflare.com/privacypolicy/</u></a> ).</p>
+</li>
+<li>
+<p>As an open-source platform, the source code is publicly available, but the DATABASE (containing User data and Content) is not.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>COOKIES AND LOCAL STORAGE</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Orca uses a JWT (JSON Web Token) stored in the browser for authentication session management. Local storage is used for UI preferences (e.g., attribute filter defaults on the root page).</p>
+</li>
+<li>
+<p>No third-party cookies, tracking pixels, or analytics scripts are used.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>DATA RETENTION</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Account data (username, hashed phone number, email, hashed password, ORCID iD) is retained until the User deletes their account.</p>
+</li>
+<li>
+<p>User-generated Content follows the four-tier policy described in the Agreement:</p>
+
+<ol type="i">
+<li>
+<p>Concepts, edges, annotations, web links, tunnel links, and Superconcepts are retained permanently (creator field cleared on account deletion where applicable).</p>
+</li>
+<li>
+<p>Votes, subscriptions, and tunnel votes are deleted when the account is deleted.</p>
+</li>
+<li>
+<p>Documents follow Corpus membership lifecycle; orphaned documents are auto-deleted (unless rescued by the uploader). Uploaders can also permanently delete their own document versions at any time.</p>
+</li>
+</ol></li>
+<li>
+<p>Dormant tables and retired features: Some database tables are retained per the platform's append-only philosophy even after the associated feature is retired. This data is inert and not actively processed.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>DATA SECURITY</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Phone numbers are hashed using industry-standard bcryptjs (10 salt rounds) and HMAC-SHA256. Passwords are hashed using bcryptjs (10 salt rounds) and validated for strength using the zxcvbn library.</p>
+</li>
+<li>
+<p>Authentication tokens (JWTs) can be invalidated globally via "Log out everywhere" feature.</p>
+</li>
+<li>
+<p>The Website(s) uses rate limiting on authentication endpoints (5 requests per IP per 15 minutes on OTP sending; 10 requests per IP per 15 minutes on login).</p>
+</li>
+<li>
+<p>ORCID integration uses server-to-server OAuth token exchange — ORCID access tokens are used once for verification and not stored.</p>
+</li>
+<li>
+<p>We take other industry standard security measures to protect data.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>USER RIGHTS</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Access: Users can view their contributions through the Website interface: voted Concepts are visible via graph votes, uploaded documents appear in "My Documents" sections within each Corpus, and annotations can be filtered by authorship using the Author filter on individual documents. Users can view their profile page showing their username, ORCID ID (if linked), and activity statistics. There is not currently a single unified view of all contributions.</p>
+</li>
+<li>
+<p>Deletion: Users can delete their account, which removes personal data and clears creator attribution on contributions (see Section 17 of the Agreement). Users can also permanently delete specific document versions they uploaded (see Section 6 of the Agreement).</p>
+</li>
+<li>
+<p>ORCID disconnection: Users can disconnect their ORCID ID at any time via their profile page.</p>
+</li>
+<li>
+<p>Our data export feature may be found on your profile page (click your username at the top and look under Privacy and Data). Please contact us at orcaconcepts@gmail.com if you believe your personal data needs correction or you need assistance with data export.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>THIRD PARTY SERVICES</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Twilio: Used for phone number OTP verification during registration and password reset. This is subject to Twilio's privacy policy (<a href="https://www.twilio.com/legal/privacy"><u>https://www.twilio.com/legal/privacy</u></a> ).</p>
+</li>
+<li>
+<p>ORCID: Used for optional User (researcher) identity verification via OAuth. Only the verified ORCID ID is received and stored; no access tokens are retained. This is subject to ORCID's privacy policy (<a href="https://info.orcid.org/privacy-policy/"><u>https://info.orcid.org/privacy-policy/</u></a> ).</p>
+</li>
+<li>
+<p>Cloudflare R2 (planned): Will be used for cloud storage of User-uploaded document files. This will be/ is subject to Cloudflare's privacy policy (<a href="https://www.cloudflare.com/privacypolicy/"><u>https://www.cloudflare.com/privacypolicy/</u></a> ).</p>
+</li>
+<li>
+<p>Railway (planned): Will be used for application hosting (web server and database). This is subject to Railway's privacy policy (<a href="https://railway.com/legal/privacy"><u>https://railway.com/legal/privacy</u></a> ).</p>
+</li>
+<li>
+<p>No third-party services are used for advertising, analytics, or tracking.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>INTERNATIONAL AND OTHER USERS</u></strong></p>
+
+<ol type="a">
+<li>
+<p>Scope and Status. The Company is operated in the State of Wisconsin, United States of America. This Privacy Policy generally and the following is intended to reflect the applicable requirements of the certain U.S. States, UK GDPR, the EU GDPR, and other related data protection laws. The Company intends to comply, in all material respects, with all applicable data privacy and security laws and regulations.</p>
+</li>
+<li>
+<p>UK GDPR Application</p>
+
+<ol type="i">
+<li>
+<p>Defined terms. For purposes of this Privacy Policy section related to UK GDPR, the following definitions apply:</p>
+
+<ol type="1">
+<li>
+<p>"Personal Data" means any information relating to a living individual who is identified or identifiable, directly or indirectly, by reference to that information.</p>
+</li>
+<li>
+<p>"Special Category Personal Data" (sometimes referred to as sensitive personal data) means Personal Data revealing racial or ethnic origin, political opinions, religious or philosophical beliefs, or trade union membership, and the processing of genetic data, biometric data for the purpose of uniquely identifying an individual, data concerning health, or data concerning an individual's sex life or sexual orientation.</p>
+</li>
+<li>
+<p>"Data Subject" means the individual to whom the Personal Data relates.</p>
+</li>
+<li>
+<p>"Personal Data Breach" means a breach of security leading to the accidental or unlawful destruction, loss, alteration, unauthorized disclosure of, or access to, Personal Data transmitted, stored, or otherwise processed, including accidental loss, destruction, theft, corruption, or unauthorized disclosure of Personal Data.</p>
+</li>
+<li>
+<p>"Supervisory Authority" means the Information Commissioner's Office (ICO), the United Kingdom's independent authority responsible for upholding information rights.</p>
+</li>
+<li>
+<p>"Data Protection Officer" or "DPO" means the person appointed by the Company to lead and be involved in the development and implementation of the Company’s data protection and privacy strategy and compliance with the UK GDPR and applicable laws, where such appointment is made.</p>
+</li>
+</ol></li>
+<li>
+<p>How to exercise your rights. Subject to applicable law and verification of identity, Data Subjects may exercise their rights described in this Privacy Policy section (including, where applicable, rights of access, rectification, erasure, restriction, objection, and data portability) by submitting a request through one of the following channels made available by the Company:</p>
+
+<ol type="1">
+<li>
+<p>Completing the data subject request form made available on the Website within the Data Subject's online account settings (available on the profile page accessed by clicking the username at the top)</p>
+</li>
+<li>
+<p>Contacting the Company using the contact method(s) stated in the Privacy Policy's "Contact" section, below.</p>
+</li>
+</ol></li>
+<li>
+<p>Request limits and administration. Where permitted by applicable law, the Company may limit or refuse a request that is manifestly unfounded or excessive and may apply reasonable administrative measures to manage repeat requests. Without limiting the foregoing, the Company may decline to take action on a data access, data portability, or disclosure request made more than twice within any 12-month period, to the extent such limitation is permitted by applicable law and does not prejudice the Data Subject's statutory rights.</p>
+</li>
+<li>
+<p>Personal Data Breach handling (process and accountability). The Company shall maintain and follow reasonable internal procedures to assess, investigate, and respond to any suspected or confirmed Personal Data Breach affecting Personal Data processed in connection with the Website. Such procedures shall, at a minimum:</p>
+
+<ol type="1">
+<li>
+<p>identify and record the nature of the incident and the categories of Personal Data potentially affected;</p>
+</li>
+<li>
+<p>take reasonable steps to contain, mitigate, and remediate the incident and reduce the likelihood of recurrence;</p>
+</li>
+<li>
+<p>assess, based on available information, whether the incident constitutes a Personal Data Breach and, if so, the likely risk to the rights and freedoms of Data Subjects;</p>
+</li>
+<li>
+<p>where required by applicable law, notify the Supervisory Authority and/or affected Data Subjects within the timeframes and with the content required by applicable law; and</p>
+</li>
+<li>
+<p>document the incident, the assessment, the decisions taken (including whether notification was required), and the remedial actions implemented.</p>
+</li>
+</ol></li>
+<li>
+<p>Consistency and interpretation. This section shall be interpreted to give effect to Data Subject rights and the Company’s obligations under applicable data protection law. If any part of this section conflicts with mandatory legal requirements, the mandatory requirements shall prevail to the extent of the conflict, and the remainder shall remain in effect.</p>
+</li>
+</ol></li>
+<li>
+<p>EU GDPR</p>
+
+<ol type="i">
+<li>
+<p>Defined Terms.</p>
+
+<ol type="1">
+<li>
+<p>"Personal Data" means any information relating to an identified or identifiable natural person.</p>
+</li>
+<li>
+<p>"Special Category Personal Data" means Personal Data revealing racial or ethnic origin, political opinions, religious or philosophical beliefs, or trade union membership, and the processing of genetic data, biometric data for the purpose of uniquely identifying a natural person, data concerning health, or data concerning a natural person's sex life or sexual orientation.</p>
+</li>
+<li>
+<p>"Processing" means any operation performed on Personal Data, whether or not by automated means, including collection, recording, organization, structuring, storage, adaptation or alteration, retrieval, consultation, use, disclosure by transmission, dissemination or otherwise making available, alignment or combination, restriction, erasure, or destruction.</p>
+</li>
+<li>
+<p>"Data Subject" means the natural person to whom the Personal Data relates.</p>
+</li>
+<li>
+<p>"Personal Data Breach" means a breach of security leading to the accidental or unlawful destruction, loss, alteration, unauthorized disclosure of, or access to, Personal Data transmitted, stored, or otherwise processed.</p>
+</li>
+</ol></li>
+<li>
+<p>Transparency and disclosures. The Company shall provide Data Subjects with clear, accurate, and up-to-date disclosures required by the privacy laws regarding the Processing of Personal Data via the Website, including disclosures regarding: (i) the categories of Personal Data processed; (ii) the purposes of Processing; (iii) the legal bases relied upon; (iv) the categories of recipients (if any); (v) international transfers (if any) and the safeguards used; (vi) retention periods or the criteria used to determine them; and (vii) Data Subject rights and how to exercise them. The Company shall ensure that any disclosures made to Data Subjects or to competent governmental, regulatory, or supervisory authorities are not inaccurate or misleading in any material respect and do not violate privacy laws.</p>
+</li>
+<li>
+<p>Data Subject rights; how to exercise rights; identity verification. Subject to privacy laws and verification of identity, Data Subjects may exercise their rights described in this section and elsewhere in the Privacy Policy (including, as applicable, rights of access, rectification, erasure, restriction, objection, and data portability) by contacting the Company using the contact method(s) stated below. The Company may require the Data Subject to provide sufficient information to allow the Company to reasonably verify the requestor's identity and locate the relevant Personal Data, which may include: the Data Subject's full name, contact details, account or reference information (if any), a description of the right requested and the information to which the request relates, and reasonable proof of identity and address (e. g., a copy of a government-issued identification document and a recent utility or similar bill), provided that any such verification information shall be used solely for identity verification and request fulfilment and shall be protected and retained only as long as necessary for those purposes. The Company shall not be obligated to comply with a request if the Company cannot reasonably verify the identity of the requestor or the requestor's authority to act on behalf of the Data Subject.</p>
+</li>
+<li>
+<p>Request handling; limits. The Company shall respond to Data Subject requests within the timeframes required by privacy laws and shall implement reasonable administrative measures to manage requests. Where permitted by privacy laws, the Company may refuse to act on requests that are manifestly unfounded or excessive, including because of their repetitive character, and may charge a reasonable fee or refuse to act, as permitted by privacy laws, provided the Company documents the basis for such decision and informs the Data Subject of available remedies.</p>
+</li>
+<li>
+<p>Security; confidentiality; accountability. The Company shall implement and maintain appropriate technical and organizational measures designed to protect Personal Data against accidental or unlawful destruction, loss, alteration, unauthorized disclosure of, or access to Personal Data. The Company shall take appropriate steps to ensure compliance with this section of the Privacy Policy and privacy laws in all material respects, including by maintaining internal governance, training, and oversight proportionate to the nature, scope, context, and purposes of Processing conducted via the Website.</p>
+</li>
+<li>
+<p>Personal Data Breach assessment and notifications. The Company shall maintain and follow internal procedures to assess, investigate, and respond to any suspected or confirmed Personal Data Breach affecting Personal Data processed in connection with the Website. Such procedures shall, at a minimum:</p>
+
+<ol type="1">
+<li>
+<p>identify and record the nature of the incident and the categories of Personal Data potentially affected;</p>
+</li>
+<li>
+<p>take reasonable steps to contain, mitigate, and remediate the incident and reduce the likelihood of recurrence;</p>
+</li>
+<li>
+<p>assess, based on available information, whether the incident constitutes a Personal Data Breach and, if so, the likely risk to the rights and freedoms of Data Subjects; and</p>
+</li>
+<li>
+<p>where required by privacy laws, notify the competent supervisory authority and/or affected Data Subjects within the timeframes and with the content required by privacy laws, and document the incident, the assessment, the decisions taken (including whether notification was required), and the remedial actions implemented.</p>
+</li>
+</ol></li>
+<li>
+<p>Regulatory engagement; investigations; remediation. If the Company receives any notice, claim, inquiry, or communication from a governmental, regulatory, or supervisory authority or a Data Subject alleging a Personal Data Breach or improper Processing of Personal Data in connection with the Website, the Company shall take reasonable steps to investigate, respond, and, where appropriate, remediate and implement corrective actions consistent with privacy laws.</p>
+</li>
+<li>
+<p>Order of precedence; updates. This section of the Privacy Policy shall be interpreted to give effect to Data Subject rights and the Company's obligations under privacy laws. If any part of this section conflicts with mandatory requirements of privacy laws, those mandatory requirements shall prevail to the extent of the conflict. The Company may update this section from time to time to reflect changes in Processing or privacy laws and shall post the updated version on the Website with an updated effective date.</p>
+</li>
+</ol></li>
+</ol></li>
+<li>
+<p><strong><u>CHANGES TO PRIVACY POLICY</u></strong></p>
+
+<ol type="a">
+<li>
+<p>The Company will update this Privacy Policy if our data practices change or to comply with applicable law. The effective date of each update will be noted.</p>
+</li>
+</ol></li>
+<li>
+<p><strong><u>CONTACT</u></strong></p>
+
+<ol type="a">
+<li>
+<p>If you would like to exercise any of your rights as described in this Privacy Policy, please:</p>
+
+<ol type="i">
+<li>
+<p>Complete a data subject request form available within your online account settings at your profile page, accessed by clicking the username at the top;</p>
+</li>
+<li>
+<p>Call us at 608-571-7643; or</p>
+</li>
+<li>
+<p>Email us at orcaconcepts@gmail.com.</p>
+</li>
+</ol></li>
+<li>
+<p>Please note that you may only make a data access or data portability disclosure request twice within a 12-month period.</p>
+</li>
+<li>
+<p>If you choose to contact directly by email/phone, you will need to provide us with:</p>
+
+<ol type="i">
+<li>
+<p>Enough information to identify you (e.g., your full name, address and customer or matter reference number));</p>
+</li>
+<li>
+<p>Proof of your identity and address (e.g., a copy of your driving license or passport and a recent utility or credit card bill); and</p>
+</li>
+<li>
+<p>A description of what right you want to exercise and the information to which your request relates.</p>
+</li>
+<li>
+<p>We are not obligated to make a data access or data portability disclosure if we cannot verify that the person making the request is the person about whom we collected information or is someone authorized to act on such person's behalf.</p>
+</li>
+</ol></li>
+<li>
+<p>Any personal information we collect from you to verify your identity in connection with your request will be used solely for the purposes of verification.</p>
+</li>
+</ol></li>
+</ol>
+<p>This Privacy Policy was updated on 4/29/2026.</p>

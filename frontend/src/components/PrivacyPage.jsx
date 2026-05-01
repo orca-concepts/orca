@@ -1,18 +1,40 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const PrivacyPage = () => {
   const navigate = useNavigate();
+  const [html, setHtml] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/legal/privacy-policy.html')
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((text) => {
+        if (!cancelled) setHtml(text);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div style={styles.container}>
       <button onClick={() => navigate('/legal')} style={styles.backLink}>← Legal</button>
       <h1 style={styles.heading}>Privacy Policy</h1>
-      <p style={styles.body}>
-        This is a placeholder. The Privacy Policy is currently under legal review
-        and will be published here before public launch.
-      </p>
-      <div style={styles.footer}>Last updated: 2026-04-25</div>
+      {error && (
+        <p style={{ color: '#a00', fontFamily: '"EB Garamond", Georgia, serif' }}>
+          Could not load the Privacy Policy. Please refresh, or contact orcaconcepts@gmail.com if the problem persists.
+        </p>
+      )}
+      {!error && html === null && <p style={{ fontFamily: '"EB Garamond", Georgia, serif' }}>Loading...</p>}
+      {!error && html !== null && (
+        <div dangerouslySetInnerHTML={{ __html: html }} />
+      )}
     </div>
   );
 };
@@ -22,7 +44,7 @@ const styles = {
     maxWidth: '760px',
     padding: '40px 20px',
     fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#333',
+    color: '#111',
     lineHeight: 1.6,
   },
   backLink: {
@@ -43,18 +65,6 @@ const styles = {
     marginBottom: '24px',
     borderBottom: '1px solid #d0d0d0',
     paddingBottom: '12px',
-  },
-  body: {
-    fontSize: '17px',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    marginBottom: '32px',
-  },
-  footer: {
-    fontSize: '14px',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#888',
-    borderTop: '1px solid #d0d0d0',
-    paddingTop: '12px',
   },
 };
 
