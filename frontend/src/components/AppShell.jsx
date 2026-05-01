@@ -27,6 +27,7 @@ import CopyrightPolicyPage from '../components/CopyrightPolicyPage';
 import InfringementNoticePage from '../components/InfringementNoticePage';
 import CounterNoticePage from '../components/CounterNoticePage';
 import AdminLegalRemovalsPanel from '../components/AdminLegalRemovalsPanel';
+import TheStormPage from '../components/TheStormPage';
 
 const AppShell = () => {
   const { logout, logoutEverywhere, user, isGuest, loading: authLoading } = useAuth();
@@ -34,7 +35,7 @@ const AppShell = () => {
   const location = useLocation();
 
   // Phase 30g: Info page detection and header nav
-  const INFO_SLUGS = ['using-orca', 'constitution', 'donate'];
+  const INFO_SLUGS = ['using-orca', 'the-storm'];
   const LEGAL_SLUGS = ['legal', 'terms', 'privacy', 'copyright-policy', 'report-infringement', 'counter-notice', 'admin/legal'];
   const infoSlug = INFO_SLUGS.find(s => location.pathname === `/${s}`);
   const isLegalPage = LEGAL_SLUGS.some(s => location.pathname === `/${s}`);
@@ -1338,10 +1339,9 @@ const AppShell = () => {
         <div style={styles.headerContent}>
           <div style={styles.titleRow}>
             <h1 style={styles.title} onClick={() => navigate('/')} role="button" tabIndex={0}>orca</h1>
+            <button style={{ ...styles.navLink, ...(infoSlug === 'the-storm' ? styles.navLinkActive : {}) }} onClick={() => navigate('/the-storm')}>The Storm</button>
             <button style={{ ...styles.navLink, ...(infoSlug === 'using-orca' ? styles.navLinkActive : {}) }} onClick={() => navigate('/using-orca')}>Using Orca</button>
-            <button style={{ ...styles.navLink, ...(infoSlug === 'constitution' ? styles.navLinkActive : {}) }} onClick={() => navigate('/constitution')}>Constitution</button>
-            <button style={{ ...styles.navLink, ...(infoSlug === 'donate' ? styles.navLinkActive : {}) }} onClick={() => navigate('/donate')}>Donate</button>
-            <button style={{ ...styles.navLink, ...(isLegalPage ? styles.navLinkActive : {}) }} onClick={() => navigate('/legal')}>Legal</button>
+            <button style={{ ...styles.navLink, ...(isLegalPage ? styles.navLinkActive : {}) }} onClick={() => navigate('/legal')}>Legal/Copyright Info</button>
           </div>
           {isGuest ? (
             <div style={styles.userSection}>
@@ -1400,7 +1400,8 @@ const AppShell = () => {
       {infoSlug || isLegalPage ? (
         <div style={styles.mainLayout}>
           <div style={styles.contentArea}>
-            {infoSlug && <InfoPage slug={infoSlug} onRequestLogin={handleRequestLogin} />}
+            {infoSlug === 'the-storm' && <TheStormPage />}
+            {infoSlug && infoSlug !== 'the-storm' && <InfoPage slug={infoSlug} onRequestLogin={handleRequestLogin} />}
             {location.pathname === '/legal' && <LegalPage />}
             {location.pathname === '/terms' && <TermsPage />}
             {location.pathname === '/privacy' && <PrivacyPage />}

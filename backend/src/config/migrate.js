@@ -2266,6 +2266,19 @@ const createTables = async () => {
     `);
     console.log('Phase 51a: Added tos_accepted_at and tos_version_accepted columns to users table');
 
+    // Phase 56a — Hard-delete of page_comments rows for retired Constitution/Donate pages.
+    // This is a documented narrow exception to the append-only philosophy: operator-initiated
+    // retirement of pre-launch pages that were never publicly visible. Distinct from the
+    // Phase 53 DMCA exception (which is for legal removal of user content).
+    const deleteResult = await client.query(
+      `DELETE FROM page_comments WHERE page_slug IN ('constitution', 'donate')`
+    );
+    if (deleteResult.rowCount > 0) {
+      console.log(`Phase 56a: Deleted ${deleteResult.rowCount} page_comments rows for retired constitution/donate pages`);
+    } else {
+      console.log('Phase 56a: No constitution/donate page_comments rows to delete (already clean)');
+    }
+
     console.log('Database tables created/migrated successfully!');
   } catch (error) {
     await client.query('ROLLBACK');

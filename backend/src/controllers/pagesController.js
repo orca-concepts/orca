@@ -1,6 +1,6 @@
 const pool = require('../config/database');
 
-const VALID_SLUGS = ['using-orca', 'constitution', 'donate'];
+const VALID_SLUGS = ['using-orca'];
 
 module.exports = {
   // GET /:slug/comments

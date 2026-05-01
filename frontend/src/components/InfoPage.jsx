@@ -4,8 +4,6 @@ import { pagesAPI } from '../services/api';
 
 const PAGE_TITLES = {
   'using-orca': 'Using Orca',
-  'constitution': 'Constitution',
-  'donate': 'Donate',
 };
 
 // ── Carousel data (using-orca only) ──────────────────────────
@@ -262,74 +260,6 @@ const UsingOrcaContent = ({ onImageClick }) => {
   );
 };
 
-// ── Constitution content (left column) ────────────────────
-const ConstitutionContent = () => (
-  <div>
-    <p style={constitutionStyles.subtitle}>
-      (Tentative*)
-    </p>
-    <p style={constitutionStyles.note}>
-      *Currently, Orca is just an LLC that I created in an abundance of caution to avoid fallout in the case of a potential lawsuit. If the app gains traction, I plan to search for board members and create a nonprofit, at which point I would turn this document into the basis of the bylaws and mission of that organization.
-    </p>
-
-    <ul style={constitutionStyles.list}>
-      <li style={constitutionStyles.listItem}>
-        Orca will always operate on a not-for-profit basis. The only monetization strategy Orca will pursue is a cost-plus subscription (meaning subscription fees would only ever cover operating costs plus a modest margin for development), and only in the event that donations alone cannot sustain development. Orca will not consider the idea of ads-based monetization.
-      </li>
-      <li style={constitutionStyles.listItem}>
-        Orca stores as little user information as possible, and will never sell or share user data with third parties. Orca stores hashed versions of user phone numbers to ensure uniqueness in registration, but does not store raw phone numbers.
-      </li>
-      <li style={constitutionStyles.listItem}>
-        Orca is committed to ensuring that each user represents an actual human person. Phone-based verification is the current approach. Orca reserves the right to pursue stronger verification methods if manipulation of the platform's data is detected.
-      </li>
-      <li style={constitutionStyles.listItem}>
-        Orca is committed to remaining transparent in content moderation, pursuing a community norms model over direct or algorithmic removal of content.&#8224;
-      </li>
-    </ul>
-
-    <p style={constitutionStyles.footnote}>
-      &#8224; Currently, if 10 users flag a concept as spam, it is moved to a hidden page for further voting. The site administrator makes the final decisions on hidden content. As trusted users emerge, Orca intends to transition to a deliberative model similar to Wikipedia's, where experienced community members make these decisions. This process applies to obnoxious or offensive content; seemingly irrelevant content should simply receive fewer votes from the community.
-    </p>
-  </div>
-);
-
-const constitutionStyles = {
-  subtitle: {
-    fontSize: '1.1em',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#666',
-    margin: '0 0 16px 0',
-  },
-  note: {
-    fontSize: '0.9em',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#666',
-    lineHeight: '1.6',
-    margin: '0 0 28px 0',
-  },
-  list: {
-    listStyle: 'disc',
-    paddingLeft: '24px',
-    margin: '0 0 28px 0',
-  },
-  listItem: {
-    fontSize: '1em',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#333',
-    lineHeight: '1.7',
-    marginBottom: '16px',
-  },
-  footnote: {
-    fontSize: '0.85em',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#666',
-    lineHeight: '1.6',
-    borderTop: '1px solid #e8e6e2',
-    paddingTop: '16px',
-    margin: '0',
-  },
-};
-
 const usingOrcaStyles = {
   intro: {
     fontSize: '1.1em',
@@ -417,8 +347,7 @@ const InfoPage = ({ slug, onRequestLogin }) => {
 
   const title = PAGE_TITLES[slug] || slug;
   const isUsingOrca = slug === 'using-orca';
-  const isConstitution = slug === 'constitution';
-  const isTwoCol = isUsingOrca || isConstitution;
+  const isTwoCol = isUsingOrca;
   const commentsHeading = isUsingOrca ? 'Report Bugs / Request Enhancements' : 'Community Comments';
 
   const loadComments = useCallback(async () => {
@@ -638,7 +567,7 @@ const InfoPage = ({ slug, onRequestLogin }) => {
     </div>
   );
 
-  // ── Two-column layout for using-orca and constitution ────
+  // ── Two-column layout for using-orca ────
   if (isTwoCol) {
     return (
       <div style={styles.container}>
@@ -646,7 +575,6 @@ const InfoPage = ({ slug, onRequestLogin }) => {
           <div style={styles.leftCol}>
             <h1 style={styles.pageTitle}>{title}</h1>
             {isUsingOrca && <UsingOrcaContent onImageClick={setLightbox} />}
-            {isConstitution && <ConstitutionContent />}
           </div>
           <div style={styles.rightCol}>
             {renderCommentsSection()}
@@ -698,7 +626,7 @@ const InfoPage = ({ slug, onRequestLogin }) => {
     );
   }
 
-  // ── Single-column layout for constitution / donate ───────
+  // ── Single-column layout (fallback) ───────
   return (
     <div style={styles.container}>
       <div style={styles.content}>
@@ -800,7 +728,7 @@ const styles = {
     overflowY: 'auto',
     backgroundColor: '#faf9f7',
   },
-  // ── Single-column (constitution, donate) ───────────────
+  // ── Single-column (fallback) ───────────────
   content: {
     maxWidth: '680px',
     margin: '0 auto',
