@@ -163,14 +163,122 @@ const UsingOrcaContent = ({ onImageClick }) => {
         >https://github.com/orca-concepts/orca</a>). Educators and organizations can run their own instance for a controlled environment.
       </p>
 
-      {/* PHASE 56C: replace with real YouTube iframe — URL TBD */}
-      <div style={usingOrcaStyles.videoPlaceholder}>
-        <span style={usingOrcaStyles.videoPlaceholderText}>YouTube Video 1 — embed coming soon</span>
+      {/* Video 1 — link-out to YouTube */}
+      <div style={{ margin: '32px 0' }}>
+        <a
+          href="https://www.youtube.com/watch?v=lkjSEi64DFs"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'block',
+            position: 'relative',
+            width: '100%',
+            aspectRatio: '16 / 9',
+            backgroundImage: 'url(https://img.youtube.com/vi/lkjSEi64DFs/maxresdefault.jpg)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundColor: '#000',
+            border: '1px solid #ccc',
+            textDecoration: 'none',
+            cursor: 'pointer',
+          }}
+          aria-label="Watch video 1 on YouTube (opens in a new tab)"
+        >
+          {/* Play triangle overlay */}
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '80px',
+            height: '80px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}>
+            <div style={{
+              width: 0,
+              height: 0,
+              borderTop: '14px solid transparent',
+              borderBottom: '14px solid transparent',
+              borderLeft: '22px solid #fff',
+              marginLeft: '6px',
+            }} />
+          </div>
+        </a>
+        {/* PHASE 56C-CAPTION: Miles will revise this caption text */}
+        <p style={{
+          fontFamily: "'EB Garamond', Georgia, serif",
+          fontSize: '0.95rem',
+          fontStyle: 'normal',
+          color: '#555',
+          marginTop: '8px',
+          textAlign: 'center',
+        }}>
+          Placeholder caption for video 1 — short description of what this video covers, to be revised.
+        </p>
       </div>
 
-      {/* PHASE 56C: replace with real YouTube iframe — URL TBD */}
-      <div style={usingOrcaStyles.videoPlaceholder}>
-        <span style={usingOrcaStyles.videoPlaceholderText}>YouTube Video 2 — embed coming soon</span>
+      {/* Video 2 — link-out to YouTube */}
+      <div style={{ margin: '32px 0' }}>
+        <a
+          href="https://www.youtube.com/watch?v=o9JuDZjSiGw"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'block',
+            position: 'relative',
+            width: '100%',
+            aspectRatio: '16 / 9',
+            backgroundImage: 'url(https://img.youtube.com/vi/o9JuDZjSiGw/maxresdefault.jpg)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundColor: '#000',
+            border: '1px solid #ccc',
+            textDecoration: 'none',
+            cursor: 'pointer',
+          }}
+          aria-label="Watch video 2 on YouTube (opens in a new tab)"
+        >
+          {/* Play triangle overlay */}
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '80px',
+            height: '80px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}>
+            <div style={{
+              width: 0,
+              height: 0,
+              borderTop: '14px solid transparent',
+              borderBottom: '14px solid transparent',
+              borderLeft: '22px solid #fff',
+              marginLeft: '6px',
+            }} />
+          </div>
+        </a>
+        {/* PHASE 56C-CAPTION: Miles will revise this caption text */}
+        <p style={{
+          fontFamily: "'EB Garamond', Georgia, serif",
+          fontSize: '0.95rem',
+          fontStyle: 'normal',
+          color: '#555',
+          marginTop: '8px',
+          textAlign: 'center',
+        }}>
+          Placeholder caption for video 2 — short description of what this video covers, to be revised.
+        </p>
       </div>
 
       <div style={usingOrcaStyles.heroTitle}>
@@ -291,21 +399,6 @@ const usingOrcaStyles = {
     textDecorationColor: '#ccc',
     textUnderlineOffset: '2px',
     fontFamily: '"EB Garamond", Georgia, serif',
-  },
-  videoPlaceholder: {
-    aspectRatio: '16 / 9',
-    width: '100%',
-    border: '1px solid #ccc',
-    backgroundColor: '#f5f4f2',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: '24px',
-  },
-  videoPlaceholderText: {
-    fontSize: '1em',
-    fontFamily: '"EB Garamond", Georgia, serif',
-    color: '#999',
   },
   sectionTitle: {
     fontSize: '1.1em',
