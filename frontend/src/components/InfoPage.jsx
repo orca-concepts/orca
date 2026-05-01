@@ -114,11 +114,11 @@ const USE_CASES = [
   },
   {
     label: 'Use Case: Product Development.',
-    text: ' Developers can publish documents related to the functionality of their products and users can apply value, tool, and action hierarchy graphs to help others best utilize tools and signal evolving demand for product capabilities.',
+    text: ' Developers can publish documents related to the functionality of their products and users can apply value, tool, and action hierarchy graphs to help others best utilize tools and signal evolving demand for product capabilities. Orca itself is a platform for researchers, so please respect that audience and only include research-related tools here.',
   },
   {
     label: 'Use Case: Education.',
-    text: ' Students and educators can create hierarchy graphs and apply them to material for structured, self-directed exploration of core concepts.',
+    text: ' Students and educators can create hierarchy graphs and apply them to material for self-directed exploration of core concepts.',
   },
 ];
 
@@ -150,8 +150,9 @@ const UsingOrcaContent = ({ onImageClick }) => {
   return (
     <div>
       <p style={usingOrcaStyles.intro}>
-        Using Orca means building shared value hierarchies, the principles that matter most to a
-        field, and using them as annotations to navigate between research documents. You can also message document authors about a specific annotation.
+        Using orca is building shared value hierarchies, ontologies of the principles that matter most in research,
+        and using them as annotations to navigate between research documents. You can also message document authors about a specific annotation/document, cite annotations from other documents,
+        and link the text-only documents in orca to where they are hosted elsewhere.
       </p>
 
       <p style={usingOrcaStyles.useCase}>
@@ -218,7 +219,7 @@ const UsingOrcaContent = ({ onImageClick }) => {
           marginTop: '8px',
           textAlign: 'center',
         }}>
-          Placeholder caption for video 1 — short description of what this video covers, to be revised.
+          This video shows the navigation between documents via concept graphs.
         </p>
       </div>
 
@@ -277,7 +278,7 @@ const UsingOrcaContent = ({ onImageClick }) => {
           marginTop: '8px',
           textAlign: 'center',
         }}>
-          Placeholder caption for video 2 — short description of what this video covers, to be revised.
+          This video shows using Flip View to compare a single concept and its children across different parent contexts.
         </p>
       </div>
 
@@ -291,7 +292,7 @@ const UsingOrcaContent = ({ onImageClick }) => {
             alt="Children view showing a value hierarchy"
             style={usingOrcaStyles.heroImage}
             onClick={() => onImageClick({
-              slides: [{ image: '/images/using-orca/children_view.png', caption: 'Build collaborative value ontologies to organize the principles central to a field of study.' }],
+              slides: [{ image: '/images/using-orca/children_view.png', caption: 'Build collaborative value ontologies to organize the principles central to research.' }],
               index: 0,
             })}
           />
