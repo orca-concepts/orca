@@ -154,12 +154,6 @@ const UsingOrcaContent = ({ onImageClick }) => {
         field, and using them as annotations to navigate between research documents. You can also message document authors about a specific annotation.
       </p>
 
-      {USE_CASES.map((uc, i) => (
-        <p key={i} style={usingOrcaStyles.useCase}>
-          <span style={{ fontWeight: 'bold' }}>{uc.label}</span>{uc.text}
-        </p>
-      ))}
-
       <p style={usingOrcaStyles.useCase}>
         Orca is open source (<a
           href="https://github.com/orca-concepts/orca"
@@ -168,6 +162,16 @@ const UsingOrcaContent = ({ onImageClick }) => {
           style={usingOrcaStyles.subtleLink}
         >https://github.com/orca-concepts/orca</a>). Educators and organizations can run their own instance for a controlled environment.
       </p>
+
+      {/* PHASE 56C: replace with real YouTube iframe — URL TBD */}
+      <div style={usingOrcaStyles.videoPlaceholder}>
+        <span style={usingOrcaStyles.videoPlaceholderText}>YouTube Video 1 — embed coming soon</span>
+      </div>
+
+      {/* PHASE 56C: replace with real YouTube iframe — URL TBD */}
+      <div style={usingOrcaStyles.videoPlaceholder}>
+        <span style={usingOrcaStyles.videoPlaceholderText}>YouTube Video 2 — embed coming soon</span>
+      </div>
 
       <div style={usingOrcaStyles.heroTitle}>
         Build collaborative value ontologies, then use them to annotate research documents
@@ -256,6 +260,12 @@ const UsingOrcaContent = ({ onImageClick }) => {
           </p>
         </div>
       </div>
+
+      {USE_CASES.map((uc, i) => (
+        <p key={i} style={usingOrcaStyles.useCase}>
+          <span style={{ fontWeight: 'bold' }}>{uc.label}</span>{uc.text}
+        </p>
+      ))}
     </div>
   );
 };
@@ -281,6 +291,21 @@ const usingOrcaStyles = {
     textDecorationColor: '#ccc',
     textUnderlineOffset: '2px',
     fontFamily: '"EB Garamond", Georgia, serif',
+  },
+  videoPlaceholder: {
+    aspectRatio: '16 / 9',
+    width: '100%',
+    border: '1px solid #ccc',
+    backgroundColor: '#f5f4f2',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '24px',
+  },
+  videoPlaceholderText: {
+    fontSize: '1em',
+    fontFamily: '"EB Garamond", Georgia, serif',
+    color: '#999',
   },
   sectionTitle: {
     fontSize: '1.1em',
