@@ -8,6 +8,7 @@ import HiddenConceptsView from '../components/HiddenConceptsView';
 import SwapModal from '../components/SwapModal';
 
 const ATTR_FILTER_KEY = 'orca_root_attribute_filter';
+const ATTR_DISPLAY_ORDER = ['value', 'action', 'tool', 'question'];
 
 const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
   const [concepts, setConcepts] = useState([]);
@@ -238,7 +239,11 @@ const Root = ({ graphTabId, onNavigate, isGuest = false }) => {
             >
               All
             </button>
-            {availableAttributes.map(attr => (
+            {[...availableAttributes].sort((a, b) => {
+              const ai = ATTR_DISPLAY_ORDER.indexOf(a.name);
+              const bi = ATTR_DISPLAY_ORDER.indexOf(b.name);
+              return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+            }).map(attr => (
               <button
                 key={attr.id}
                 style={attributeFilter === attr.name ? styles.attributeFilterBtnActive : styles.attributeFilterBtn}

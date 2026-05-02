@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { pagesAPI } from '../services/api';
 
 const PAGE_TITLES = {
-  'using-orca': 'Using Orca',
+  'using-orca': 'Using orca',
 };
 
 // ── Carousel data (using-orca only) ──────────────────────────

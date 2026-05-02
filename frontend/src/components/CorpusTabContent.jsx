@@ -8,6 +8,8 @@ import CorpusMembersPanel from './CorpusMembersPanel';
 import OrcidBadge from './OrcidBadge';
 
 
+const ATTR_DISPLAY_ORDER = ['value', 'action', 'tool', 'question'];
+
 // Find all occurrences of text in body, return array of { idx, before, match, after }
 const buildOccurrenceItems = (text, body) => {
   if (!text || !body) return [];
@@ -1453,7 +1455,11 @@ const CorpusTabContent = ({ corpusId, isGuest, onUnsubscribe, onOpenConceptTab, 
                     ...(attributeFilter === 'all' ? styles.layerToggleBtnActive : {}),
                   }}
                 >All</button>
-                {enabledAttributes.map(attr => (
+                {[...enabledAttributes].sort((a, b) => {
+                  const ai = ATTR_DISPLAY_ORDER.indexOf(a.name);
+                  const bi = ATTR_DISPLAY_ORDER.indexOf(b.name);
+                  return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+                }).map(attr => (
                   <button
                     key={attr.id}
                     onClick={() => setAttributeFilter(attr.name)}
